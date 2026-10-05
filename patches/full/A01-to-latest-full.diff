@@ -1,5 +1,5 @@
 diff --git a/.github/workflows/build_mod.yml b/.github/workflows/build_mod.yml
-index c84919c..893686a 100644
+index c84919c..6a4db64 100644
 --- a/.github/workflows/build_mod.yml
 +++ b/.github/workflows/build_mod.yml
 @@ -1,6 +1,9 @@
@@ -12,7 +12,7 @@ index c84919c..893686a 100644
    workflow_dispatch:
      inputs:
        anytls_commit:
-@@ -54,10 +57,10 @@ jobs:
+@@ -54,15 +57,18 @@ jobs:
          env:
            GH_PAT: ${{ secrets.GH_PAT }}
          run: |
@@ -27,7 +27,23 @@ index c84919c..893686a 100644
            cat buildScript/lib/core/get_source_env.sh
  
        - name: Build LibCore
-@@ -115,12 +118,3 @@ jobs:
+         env:
+           GH_PAT: ${{ secrets.GH_PAT }}
++          # sum.golang.org 近期对 runner 不稳定（stream INTERNAL_ERROR 连续失败）。
++          # 关闭在线校验库即可：本地 go.sum 哈希校验仍然生效，不影响依赖完整性。
++          GOSUMDB: off
+         run: |
+           go version
+           ./run lib core
+@@ -70,6 +76,7 @@ jobs:
+       - name: Build APK
+         env:
+           BUILD_PLUGIN: none
++          GOSUMDB: off
+         run: |
+           echo "sdk.dir=${ANDROID_HOME}" > local.properties
+           echo "ndk.dir=${ANDROID_NDK_HOME}" >> local.properties
+@@ -115,12 +122,3 @@ jobs:
          with:
            name: NekoBox-mod-arm64
            path: app/build/outputs/apk/**/NekoBox*.apk
@@ -71,7 +87,7 @@ index 75a64a8..624643b 100644
          super.onViewCreated(view, savedInstanceState)
  
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
-index afd90b7..d7212cb 100644
+index afd90b7..187781e 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
 +++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
 @@ -40,6 +40,7 @@ import androidx.preference.PreferenceDataStore
@@ -82,7 +98,41 @@ index afd90b7..d7212cb 100644
  import androidx.viewpager2.adapter.FragmentStateAdapter
  import androidx.viewpager2.widget.ViewPager2
  import com.google.android.material.card.MaterialCardView
-@@ -520,15 +521,7 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -136,6 +137,7 @@ import java.net.UnknownHostException
+ import java.util.concurrent.ConcurrentHashMap
+ import java.util.concurrent.ConcurrentLinkedQueue
+ import java.util.concurrent.atomic.AtomicInteger
++import java.util.concurrent.atomic.AtomicBoolean
+ import java.util.concurrent.atomic.AtomicLong
+ import java.util.zip.ZipInputStream
+ import kotlin.collections.set
+@@ -362,6 +364,8 @@ class ConfigurationFragment @JvmOverloads constructor(
+         }
+     }
+ 
++    private var settleEnsureJob: Job? = null
++
+     val updateSelectedCallback = object : ViewPager2.OnPageChangeCallback() {
+         override fun onPageSelected(position: Int) {
+             if (!isRestoringGroup && adapter.groupList.size > position) {
+@@ -370,6 +374,16 @@ class ConfigurationFragment @JvmOverloads constructor(
+                     DataStore.selectedGroup = newId
+                 }
+             }
++            // 落定兜底：当前页若为空则装载（120ms 防抖）。不做邻页预载——
++            // 大分组下邻居装载负载大、抢主线程（用户实测掉帧）
++            settleEnsureJob?.cancel()
++            settleEnsureJob = lifecycleScope.launch {
++                delay(120L)
++                if (isHidden || !isAdded) return@launch
++                if (position in adapter.groupList.indices) {
++                    adapter.getGroupFragment(position)?.ensureLoadedIfEmpty()
++                }
++            }
+         }
+     }
+ 
+@@ -520,15 +534,7 @@ class ConfigurationFragment @JvmOverloads constructor(
              tab.view.setOnLongClickListener {
                  if (position in adapter.groupList.indices) {
                      val group = adapter.groupList[position]
@@ -99,7 +149,7 @@ index afd90b7..d7212cb 100644
                  }
                  true
              }
-@@ -616,6 +609,38 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -616,6 +622,41 @@ class ConfigurationFragment @JvmOverloads constructor(
          super.onDestroy()
      }
  
@@ -127,6 +177,9 @@ index afd90b7..d7212cb 100644
 +                    }
 +                }
 +            }
++
++            // 顺序兜底：分组页拖动排序的广播若因竞态未生效，按数据库顺序校正
++            adapter.syncOrderFromDb()
 +        }
 +    }
 +
@@ -138,7 +191,7 @@ index afd90b7..d7212cb 100644
      override fun onKeyDown(ketCode: Int, event: KeyEvent): Boolean {
          val fragment = getCurrentGroupFragment()
          fragment?.configurationListView?.apply {
-@@ -1529,8 +1554,9 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -1529,8 +1570,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                      tabLayout.visibility = View.VISIBLE
                  }
  
@@ -150,7 +203,72 @@ index afd90b7..d7212cb 100644
              }
          }
  
-@@ -1598,6 +1624,11 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -1555,9 +1597,62 @@ class ConfigurationFragment @JvmOverloads constructor(
+             // 于是拿到的还是改名前那个旧对象 —— 表现就是「名字像没改一样」，
+             // 直到列表被整体重建（切页/进设置再回来）才刷新。
+             // 就地替换保持原有顺序，同时把 ☴ 列表和 tab 一起更新掉。
++            val orderChanged = groupList[index].userOrder != group.userOrder
+             groupList[index] = group
+-            tabLayout.post {
+-                tabLayout.getTabAt(index)?.text = group.displayName()
++
++            if (orderChanged) {
++                // 分组页拖动排序：整体重排（标签栏 + ☴ 快速列表），保持当前分组选中
++                val currentId = DataStore.selectedGroup
++                tabLayout.post {
++                    groupList.sortBy { it.userOrder }
++                    notifyDataSetChanged()
++                    val newIndex = groupList.indexOfFirst { it.id == currentId }
++                    if (newIndex >= 0) {
++                        groupPager.setCurrentItem(newIndex, false)
++                    }
++                }
++            } else {
++                tabLayout.post {
++                    tabLayout.getTabAt(index)?.text = group.displayName()
++                }
++            }
++        }
++
++        /**
++         * 从数据库校正分组顺序（兜底保险丝）：分组页拖动排序的广播若因竞态
++         * 没有落到标签栏，页面每次显示时按数据库 userOrder 就地对齐一次。
++         * 只在「集合一致、仅顺序不同」时动作，增删场景仍走 reload()。
++         */
++        fun syncOrderFromDb() {
++            runOnDefaultDispatcher {
++                val fresh = SagerDatabase.groupDao.allGroups()
++                val orderedIds = fresh.sortedBy { it.userOrder }.map { it.id }
++                val orderById = fresh.associate { it.id to it.userOrder }
++                tabLayout.post {
++                    if (!::groupPager.isInitialized || !::tabLayout.isInitialized) return@post
++                    val currentId = groupList.getOrNull(groupPager.currentItem)?.id
++                    val existing = groupList.associateBy { it.id }
++                    val reordered = orderedIds.mapNotNull { existing[it] }
++                    if (reordered.size != groupList.size) return@post
++                    if (reordered.map { it.id } == groupList.map { it.id }) return@post
++                    for (g in reordered) {
++                        orderById[g.id]?.let { g.userOrder = it }
++                    }
++                    groupList.clear()
++                    groupList.addAll(reordered)
++                    notifyDataSetChanged()
++                    val newIndex = groupList.indexOfFirst { it.id == currentId }
++                    if (newIndex >= 0) {
++                        groupPager.setCurrentItem(newIndex, false)
++                        tabLayout.post {
++                            val tab = tabLayout.getTabAt(newIndex)
++                            if (tab != null && !tab.isSelected) {
++                                tab.select()
++                            }
++                            tabLayout.setScrollPosition(newIndex, 0f, true)
++                        }
++                    }
++                }
+             }
+         }
+ 
+@@ -1598,6 +1693,30 @@ class ConfigurationFragment @JvmOverloads constructor(
          lateinit var undoManager: UndoSnackbarManager<ProxyEntity>
          var adapter: ConfigurationAdapter? = null
  
@@ -159,29 +277,82 @@ index afd90b7..d7212cb 100644
 +            if (::configurationListView.isInitialized) configurationListView.scrollToPosition(0)
 +        }
 +
++        /**
++         * 修复：首次滑入分组节点卡片不渲染。数据级判空 + 防重入装载：
++         * 只要适配器还没有数据且当前没有装载在途，就查库装载一次。
++         * 可安全地从 onResume / onPageSelected 重复调用。
++         */
++        fun ensureLoadedIfEmpty() {
++            val a = adapter ?: return
++            if (!::configurationListView.isInitialized) return
++            if (a.itemCount > 0) return
++            if (!a.loadInFlight.compareAndSet(false, true)) return
++            runOnDefaultDispatcher {
++                try {
++                    a.reloadProfiles()
++                } finally {
++                    a.loadInFlight.set(false)
++                }
++            }
++        }
++
          override fun onSaveInstanceState(outState: Bundle) {
              super.onSaveInstanceState(outState)
  
-@@ -2380,17 +2411,38 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -1732,10 +1851,11 @@ class ConfigurationFragment @JvmOverloads constructor(
+ 
+             if (::configurationListView.isInitialized && configurationListView.size == 0) {
+                 configurationListView.adapter = adapter
+-                runOnDefaultDispatcher {
+-                    adapter?.reloadProfiles()
+-                }
+-            } else if (!::configurationListView.isInitialized) {
++            }
++            if (::configurationListView.isInitialized) {
++                // 修复：大分组首次滑入卡片不渲染——数据级判空 + 防重入装载
++                ensureLoadedIfEmpty()
++            } else {
+                 onViewCreated(requireView(), null)
+             }
+             checkOrderMenu()
+@@ -1931,6 +2051,9 @@ class ConfigurationFragment @JvmOverloads constructor(
+             var configurationIdList: MutableList<Long> = mutableListOf()
+             val configurationList = HashMap<Long, ProxyEntity>()
+             private val pendingTrafficUpdates = HashSet<Long>()
++
++            /** 装载防重入：避免 onResume 与落定兜底并发触发两次查库 */
++            val loadInFlight = AtomicBoolean(false)
+             private val profileStatePayload = Any()
+ 
+             private fun getItem(profileId: Long): ProxyEntity {
+@@ -2380,20 +2503,86 @@ class ConfigurationFragment @JvmOverloads constructor(
                      selectedProfileIndex = newProfileIds.indexOf(selectedProxy)
                  }
  
 +                // 问题2 卡顿优化：在后台线程计算 DiffUtil，主线程只应用局部增量更新，
 +                // 彻底消灭 notifyDataSetChanged 带来的全量销毁/重建和掉帧卡顿
 +                val oldIds = synchronized(configurationIdList) { ArrayList(configurationIdList) }
-+                val diffResult = if (oldIds.isNotEmpty()) {
-+                    DiffUtil.calculateDiff(object : DiffUtil.Callback() {
-+                        override fun getOldListSize(): Int = oldIds.size
-+                        override fun getNewListSize(): Int = newProfileIds.size
-+                        override fun areItemsTheSame(oldPos: Int, newPos: Int): Boolean =
-+                            oldIds[oldPos] == newProfileIds[newPos]
-+                        override fun areContentsTheSame(oldPos: Int, newPos: Int): Boolean {
-+                            val oldId = oldIds[oldPos]
-+                            val newId = newProfileIds[newPos]
-+                            return configurationList[oldId] == newProfileMap[newId]
-+                        }
-+                    }, false)
-+                } else null
++
++                if (oldIds.isEmpty()) {
++                    // 首次装载：30 个/帧 高速分片渲染——先出卡，再流式补齐。
++                    // 期间 loadInFlight 保持 true，兜底/防重入不会重复触发
++                    configurationListView.post {
++                        applyFirstFill(newProfileMap, newProfileIds, selectedProfileIndex)
++                    }
++                    return
++                }
++
++                val diffResult = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
++                    override fun getOldListSize(): Int = oldIds.size
++                    override fun getNewListSize(): Int = newProfileIds.size
++                    override fun areItemsTheSame(oldPos: Int, newPos: Int): Boolean =
++                        oldIds[oldPos] == newProfileIds[newPos]
++                    override fun areContentsTheSame(oldPos: Int, newPos: Int): Boolean {
++                        val oldId = oldIds[oldPos]
++                        val newId = newProfileIds[newPos]
++                        return configurationList[oldId] == newProfileMap[newId]
++                    }
++                }, false)
 +
                  configurationListView.post {
                      configurationList.clear()
@@ -189,24 +360,65 @@ index afd90b7..d7212cb 100644
                      configurationIdList.clear()
                      configurationIdList.addAll(newProfileIds)
 -                    notifyDataSetChanged()
-+                    if (diffResult != null) {
-+                        diffResult.dispatchUpdatesTo(this@ConfigurationAdapter)
-+                    } else {
-+                        notifyDataSetChanged()
-+                    }
- 
+-
++                    diffResult.dispatchUpdatesTo(this@ConfigurationAdapter)
                      if (selectedProfileIndex != -1) {
 -                        configurationListView.scrollTo(selectedProfileIndex, true)
 -                    } else if (newProfiles.isNotEmpty()) {
 -                        configurationListView.scrollTo(0, true)
 +                        configurationListView.scrollTo(selectedProfileIndex, false)
-+                    } else if (newProfiles.isNotEmpty() && oldIds.isEmpty()) {
-+                        configurationListView.scrollToPosition(0)
                      }
++                }
++            }
  
++            /**
++             * 首次装载分片渲染：每帧 30 个，主线程 post 链式推进。
++             * 大分组先出前 30 张卡片，其余流式补齐；每步校验数据一致性，
++             * 检测到并发写入时直接一次性全量刷新收尾。完成后数据常驻适配器。
++             */
++            private fun applyFirstFill(
++                map: Map<Long, ProxyEntity>,
++                ids: List<Long>,
++                selectedProfileIndex: Int,
++            ) {
++                val chunk = 30
++                var from = 0
++                fun step() {
++                    if (!::configurationListView.isInitialized) return
++                    if (configurationIdList.size != from) {
++                        // 检测到并发写入（罕见）：全量刷新一次收尾
++                        configurationList.clear()
++                        configurationList.putAll(map)
++                        configurationIdList.clear()
++                        configurationIdList.addAll(ids)
++                        notifyDataSetChanged()
++                        return
++                    }
++                    val to = minOf(from + chunk, ids.size)
++                    for (i in from until to) {
++                        configurationList[ids[i]] = map.getValue(ids[i])
++                        configurationIdList.add(ids[i])
++                    }
++                    if (from == 0) {
++                        notifyDataSetChanged()
++                        configurationListView.scrollToPosition(0)
++                    } else {
++                        notifyItemRangeInserted(from, to - from)
++                    }
++                    if (selectedProfileIndex in from until to) {
++                        configurationListView.scrollTo(selectedProfileIndex, false)
++                    }
++                    from = to
++                    if (from < ids.size) {
++                        configurationListView.post { step() }
++                    }
                  }
++                step()
+             }
+ 
+         }
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
-index af75c17..5010a09 100644
+index af75c17..764e939 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
 +++ b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
 @@ -67,6 +67,33 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
@@ -243,7 +455,7 @@ index af75c17..5010a09 100644
      override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
          super.onViewCreated(view, savedInstanceState)
          activity = requireActivity() as MainActivity
-@@ -111,8 +138,14 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+@@ -111,10 +138,19 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
  
              override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                  val index = viewHolder.bindingAdapterPosition
@@ -258,8 +470,23 @@ index af75c17..5010a09 100644
 +                }
              }
  
++            // 官方机制：长按卡片触发拖动排序（☷ 手柄已按需求移除）
++            override fun isLongPressDragEnabled(): Boolean = true
++
              override fun onMove(
-@@ -462,6 +495,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+                 recyclerView: RecyclerView,
+                 viewHolder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder,
+@@ -141,7 +177,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+                 val maxScroll = recyclerView.resources.getDimensionPixelSize(
+                     R.dimen.item_touch_helper_max_drag_scroll_per_frame
+                 )
+-                val speed = (maxScroll * 0.4f).toInt().coerceAtLeast(1)
++                // 长按拖动到边界边缘：固定为最大速度的 50%（非渐进加速，最终规格）
++                val speed = (maxScroll * 0.5f).toInt().coerceAtLeast(1)
+                 return if (viewSizeOutOfBounds > 0) speed else -speed
+             }
+         })
+@@ -462,6 +499,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                      }
                      arguments?.remove(EXTRA_TARGET_GROUP_ID)
                  }
@@ -267,7 +494,55 @@ index af75c17..5010a09 100644
              }
          }
  
-@@ -602,6 +636,12 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+@@ -567,6 +605,10 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+         private val updated = HashSet<ProxyGroup>()
+ 
+         fun move(from: Int, to: Int) {
++            // 防护：拖动动画期间 bindingAdapterPosition 可能为 NO_POSITION
++            if (from == to || from < 0 || to < 0 ||
++                from >= groupList.size || to >= groupList.size
++            ) return
+             val first = groupList[from]
+             var previousOrder = first.userOrder
+             val (step, range) = if (from < to) Pair(1, from until to) else Pair(
+@@ -578,17 +620,32 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+                 next.userOrder = previousOrder
+                 previousOrder = order
+                 groupList[i] = next
+-                updated.add(next)
++                synchronized(updated) { updated.add(next) }
+             }
+             first.userOrder = previousOrder
+             groupList[to] = first
+-            updated.add(first)
++            synchronized(updated) { updated.add(first) }
+             notifyItemMoved(from, to)
++            // 实时同步：每次换位立即落库并广播（配置页标签栏 + ☴ 列表即时跟随，
++            // 拖完立刻返回也必然生效，不再需要等待）
++            commitMove()
+         }
+ 
+         fun commitMove() = runOnDefaultDispatcher {
+-            updated.forEach { SagerDatabase.groupDao.updateGroup(it) }
+-            updated.clear()
++            // 后台线程只碰快照；updated 的增删全部在主线程锁内完成。
++            // 修复快速连续拖动多张卡片时的 ConcurrentModificationException
++            val moved = synchronized(updated) {
++                val snapshot = ArrayList(updated)
++                updated.clear()
++                snapshot
++            }
++            for (group in moved) {
++                SagerDatabase.groupDao.updateGroup(group)
++            }
++            // 拖动排序同步：广播更新——配置页标签栏与 ☴ 快速列表据此整体重排
++            for (group in moved) {
++                GroupManager.iterator { groupUpdated(group) }
++            }
+         }
+ 
+         fun remove(index: Int) {
+@@ -602,6 +659,12 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                  groupList.add(index, item)
                  notifyItemInserted(index)
              }
@@ -280,7 +555,7 @@ index af75c17..5010a09 100644
          }
  
          override fun commit(actions: List<Pair<Int, ProxyGroup>>) {
-@@ -613,6 +653,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+@@ -613,6 +676,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
          }
  
          override suspend fun groupAdd(group: ProxyGroup) {
@@ -289,6 +564,31 @@ index af75c17..5010a09 100644
              groupList.add(group)
              delay(300L)
  
+@@ -696,7 +761,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+         val groupUser = binding.groupUser
+         val editButton = binding.edit
+         val optionsButton = binding.options
+-        val sortButton = binding.groupSort
+         val updateButton = binding.groupUpdate
+         val subscriptionUpdateProgress = binding.subscriptionUpdateProgress
+ 
+@@ -756,16 +820,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+ 
+             itemView.setOnClickListener { }
+ 
+-            sortButton.isGone = proxyGroup.ungrouped
+-            sortButton.setOnTouchListener { _, event ->
+-                if (event.actionMasked == MotionEvent.ACTION_DOWN &&
+-                    this@GroupHolder.bindingAdapterPosition != RecyclerView.NO_POSITION
+-                ) {
+-                    itemTouchHelper.startDrag(this@GroupHolder)
+-                }
+-                false
+-            }
+-
+             editButton.isGone = proxyGroup.ungrouped
+             updateButton.isInvisible = proxyGroup.type != GroupType.SUBSCRIPTION
+             groupName.text = proxyGroup.displayName()
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt
 index 346c742..30be375 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt
@@ -373,7 +673,7 @@ index 2f276ee..93929f7 100644
          when (item.itemId) {
              R.id.action_clear_logcat -> {
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
-index 063514c..8eaa88a 100644
+index 063514c..91adab7 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
 +++ b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
 @@ -17,6 +17,10 @@ import androidx.activity.addCallback
@@ -413,11 +713,11 @@ index 063514c..8eaa88a 100644
 +        )
 +        private const val NAV_TAG_PREFIX = "main_nav:"
 +        private const val STATE_NAV_ID = "main_nav_id"
-+        private const val PREWARM_DELAY_MS = 800L
-+        private const val PREWARM_INTERVAL_MS = 500L
++        private const val PREWARM_DELAY_MS = 300L
++        private const val PREWARM_INTERVAL_MS = 250L
 +
 +        /** 预热时让页面在屏幕外“可见”若干毫秒，用于生成整页渲染列表 */
-+        private const val WARM_FRAME_MS = 120L
++        private const val WARM_FRAME_MS = 80L
 +    }
 +
      override fun onCreate(savedInstanceState: Bundle?) {
@@ -458,19 +758,21 @@ index 063514c..8eaa88a 100644
          if (!animateInitialControls) {
              syncMainControls(showWhenConnected = false, animate = false)
          }
-@@ -126,6 +163,11 @@ class MainActivity : ThemedActivity(),
+@@ -126,6 +163,13 @@ class MainActivity : ThemedActivity(),
  
          refreshNavMenu(DataStore.enableClashAPI)
  
 +        if (savedInstanceState == null) {
 +            // 启动后错峰预热其它侧边栏页面，让第一次点击也是热切换
 +            binding.root.postDelayed(prewarmRunnable, PREWARM_DELAY_MS)
++            // ☰ 首开预热：240ms 后离屏构建抽屉菜单的绘制列表
++            binding.root.postDelayed(drawerWarmRunnable, 240L)
 +        }
 +
          // sdk 33 notification
          if (Build.VERSION.SDK_INT >= 33) {
              val checkPermission =
-@@ -156,12 +198,19 @@ class MainActivity : ThemedActivity(),
+@@ -156,12 +200,19 @@ class MainActivity : ThemedActivity(),
          if (DataStore.hideFromRecentApps) {
              applyHideFromRecentApps(DataStore.hideFromRecentApps)
          }
@@ -492,7 +794,7 @@ index 063514c..8eaa88a 100644
          if (restoredFragment != null && restoredFragment !== currentMainFragment) {
              currentMainFragment = restoredFragment
              syncMainControls(
-@@ -370,14 +419,236 @@ class MainActivity : ThemedActivity(),
+@@ -370,14 +421,259 @@ class MainActivity : ThemedActivity(),
          return displayFragmentWithId(item.itemId)
      }
  
@@ -656,6 +958,29 @@ index 063514c..8eaa88a 100644
 +        R.id.nav_about,
 +    )
 +
++    /**
++     * ☰ 侧边栏首开预热：抽屉关闭时内容在屏外、从未绘制，第一次打开要现画
++     * 整棵菜单树（文本排版 + 显示列表构建），这正是「打开 App 立刻点 ☰ 必卡」
++     * 的主因。这里离屏强制构建一次绘制列表（buildLayer），首开直接复用，
++     * 跑完即还原图层类型。
++     */
++    private val drawerWarmRunnable = object : Runnable {
++        override fun run() {
++            if (isFinishing || isDestroyed) return
++            try {
++                navigation.setLayerType(View.LAYER_TYPE_HARDWARE, null)
++                navigation.buildLayer()
++            } catch (_: Throwable) {
++            }
++            navigation.post {
++                try {
++                    navigation.setLayerType(View.LAYER_TYPE_NONE, null)
++                } catch (_: Throwable) {
++                }
++            }
++        }
++    }
++
 +    private val prewarmRunnable = object : Runnable {
 +        override fun run() {
 +            if (isFinishing || isDestroyed) return
@@ -734,7 +1059,7 @@ index 063514c..8eaa88a 100644
      }
  
      private fun syncMainControls(
-@@ -420,26 +691,18 @@ class MainActivity : ThemedActivity(),
+@@ -420,26 +716,18 @@ class MainActivity : ThemedActivity(),
      }
  
      fun displayFragmentWithId(@IdRes id: Int): Boolean {
@@ -760,19 +1085,19 @@ index 063514c..8eaa88a 100644
 +        if (id == R.id.nav_faq) {
 +            launchCustomTab("https://matsuridayo.github.io/")
 +            return false
-+        }
+         }
 +        val fragment = if (id == R.id.nav_traffic) {
 +            // 仪表盘：内含 WebView，保持原语义每次重建（不进缓存、不预热）
 +            WebviewFragment()
 +        } else {
 +            fragmentCache[id] ?: (createFragment(id)?.also { fragmentCache[id] = it }
 +                ?: return false)
-         }
++        }
 +        displayFragment(fragment)
          navigation.menu.findItem(id).isChecked = true
          return true
      }
-@@ -544,11 +807,24 @@ class MainActivity : ThemedActivity(),
+@@ -544,11 +832,24 @@ class MainActivity : ThemedActivity(),
  
      override fun onDestroy() {
          super.onDestroy()
@@ -797,7 +1122,7 @@ index 063514c..8eaa88a 100644
      /**
       * 打开左侧抽屉。
       * 顶栏的 ☰ 由 TopBarController 自绘（原先是 Toolbar 的 navigationIcon，
-@@ -577,8 +853,8 @@ class MainActivity : ThemedActivity(),
+@@ -577,8 +878,8 @@ class MainActivity : ThemedActivity(),
          if (super.onKeyDown(keyCode, event)) return true
          if (binding.drawerLayout.isOpen) return false
  
@@ -992,6 +1317,41 @@ index a8df256..9177647 100644
 -</com.google.android.material.appbar.AppBarLayout>
 \ No newline at end of file
 +</com.google.android.material.appbar.AppBarLayout>
+diff --git a/app/src/main/res/layout/layout_group_item.xml b/app/src/main/res/layout/layout_group_item.xml
+index a274d5d..7e32499 100644
+--- a/app/src/main/res/layout/layout_group_item.xml
++++ b/app/src/main/res/layout/layout_group_item.xml
+@@ -56,29 +56,7 @@
+                     tools:text="user name" />
+             </LinearLayout>
+ 
+-            <!--
+-                排序按钮 ☷（在 ✏️ 左边）。
+-                按住 ☷ 拖动 = 立刻开始自定义排序，跟「长按卡片再拖」是同一套拖动。
+-
+-                为什么用 TouchListener 而不是 ClickListener：
+-                那样得先抬手才触发，就成了「点一下、松手、再拖」。这里直接吃下
+-                ACTION_DOWN 交给 ItemTouchHelper.startDrag()，手指不移开就一直是
+-                按住状态，往后一拖就是拖动，手感与长按完全一致。
+-                详见 GroupFragment.GroupHolder#bind 里的注释。
+-
+-                属性与 ✏️/⋮ 保持一致（12dp 内边距、top 对齐），三个按钮同高。
+-            -->
+-            <androidx.appcompat.widget.AppCompatImageView
+-                android:id="@+id/group_sort"
+-                android:layout_width="wrap_content"
+-                android:layout_height="wrap_content"
+-                android:layout_gravity="top"
+-                android:background="?attr/selectableItemBackgroundBorderless"
+-                android:contentDescription="@string/group_order"
+-                android:focusable="false"
+-                android:padding="12dp"
+-                app:srcCompat="@drawable/ic_group_sort" />
+-
++            <!-- 拖动排序：官方机制，长按卡片触发（ItemTouchHelper 默认实现） -->
+             <androidx.appcompat.widget.AppCompatImageView
+                 android:id="@+id/edit"
+                 android:layout_width="wrap_content"
 diff --git a/app/src/main/res/layout/layout_group_list.xml b/app/src/main/res/layout/layout_group_list.xml
 index 0d39b53..053e428 100644
 --- a/app/src/main/res/layout/layout_group_list.xml
@@ -1052,13 +1412,3 @@ index 08c0c50..b25a897 100644
          app:tabSelectedTextColor="?tabSelectedTextColor"
          app:tabTextColor="?tabTextColor"
          app:tabUnboundedRipple="false" />
-diff --git a/nb4a.properties b/nb4a.properties
-index aafe242..1b93518 100644
---- a/nb4a.properties
-+++ b/nb4a.properties
-@@ -1,4 +1,4 @@
- PACKAGE_NAME=com.nb4a.qiyiguo112
- VERSION_NAME=1.4.2-rev-26
--PRE_VERSION_NAME=pre-1.4.2-20260214-3
-+PRE_VERSION_NAME=A02
- VERSION_CODE=48

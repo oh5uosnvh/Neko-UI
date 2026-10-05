@@ -1,5 +1,5 @@
 diff --git a/.github/workflows/build_mod.yml b/.github/workflows/build_mod.yml
-index c84919c..893686a 100644
+index c84919c..6a4db64 100644
 --- a/.github/workflows/build_mod.yml
 +++ b/.github/workflows/build_mod.yml
 @@ -1,6 +1,9 @@
@@ -12,7 +12,7 @@ index c84919c..893686a 100644
    workflow_dispatch:
      inputs:
        anytls_commit:
-@@ -54,10 +57,10 @@ jobs:
+@@ -54,15 +57,18 @@ jobs:
          env:
            GH_PAT: ${{ secrets.GH_PAT }}
          run: |
@@ -27,7 +27,23 @@ index c84919c..893686a 100644
            cat buildScript/lib/core/get_source_env.sh
  
        - name: Build LibCore
-@@ -115,12 +118,3 @@ jobs:
+         env:
+           GH_PAT: ${{ secrets.GH_PAT }}
++          # sum.golang.org 近期对 runner 不稳定（stream INTERNAL_ERROR 连续失败）。
++          # 关闭在线校验库即可：本地 go.sum 哈希校验仍然生效，不影响依赖完整性。
++          GOSUMDB: off
+         run: |
+           go version
+           ./run lib core
+@@ -70,6 +76,7 @@ jobs:
+       - name: Build APK
+         env:
+           BUILD_PLUGIN: none
++          GOSUMDB: off
+         run: |
+           echo "sdk.dir=${ANDROID_HOME}" > local.properties
+           echo "ndk.dir=${ANDROID_NDK_HOME}" >> local.properties
+@@ -115,12 +122,3 @@ jobs:
          with:
            name: NekoBox-mod-arm64
            path: app/build/outputs/apk/**/NekoBox*.apk

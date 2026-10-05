@@ -1,0 +1,172 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
+index af75c17..764e939 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
+@@ -67,6 +67,33 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+         private const val SORT_DESC = 2
+     }
+ 
++    /** 问题1-B：切回分组页时列表回顶部 */
++    override fun resetScrollState() {
++        if (::groupListView.isInitialized) groupListView.scrollToPosition(0)
++    }
++
++    /** MainActivity 复用本实例时的定位请求（替代一次性 arguments 方案） */
++    private var pendingScrollGroupId = -1L
++
++    /** 跳到指定分组（由 MainActivity#openGroupAt 调用） */
++    fun scrollToGroup(groupId: Long) {
++        pendingScrollGroupId = groupId
++        if (::groupListView.isInitialized) {
++            groupListView.post { consumePendingScroll() }
++        }
++    }
++
++    private fun consumePendingScroll() {
++        if (!::groupListView.isInitialized || !::groupAdapter.isInitialized) return
++        val targetId = pendingScrollGroupId
++        if (targetId <= 0L) return
++        val position = groupAdapter.groupList.indexOfFirst { it.id == targetId }
++        if (position >= 0) {
++            groupListView.scrollToPosition(position)
++            pendingScrollGroupId = -1L
++        }
++    }
++
+     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+         super.onViewCreated(view, savedInstanceState)
+         activity = requireActivity() as MainActivity
+@@ -111,10 +138,19 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+ 
+             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+                 val index = viewHolder.bindingAdapterPosition
++                val group = (viewHolder as GroupHolder).proxyGroup
+                 groupAdapter.remove(index)
+-                undoManager.remove(index to (viewHolder as GroupHolder).proxyGroup)
++                undoManager.remove(index to group)
++                // 立即同步到配置页：滑动即广播移除（撤销时在 undo 中广播恢复，
++                // 正式 commit 的广播对此幂等），不再等撤销条 2 秒超时
++                runOnDefaultDispatcher {
++                    GroupManager.iterator { groupRemoved(group.id) }
++                }
+             }
+ 
++            // 官方机制：长按卡片触发拖动排序（☷ 手柄已按需求移除）
++            override fun isLongPressDragEnabled(): Boolean = true
++
+             override fun onMove(
+                 recyclerView: RecyclerView,
+                 viewHolder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder,
+@@ -141,7 +177,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+                 val maxScroll = recyclerView.resources.getDimensionPixelSize(
+                     R.dimen.item_touch_helper_max_drag_scroll_per_frame
+                 )
+-                val speed = (maxScroll * 0.4f).toInt().coerceAtLeast(1)
++                // 长按拖动到边界边缘：固定为最大速度的 50%（非渐进加速，最终规格）
++                val speed = (maxScroll * 0.5f).toInt().coerceAtLeast(1)
+                 return if (viewSizeOutOfBounds > 0) speed else -speed
+             }
+         })
+@@ -462,6 +499,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+                     }
+                     arguments?.remove(EXTRA_TARGET_GROUP_ID)
+                 }
++                consumePendingScroll()
+             }
+         }
+ 
+@@ -567,6 +605,10 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+         private val updated = HashSet<ProxyGroup>()
+ 
+         fun move(from: Int, to: Int) {
++            // 防护：拖动动画期间 bindingAdapterPosition 可能为 NO_POSITION
++            if (from == to || from < 0 || to < 0 ||
++                from >= groupList.size || to >= groupList.size
++            ) return
+             val first = groupList[from]
+             var previousOrder = first.userOrder
+             val (step, range) = if (from < to) Pair(1, from until to) else Pair(
+@@ -578,17 +620,32 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+                 next.userOrder = previousOrder
+                 previousOrder = order
+                 groupList[i] = next
+-                updated.add(next)
++                synchronized(updated) { updated.add(next) }
+             }
+             first.userOrder = previousOrder
+             groupList[to] = first
+-            updated.add(first)
++            synchronized(updated) { updated.add(first) }
+             notifyItemMoved(from, to)
++            // 实时同步：每次换位立即落库并广播（配置页标签栏 + ☴ 列表即时跟随，
++            // 拖完立刻返回也必然生效，不再需要等待）
++            commitMove()
+         }
+ 
+         fun commitMove() = runOnDefaultDispatcher {
+-            updated.forEach { SagerDatabase.groupDao.updateGroup(it) }
+-            updated.clear()
++            // 后台线程只碰快照；updated 的增删全部在主线程锁内完成。
++            // 修复快速连续拖动多张卡片时的 ConcurrentModificationException
++            val moved = synchronized(updated) {
++                val snapshot = ArrayList(updated)
++                updated.clear()
++                snapshot
++            }
++            for (group in moved) {
++                SagerDatabase.groupDao.updateGroup(group)
++            }
++            // 拖动排序同步：广播更新——配置页标签栏与 ☴ 快速列表据此整体重排
++            for (group in moved) {
++                GroupManager.iterator { groupUpdated(group) }
++            }
+         }
+ 
+         fun remove(index: Int) {
+@@ -602,6 +659,12 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+                 groupList.add(index, item)
+                 notifyItemInserted(index)
+             }
++            // 撤销 = 取消删除：把配置页刚移除的标签广播恢复
++            runOnDefaultDispatcher {
++                for ((_, item) in actions) {
++                    GroupManager.iterator { groupAdd(item) }
++                }
++            }
+         }
+ 
+         override fun commit(actions: List<Pair<Int, ProxyGroup>>) {
+@@ -613,6 +676,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+         }
+ 
+         override suspend fun groupAdd(group: ProxyGroup) {
++            // 撤销恢复时本地已在（undo 已加回），跳过，避免重复添加
++            if (groupList.any { it.id == group.id }) return
+             groupList.add(group)
+             delay(300L)
+ 
+@@ -696,7 +761,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+         val groupUser = binding.groupUser
+         val editButton = binding.edit
+         val optionsButton = binding.options
+-        val sortButton = binding.groupSort
+         val updateButton = binding.groupUpdate
+         val subscriptionUpdateProgress = binding.subscriptionUpdateProgress
+ 
+@@ -756,16 +820,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+ 
+             itemView.setOnClickListener { }
+ 
+-            sortButton.isGone = proxyGroup.ungrouped
+-            sortButton.setOnTouchListener { _, event ->
+-                if (event.actionMasked == MotionEvent.ACTION_DOWN &&
+-                    this@GroupHolder.bindingAdapterPosition != RecyclerView.NO_POSITION
+-                ) {
+-                    itemTouchHelper.startDrag(this@GroupHolder)
+-                }
+-                false
+-            }
+-
+             editButton.isGone = proxyGroup.ungrouped
+             updateButton.isInvisible = proxyGroup.type != GroupType.SUBSCRIPTION
+             groupName.text = proxyGroup.displayName()

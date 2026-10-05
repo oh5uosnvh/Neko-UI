@@ -54,7 +54,7 @@ jobs:
           git submodule update --init --recursive
           git log --oneline -1
 
-      - name: Apply A02 patches
+      - name: Apply mod patches (9)
         run: |
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
@@ -88,6 +88,7 @@ jobs:
       - name: Build LibCore
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
+          GOSUMDB: off
         run: |
           cd upstream
           go version
@@ -96,6 +97,7 @@ jobs:
       - name: Build APK
         env:
           BUILD_PLUGIN: none
+          GOSUMDB: off
         run: |
           cd upstream
           echo "sdk.dir=${ANDROID_HOME}" > local.properties

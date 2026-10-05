@@ -5,18 +5,23 @@
 用法: python3 verify_build.py <apk路径>
 校验:
   1) 包名/签名形态（debug 可安装）
-  2) dex 内 UI 保留符号（openGroupAt/scrollToGroup/resetScrollState/calculateDiff）
-  3) dex 内不得出现历史废案符号（prefetchJob/pageWarmStep/isPagerBusy/...）
+  2) dex 内 UI 保留符号（8 项功能规格的锚点）
+  3) dex 内不得出现历史废案符号 + 已移除功能符号（☷ 手柄等）
   4) libgojni.so 协议 mod 标记（x365/viewTurbo/fastup/oppa-mod/mihomo 伪装）
 """
 import sys
 import zipfile
 
-REQUIRED_DEX = [b"openGroupAt", b"scrollToGroup", b"resetScrollState", b"calculateDiff"]
+REQUIRED_DEX = [
+    b"openGroupAt", b"scrollToGroup", b"resetScrollState", b"calculateDiff",
+    b"ensureLoadedIfEmpty", b"applyFirstFill", b"syncOrderFromDb",
+    b"drawerWarmRunnable",
+]
 FORBIDDEN_DEX = [
-    b"prefetchJob", b"prefetchGroupPages", b"pageWarmStep", b"warmUpJob",
-    b"isPagerBusy", b"pendingStateRefreshes", b"sharedRecycledViewPool",
-    b"ensureProfilesLoaded", b"startPageWarmUp",
+    b"prefetchJob", b"prefetchGroupPages", b"pageWarmStep", b"pageWarmCap",
+    b"warmUpJob", b"isPagerBusy", b"pendingStateRefreshes",
+    b"sharedRecycledViewPool", b"ensureProfilesLoaded", b"startPageWarmUp",
+    b"sortButton", b"groupSort",
 ]
 REQUIRED_SO = [b"x365", b"viewTurbo", b"fastup", b"oppa-mod/oppa", b"mihomo/1.19.25"]
 

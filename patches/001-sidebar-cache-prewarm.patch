@@ -1,5 +1,5 @@
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
-index 063514c..8eaa88a 100644
+index 063514c..91adab7 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
 +++ b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
 @@ -17,6 +17,10 @@ import androidx.activity.addCallback
@@ -39,11 +39,11 @@ index 063514c..8eaa88a 100644
 +        )
 +        private const val NAV_TAG_PREFIX = "main_nav:"
 +        private const val STATE_NAV_ID = "main_nav_id"
-+        private const val PREWARM_DELAY_MS = 800L
-+        private const val PREWARM_INTERVAL_MS = 500L
++        private const val PREWARM_DELAY_MS = 300L
++        private const val PREWARM_INTERVAL_MS = 250L
 +
 +        /** 预热时让页面在屏幕外“可见”若干毫秒，用于生成整页渲染列表 */
-+        private const val WARM_FRAME_MS = 120L
++        private const val WARM_FRAME_MS = 80L
 +    }
 +
      override fun onCreate(savedInstanceState: Bundle?) {
@@ -84,19 +84,21 @@ index 063514c..8eaa88a 100644
          if (!animateInitialControls) {
              syncMainControls(showWhenConnected = false, animate = false)
          }
-@@ -126,6 +163,11 @@ class MainActivity : ThemedActivity(),
+@@ -126,6 +163,13 @@ class MainActivity : ThemedActivity(),
  
          refreshNavMenu(DataStore.enableClashAPI)
  
 +        if (savedInstanceState == null) {
 +            // 启动后错峰预热其它侧边栏页面，让第一次点击也是热切换
 +            binding.root.postDelayed(prewarmRunnable, PREWARM_DELAY_MS)
++            // ☰ 首开预热：240ms 后离屏构建抽屉菜单的绘制列表
++            binding.root.postDelayed(drawerWarmRunnable, 240L)
 +        }
 +
          // sdk 33 notification
          if (Build.VERSION.SDK_INT >= 33) {
              val checkPermission =
-@@ -156,12 +198,19 @@ class MainActivity : ThemedActivity(),
+@@ -156,12 +200,19 @@ class MainActivity : ThemedActivity(),
          if (DataStore.hideFromRecentApps) {
              applyHideFromRecentApps(DataStore.hideFromRecentApps)
          }
@@ -118,7 +120,7 @@ index 063514c..8eaa88a 100644
          if (restoredFragment != null && restoredFragment !== currentMainFragment) {
              currentMainFragment = restoredFragment
              syncMainControls(
-@@ -370,14 +419,236 @@ class MainActivity : ThemedActivity(),
+@@ -370,14 +421,259 @@ class MainActivity : ThemedActivity(),
          return displayFragmentWithId(item.itemId)
      }
  
@@ -282,6 +284,29 @@ index 063514c..8eaa88a 100644
 +        R.id.nav_about,
 +    )
 +
++    /**
++     * ☰ 侧边栏首开预热：抽屉关闭时内容在屏外、从未绘制，第一次打开要现画
++     * 整棵菜单树（文本排版 + 显示列表构建），这正是「打开 App 立刻点 ☰ 必卡」
++     * 的主因。这里离屏强制构建一次绘制列表（buildLayer），首开直接复用，
++     * 跑完即还原图层类型。
++     */
++    private val drawerWarmRunnable = object : Runnable {
++        override fun run() {
++            if (isFinishing || isDestroyed) return
++            try {
++                navigation.setLayerType(View.LAYER_TYPE_HARDWARE, null)
++                navigation.buildLayer()
++            } catch (_: Throwable) {
++            }
++            navigation.post {
++                try {
++                    navigation.setLayerType(View.LAYER_TYPE_NONE, null)
++                } catch (_: Throwable) {
++                }
++            }
++        }
++    }
++
 +    private val prewarmRunnable = object : Runnable {
 +        override fun run() {
 +            if (isFinishing || isDestroyed) return
@@ -360,7 +385,7 @@ index 063514c..8eaa88a 100644
      }
  
      private fun syncMainControls(
-@@ -420,26 +691,18 @@ class MainActivity : ThemedActivity(),
+@@ -420,26 +716,18 @@ class MainActivity : ThemedActivity(),
      }
  
      fun displayFragmentWithId(@IdRes id: Int): Boolean {
@@ -386,19 +411,19 @@ index 063514c..8eaa88a 100644
 +        if (id == R.id.nav_faq) {
 +            launchCustomTab("https://matsuridayo.github.io/")
 +            return false
-+        }
+         }
 +        val fragment = if (id == R.id.nav_traffic) {
 +            // 仪表盘：内含 WebView，保持原语义每次重建（不进缓存、不预热）
 +            WebviewFragment()
 +        } else {
 +            fragmentCache[id] ?: (createFragment(id)?.also { fragmentCache[id] = it }
 +                ?: return false)
-         }
++        }
 +        displayFragment(fragment)
          navigation.menu.findItem(id).isChecked = true
          return true
      }
-@@ -544,11 +807,24 @@ class MainActivity : ThemedActivity(),
+@@ -544,11 +832,24 @@ class MainActivity : ThemedActivity(),
  
      override fun onDestroy() {
          super.onDestroy()
@@ -423,7 +448,7 @@ index 063514c..8eaa88a 100644
      /**
       * 打开左侧抽屉。
       * 顶栏的 ☰ 由 TopBarController 自绘（原先是 Toolbar 的 navigationIcon，
-@@ -577,8 +853,8 @@ class MainActivity : ThemedActivity(),
+@@ -577,8 +878,8 @@ class MainActivity : ThemedActivity(),
          if (super.onKeyDown(keyCode, event)) return true
          if (binding.drawerLayout.isOpen) return false
  

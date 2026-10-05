@@ -1,0 +1,331 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+index afd90b7..187781e 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+@@ -40,6 +40,7 @@ import androidx.preference.PreferenceDataStore
+ import androidx.recyclerview.widget.ItemTouchHelper
+ import androidx.recyclerview.widget.LinearLayoutManager
+ import androidx.recyclerview.widget.RecyclerView
++import androidx.recyclerview.widget.DiffUtil
+ import androidx.viewpager2.adapter.FragmentStateAdapter
+ import androidx.viewpager2.widget.ViewPager2
+ import com.google.android.material.card.MaterialCardView
+@@ -136,6 +137,7 @@ import java.net.UnknownHostException
+ import java.util.concurrent.ConcurrentHashMap
+ import java.util.concurrent.ConcurrentLinkedQueue
+ import java.util.concurrent.atomic.AtomicInteger
++import java.util.concurrent.atomic.AtomicBoolean
+ import java.util.concurrent.atomic.AtomicLong
+ import java.util.zip.ZipInputStream
+ import kotlin.collections.set
+@@ -362,6 +364,8 @@ class ConfigurationFragment @JvmOverloads constructor(
+         }
+     }
+ 
++    private var settleEnsureJob: Job? = null
++
+     val updateSelectedCallback = object : ViewPager2.OnPageChangeCallback() {
+         override fun onPageSelected(position: Int) {
+             if (!isRestoringGroup && adapter.groupList.size > position) {
+@@ -370,6 +374,16 @@ class ConfigurationFragment @JvmOverloads constructor(
+                     DataStore.selectedGroup = newId
+                 }
+             }
++            // 落定兜底：当前页若为空则装载（120ms 防抖）。不做邻页预载——
++            // 大分组下邻居装载负载大、抢主线程（用户实测掉帧）
++            settleEnsureJob?.cancel()
++            settleEnsureJob = lifecycleScope.launch {
++                delay(120L)
++                if (isHidden || !isAdded) return@launch
++                if (position in adapter.groupList.indices) {
++                    adapter.getGroupFragment(position)?.ensureLoadedIfEmpty()
++                }
++            }
+         }
+     }
+ 
+@@ -520,15 +534,7 @@ class ConfigurationFragment @JvmOverloads constructor(
+             tab.view.setOnLongClickListener {
+                 if (position in adapter.groupList.indices) {
+                     val group = adapter.groupList[position]
+-                    val targetFragment = io.nekohasekai.sagernet.ui.GroupFragment().apply {
+-                        arguments = Bundle().apply {
+-                            putLong(io.nekohasekai.sagernet.ui.GroupFragment.EXTRA_TARGET_GROUP_ID, group.id)
+-                        }
+-                    }
+-                    (activity as? MainActivity)?.apply {
+-                        displayFragment(targetFragment)
+-                        navigation.menu.findItem(R.id.nav_group)?.isChecked = true
+-                    }
++                    (activity as? MainActivity)?.openGroupAt(group.id)
+                 }
+                 true
+             }
+@@ -616,6 +622,41 @@ class ConfigurationFragment @JvmOverloads constructor(
+         super.onDestroy()
+     }
+ 
++    override fun onHiddenChanged(hidden: Boolean) {
++        super.onHiddenChanged(hidden)
++        // 被抽屉切走（hide）时收起搜索，避免返回键拦截器在其它页面残留
++        if (hidden) {
++            topBar.collapseSearch()
++        } else if (::groupPager.isInitialized && ::tabLayout.isInitialized && ::adapter.isInitialized) {
++            // 显示修复：从分组管理页返回时，把顶部标签栏同步到当前选中的分组。
++            // 新建分组等操作发生在页面隐藏期间，标签栏在 GONE 状态下算不出滚动位置，
++            // 回来后停在旧位置（要触摸才纠正）；这里照 reload() 的既有同步方式补一次。
++            val index = groupPager.currentItem
++            if (index in adapter.groupList.indices) {
++                tabLayout.post {
++                    val tab = tabLayout.getTabAt(index)
++                    if (tab != null && !tab.isSelected) {
++                        tab.select()
++                    }
++                    tabLayout.setScrollPosition(index, 0f, true)
++                    tabLayout.post {
++                        if (index in 0 until tabLayout.tabCount) {
++                            tabLayout.setScrollPosition(index, 0f, true)
++                        }
++                    }
++                }
++            }
++
++            // 顺序兜底：分组页拖动排序的广播若因竞态未生效，按数据库顺序校正
++            adapter.syncOrderFromDb()
++        }
++    }
++
++    /** 问题1-B：切回配置页时，当前分组的节点列表回顶部 */
++    override fun resetScrollState() {
++        getCurrentGroupFragment()?.resetScrollState()
++    }
++
+     override fun onKeyDown(ketCode: Int, event: KeyEvent): Boolean {
+         val fragment = getCurrentGroupFragment()
+         fragment?.configurationListView?.apply {
+@@ -1529,8 +1570,9 @@ class ConfigurationFragment @JvmOverloads constructor(
+                     tabLayout.visibility = View.VISIBLE
+                 }
+ 
+-                notifyItemInserted(groupList.size - 1)
+-                tabLayout.getTabAt(groupList.size - 1)?.select()
++                val newIndex = groupList.size - 1
++                notifyItemInserted(newIndex)
++                tabLayout.getTabAt(newIndex)?.select()
+             }
+         }
+ 
+@@ -1555,9 +1597,62 @@ class ConfigurationFragment @JvmOverloads constructor(
+             // 于是拿到的还是改名前那个旧对象 —— 表现就是「名字像没改一样」，
+             // 直到列表被整体重建（切页/进设置再回来）才刷新。
+             // 就地替换保持原有顺序，同时把 ☴ 列表和 tab 一起更新掉。
++            val orderChanged = groupList[index].userOrder != group.userOrder
+             groupList[index] = group
+-            tabLayout.post {
+-                tabLayout.getTabAt(index)?.text = group.displayName()
++
++            if (orderChanged) {
++                // 分组页拖动排序：整体重排（标签栏 + ☴ 快速列表），保持当前分组选中
++                val currentId = DataStore.selectedGroup
++                tabLayout.post {
++                    groupList.sortBy { it.userOrder }
++                    notifyDataSetChanged()
++                    val newIndex = groupList.indexOfFirst { it.id == currentId }
++                    if (newIndex >= 0) {
++                        groupPager.setCurrentItem(newIndex, false)
++                    }
++                }
++            } else {
++                tabLayout.post {
++                    tabLayout.getTabAt(index)?.text = group.displayName()
++                }
++            }
++        }
++
++        /**
++         * 从数据库校正分组顺序（兜底保险丝）：分组页拖动排序的广播若因竞态
++         * 没有落到标签栏，页面每次显示时按数据库 userOrder 就地对齐一次。
++         * 只在「集合一致、仅顺序不同」时动作，增删场景仍走 reload()。
++         */
++        fun syncOrderFromDb() {
++            runOnDefaultDispatcher {
++                val fresh = SagerDatabase.groupDao.allGroups()
++                val orderedIds = fresh.sortedBy { it.userOrder }.map { it.id }
++                val orderById = fresh.associate { it.id to it.userOrder }
++                tabLayout.post {
++                    if (!::groupPager.isInitialized || !::tabLayout.isInitialized) return@post
++                    val currentId = groupList.getOrNull(groupPager.currentItem)?.id
++                    val existing = groupList.associateBy { it.id }
++                    val reordered = orderedIds.mapNotNull { existing[it] }
++                    if (reordered.size != groupList.size) return@post
++                    if (reordered.map { it.id } == groupList.map { it.id }) return@post
++                    for (g in reordered) {
++                        orderById[g.id]?.let { g.userOrder = it }
++                    }
++                    groupList.clear()
++                    groupList.addAll(reordered)
++                    notifyDataSetChanged()
++                    val newIndex = groupList.indexOfFirst { it.id == currentId }
++                    if (newIndex >= 0) {
++                        groupPager.setCurrentItem(newIndex, false)
++                        tabLayout.post {
++                            val tab = tabLayout.getTabAt(newIndex)
++                            if (tab != null && !tab.isSelected) {
++                                tab.select()
++                            }
++                            tabLayout.setScrollPosition(newIndex, 0f, true)
++                        }
++                    }
++                }
+             }
+         }
+ 
+@@ -1598,6 +1693,30 @@ class ConfigurationFragment @JvmOverloads constructor(
+         lateinit var undoManager: UndoSnackbarManager<ProxyEntity>
+         var adapter: ConfigurationAdapter? = null
+ 
++        /** 问题1-B：切回配置页时节点列表回顶部 */
++        fun resetScrollState() {
++            if (::configurationListView.isInitialized) configurationListView.scrollToPosition(0)
++        }
++
++        /**
++         * 修复：首次滑入分组节点卡片不渲染。数据级判空 + 防重入装载：
++         * 只要适配器还没有数据且当前没有装载在途，就查库装载一次。
++         * 可安全地从 onResume / onPageSelected 重复调用。
++         */
++        fun ensureLoadedIfEmpty() {
++            val a = adapter ?: return
++            if (!::configurationListView.isInitialized) return
++            if (a.itemCount > 0) return
++            if (!a.loadInFlight.compareAndSet(false, true)) return
++            runOnDefaultDispatcher {
++                try {
++                    a.reloadProfiles()
++                } finally {
++                    a.loadInFlight.set(false)
++                }
++            }
++        }
++
+         override fun onSaveInstanceState(outState: Bundle) {
+             super.onSaveInstanceState(outState)
+ 
+@@ -1732,10 +1851,11 @@ class ConfigurationFragment @JvmOverloads constructor(
+ 
+             if (::configurationListView.isInitialized && configurationListView.size == 0) {
+                 configurationListView.adapter = adapter
+-                runOnDefaultDispatcher {
+-                    adapter?.reloadProfiles()
+-                }
+-            } else if (!::configurationListView.isInitialized) {
++            }
++            if (::configurationListView.isInitialized) {
++                // 修复：大分组首次滑入卡片不渲染——数据级判空 + 防重入装载
++                ensureLoadedIfEmpty()
++            } else {
+                 onViewCreated(requireView(), null)
+             }
+             checkOrderMenu()
+@@ -1931,6 +2051,9 @@ class ConfigurationFragment @JvmOverloads constructor(
+             var configurationIdList: MutableList<Long> = mutableListOf()
+             val configurationList = HashMap<Long, ProxyEntity>()
+             private val pendingTrafficUpdates = HashSet<Long>()
++
++            /** 装载防重入：避免 onResume 与落定兜底并发触发两次查库 */
++            val loadInFlight = AtomicBoolean(false)
+             private val profileStatePayload = Any()
+ 
+             private fun getItem(profileId: Long): ProxyEntity {
+@@ -2380,20 +2503,86 @@ class ConfigurationFragment @JvmOverloads constructor(
+                     selectedProfileIndex = newProfileIds.indexOf(selectedProxy)
+                 }
+ 
++                // 问题2 卡顿优化：在后台线程计算 DiffUtil，主线程只应用局部增量更新，
++                // 彻底消灭 notifyDataSetChanged 带来的全量销毁/重建和掉帧卡顿
++                val oldIds = synchronized(configurationIdList) { ArrayList(configurationIdList) }
++
++                if (oldIds.isEmpty()) {
++                    // 首次装载：30 个/帧 高速分片渲染——先出卡，再流式补齐。
++                    // 期间 loadInFlight 保持 true，兜底/防重入不会重复触发
++                    configurationListView.post {
++                        applyFirstFill(newProfileMap, newProfileIds, selectedProfileIndex)
++                    }
++                    return
++                }
++
++                val diffResult = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
++                    override fun getOldListSize(): Int = oldIds.size
++                    override fun getNewListSize(): Int = newProfileIds.size
++                    override fun areItemsTheSame(oldPos: Int, newPos: Int): Boolean =
++                        oldIds[oldPos] == newProfileIds[newPos]
++                    override fun areContentsTheSame(oldPos: Int, newPos: Int): Boolean {
++                        val oldId = oldIds[oldPos]
++                        val newId = newProfileIds[newPos]
++                        return configurationList[oldId] == newProfileMap[newId]
++                    }
++                }, false)
++
+                 configurationListView.post {
+                     configurationList.clear()
+                     configurationList.putAll(newProfileMap)
+                     configurationIdList.clear()
+                     configurationIdList.addAll(newProfileIds)
+-                    notifyDataSetChanged()
+-
++                    diffResult.dispatchUpdatesTo(this@ConfigurationAdapter)
+                     if (selectedProfileIndex != -1) {
+-                        configurationListView.scrollTo(selectedProfileIndex, true)
+-                    } else if (newProfiles.isNotEmpty()) {
+-                        configurationListView.scrollTo(0, true)
++                        configurationListView.scrollTo(selectedProfileIndex, false)
+                     }
++                }
++            }
+ 
++            /**
++             * 首次装载分片渲染：每帧 30 个，主线程 post 链式推进。
++             * 大分组先出前 30 张卡片，其余流式补齐；每步校验数据一致性，
++             * 检测到并发写入时直接一次性全量刷新收尾。完成后数据常驻适配器。
++             */
++            private fun applyFirstFill(
++                map: Map<Long, ProxyEntity>,
++                ids: List<Long>,
++                selectedProfileIndex: Int,
++            ) {
++                val chunk = 30
++                var from = 0
++                fun step() {
++                    if (!::configurationListView.isInitialized) return
++                    if (configurationIdList.size != from) {
++                        // 检测到并发写入（罕见）：全量刷新一次收尾
++                        configurationList.clear()
++                        configurationList.putAll(map)
++                        configurationIdList.clear()
++                        configurationIdList.addAll(ids)
++                        notifyDataSetChanged()
++                        return
++                    }
++                    val to = minOf(from + chunk, ids.size)
++                    for (i in from until to) {
++                        configurationList[ids[i]] = map.getValue(ids[i])
++                        configurationIdList.add(ids[i])
++                    }
++                    if (from == 0) {
++                        notifyDataSetChanged()
++                        configurationListView.scrollToPosition(0)
++                    } else {
++                        notifyItemRangeInserted(from, to - from)
++                    }
++                    if (selectedProfileIndex in from until to) {
++                        configurationListView.scrollTo(selectedProfileIndex, false)
++                    }
++                    from = to
++                    if (from < ids.size) {
++                        configurationListView.post { step() }
++                    }
+                 }
++                step()
+             }
+ 
+         }

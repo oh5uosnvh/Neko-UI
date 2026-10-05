@@ -21,12 +21,13 @@ PATCH_DIR = HERE.parent / "patches"
 ORDERED = [
     "001-sidebar-cache-prewarm.patch",
     "002-page-scroll-reset.patch",
-    "003-groups-page.patch",
-    "004-config-page-keepers.patch",
+    "003-groups-page-drag.patch",
+    "004-config-page.patch",
     "005-group-settings-autoselect.patch",
     "006-insets-fix.patch",
     "007-tab-strip-official-ui.patch",
-    "008-ci-mod-pins.patch",
+    "008-group-item-longpress-only.patch",
+    "009-ci-mod-pins-gosumdb.patch",
 ]
 
 
