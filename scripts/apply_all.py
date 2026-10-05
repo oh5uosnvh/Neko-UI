@@ -76,7 +76,7 @@ def main() -> int:
 
     failed = []
     for n in clean:
-        r = git(["apply", "-R"] if args.reverse else ["apply"], str(PATCH_DIR / n))
+        r = git(["apply", "-R", str(PATCH_DIR / n)] if args.reverse else ["apply", str(PATCH_DIR / n)])
         if r.returncode == 0:
             print(f"APPLIED  {n}")
         else:
