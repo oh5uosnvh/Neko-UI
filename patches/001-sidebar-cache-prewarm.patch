@@ -1,0 +1,436 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+index 063514c..8eaa88a 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+@@ -17,6 +17,10 @@ import androidx.activity.addCallback
+ import androidx.annotation.IdRes
+ import androidx.core.app.ActivityCompat
+ import androidx.core.content.ContextCompat
++import androidx.drawerlayout.widget.DrawerLayout
++import androidx.fragment.app.Fragment
++import androidx.fragment.app.FragmentManager
++import androidx.lifecycle.Lifecycle
+ import androidx.preference.PreferenceDataStore
+ import com.google.android.material.dialog.MaterialAlertDialogBuilder
+ import com.google.android.material.navigation.NavigationView
+@@ -64,6 +68,35 @@ class MainActivity : ThemedActivity(),
+     lateinit var navigation: NavigationView
+     private var currentMainFragment: ToolbarFragment? = null
+ 
++    // ---- 侧边栏切换优化 ----
++    // 官方实现每次点击都是 new Fragment + replace()，事务恰好在抽屉关闭动画
++    // 进行时执行：销毁旧页整棵视图树 + 新页 inflation/初始化，主线程被冻结，
++    // 于是「换页必卡、重点当前页不卡（走 isChecked 提前返回）」。现在：
++    // 页面实例缓存复用（hide/show），从未创建过的页面推迟到抽屉关闭后再提交。
++    /** nav id -> 已创建的 Fragment 实例（同一页面只 inflate 一次） */
++    private val fragmentCache = HashMap<Int, ToolbarFragment>()
++
++    /** 尚未创建过的页面：延迟到抽屉关闭动画结束后再执行的切换 */
++    private var pendingCommit: (() -> Unit)? = null
++
++    /** 启动预热下标 */
++    private var prewarmIndex = 0
++
++    companion object {
++        /** 参与实例缓存（重建时按 tag 找回）的页面 */
++        private val CACHED_NAV_IDS = intArrayOf(
++            R.id.nav_configuration, R.id.nav_group, R.id.nav_route,
++            R.id.nav_settings, R.id.nav_tools, R.id.nav_logcat, R.id.nav_about,
++        )
++        private const val NAV_TAG_PREFIX = "main_nav:"
++        private const val STATE_NAV_ID = "main_nav_id"
++        private const val PREWARM_DELAY_MS = 800L
++        private const val PREWARM_INTERVAL_MS = 500L
++
++        /** 预热时让页面在屏幕外“可见”若干毫秒，用于生成整页渲染列表 */
++        private const val WARM_FRAME_MS = 120L
++    }
++
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+         MessageStore.setCurrentActivity(this)
+@@ -83,14 +116,17 @@ class MainActivity : ThemedActivity(),
+         }
+         navigation.setNavigationItemSelectedListener(this)
+ 
++        binding.drawerLayout.addDrawerListener(drawerListener)
++        // 页面缓存复用后层次里会同时存在多个页面的 AppBarLayout，
++        // 每个页面视图创建时即时补一次状态栏内边距，避免顶栏顶进状态栏。
++        supportFragmentManager.registerFragmentLifecycleCallbacks(navInsetCallbacks, false)
+         if (savedInstanceState == null) {
+             displayFragmentWithId(R.id.nav_configuration)
+         } else {
+-            currentMainFragment =
+-                supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
++            restoreFragments(savedInstanceState)
+         }
+         onBackPressedDispatcher.addCallback {
+-            if (supportFragmentManager.findFragmentById(R.id.fragment_holder) is ConfigurationFragment) {
++            if (currentMainFragment is ConfigurationFragment) {
+                 moveTaskToBack(true)
+             } else {
+                 displayFragmentWithId(R.id.nav_configuration)
+@@ -105,9 +141,10 @@ class MainActivity : ThemedActivity(),
+         binding.stats.setOnClickListener { if (DataStore.serviceState.connected) binding.stats.testConnection() }
+ 
+         setContentView(binding.root)
+-        currentMainFragment =
+-            supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
+-                ?: currentMainFragment
++        if (currentMainFragment == null) {
++            currentMainFragment =
++                supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
++        }
+         if (!animateInitialControls) {
+             syncMainControls(showWhenConnected = false, animate = false)
+         }
+@@ -126,6 +163,11 @@ class MainActivity : ThemedActivity(),
+ 
+         refreshNavMenu(DataStore.enableClashAPI)
+ 
++        if (savedInstanceState == null) {
++            // 启动后错峰预热其它侧边栏页面，让第一次点击也是热切换
++            binding.root.postDelayed(prewarmRunnable, PREWARM_DELAY_MS)
++        }
++
+         // sdk 33 notification
+         if (Build.VERSION.SDK_INT >= 33) {
+             val checkPermission =
+@@ -156,12 +198,19 @@ class MainActivity : ThemedActivity(),
+         if (DataStore.hideFromRecentApps) {
+             applyHideFromRecentApps(DataStore.hideFromRecentApps)
+         }
++
++        // 兜底：抽屉已关闭但延迟切换还没执行（动画被系统回收等意外打断）
++        if (!binding.drawerLayout.isOpen) {
++            val pending = pendingCommit
++            pendingCommit = null
++            pending?.invoke()
++        }
+     }
+ 
+     override fun onPostResume() {
+         super.onPostResume()
+-        val restoredFragment =
+-            supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
++        val restoredFragment = currentMainFragment
++            ?: supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
+         if (restoredFragment != null && restoredFragment !== currentMainFragment) {
+             currentMainFragment = restoredFragment
+             syncMainControls(
+@@ -370,14 +419,236 @@ class MainActivity : ThemedActivity(),
+         return displayFragmentWithId(item.itemId)
+     }
+ 
++    /**
++     * 切换主内容页。
++     *
++     * 官方实现是每次 new XxxFragment() + replace()：事务恰好在抽屉关闭动画
++     * 进行时执行——销毁旧页整棵视图树 + 新页 inflation/初始化，一帧内做完
++     * 几十~几百 ms 的主线程工作，动画与点击反馈必卡。再点同一项只走
++     * onNavigationItemSelected 里的 isChecked 提前返回（仅收起抽屉），所以
++     * 表现为「换页必卡、点当前页不卡」。
++     *
++     * 现在：
++     *  1. 页面实例缓存复用，切换 = hide/show + 生命周期降级，不销毁不重建；
++     *  2. 从未创建过（或重建后视图待创建）的页面延迟到抽屉关闭动画结束后
++     *     再一次性提交，动画期间主线程零阻塞。
++     */
+     @SuppressLint("CommitTransaction")
+     fun displayFragment(fragment: ToolbarFragment) {
+-        currentMainFragment = fragment
+-        supportFragmentManager.beginTransaction()
+-            .replace(R.id.fragment_holder, fragment)
+-            .commitAllowingStateLoss()
++        // 该页可能正处于预热微露期（屏幕外），先把位移归零
++        fragment.view?.translationY = 0f
++        if (currentMainFragment === fragment) {
++            binding.drawerLayout.closeDrawers()
++            return
++        }
++
++        val commit = {
++            val old = currentMainFragment
++            val transaction = supportFragmentManager.beginTransaction()
++                .setReorderingAllowed(true)
++            if (old != null && old !== fragment && old.isAdded) {
++                if (fragmentCache.values.any { it === old }) {
++                    transaction.setMaxLifecycle(old, Lifecycle.State.STARTED)
++                    if (!old.isHidden) transaction.hide(old)
++                } else {
++                    // 不在缓存里的页面（仪表盘）：保持原语义，切走即销毁
++                    transaction.remove(old)
++                }
++            }
++            for (cached in fragmentCache.values) {
++                if (cached !== fragment && cached.isAdded && !cached.isHidden) {
++                    transaction.setMaxLifecycle(cached, Lifecycle.State.STARTED)
++                    transaction.hide(cached)
++                }
++            }
++            if (fragment.isAdded) {
++                transaction.show(fragment)
++            } else {
++                transaction.add(R.id.fragment_holder, fragment, tagOf(fragment))
++            }
++            transaction.setMaxLifecycle(fragment, Lifecycle.State.RESUMED)
++            transaction.commitAllowingStateLoss()
++
++            currentMainFragment = fragment
++            syncMainControls(fragment, showWhenConnected = false, animate = false)
++        }
++
+         binding.drawerLayout.closeDrawers()
+-        syncMainControls(fragment, showWhenConnected = false, animate = false)
++        if (fragment.view != null || !binding.drawerLayout.isOpen) {
++            // 热切换（页面已就绪）或抽屉没开：立即提交，与抽屉动画同步切换
++            pendingCommit = null
++            commit()
++        } else {
++            // 冷页面：先让抽屉关完，避免 inflation 冻结动画
++            pendingCommit = commit
++        }
++    }
++
++    private val drawerListener = object : DrawerLayout.SimpleDrawerListener() {
++        override fun onDrawerClosed(drawerView: View) {
++            val pending = pendingCommit
++            pendingCommit = null
++            pending?.invoke()
++        }
++    }
++
++    /** 页面视图创建时补齐顶栏的状态栏内边距（多页面共存场景） */
++    private val navInsetCallbacks = object : FragmentManager.FragmentLifecycleCallbacks() {
++        override fun onFragmentViewCreated(
++            fm: FragmentManager,
++            f: Fragment,
++            v: View,
++            savedInstanceState: Bundle?,
++        ) {
++            applyStatusBarInset(v)
++        }
++    }
++
++    private fun tagOf(fragment: ToolbarFragment): String? =
++        fragmentCache.entries.firstOrNull { it.value === fragment }?.let {
++            NAV_TAG_PREFIX + it.key
++        }
++
++    private fun createFragment(@IdRes id: Int): ToolbarFragment? = when (id) {
++        R.id.nav_configuration -> ConfigurationFragment()
++        R.id.nav_group -> GroupFragment()
++        R.id.nav_route -> RouteFragment()
++        R.id.nav_settings -> SettingsFragment()
++        R.id.nav_traffic -> WebviewFragment()
++        R.id.nav_tools -> ToolsFragment()
++        R.id.nav_logcat -> LogcatFragment()
++        R.id.nav_about -> AboutFragment()
++        else -> null
++    }
++
++    private fun obtainFragment(@IdRes id: Int): ToolbarFragment =
++        fragmentCache.getOrPut(id) { createFragment(id) ?: error("unknown nav id: $id") }
++
++    /** 配置页长按分组标签：跳转分组页并定位到该分组（复用实例，避免重建） */
++    fun openGroupAt(groupId: Long) {
++        val fragment = obtainFragment(R.id.nav_group) as GroupFragment
++        displayFragment(fragment)
++        navigation.menu.findItem(R.id.nav_group)?.isChecked = true
++        fragment.scrollToGroup(groupId)
++    }
++
++    /** 进程/配置变更重建后，从 tag 恢复缓存的页面实例 */
++    private fun restoreFragments(savedInstanceState: Bundle) {
++        for (id in CACHED_NAV_IDS) {
++            (supportFragmentManager.findFragmentByTag(NAV_TAG_PREFIX + id) as? ToolbarFragment)
++                ?.let { fragmentCache[id] = it }
++        }
++        // 清掉缓存外的残留顶层 Fragment（例如仪表盘页）
++        val kept = fragmentCache.values.toSet()
++        for (f in supportFragmentManager.fragments.toList()) {
++            if (f is ToolbarFragment && kept.none { it === f }) {
++                supportFragmentManager.beginTransaction()
++                    .setReorderingAllowed(true)
++                    .remove(f)
++                    .commitAllowingStateLoss()
++            }
++        }
++        val lastId = savedInstanceState.getInt(STATE_NAV_ID, R.id.nav_configuration)
++        val restored = fragmentCache[lastId]
++        if (restored != null) {
++            currentMainFragment = restored
++            navigation.menu.findItem(lastId)?.isChecked = true
++        } else if (lastId == R.id.nav_traffic) {
++            // 之前停在仪表盘（不进缓存）：重新打开一次
++            displayFragmentWithId(R.id.nav_traffic)
++        } else {
++            displayFragmentWithId(R.id.nav_configuration)
++        }
++    }
++
++    /**
++     * 启动后错峰预热其余侧边栏页面（逐个隐藏挂载），让「第一次点击」
++     * 也是热切换。不需要这部分启动开销时，清空 prewarmIds 即可。
++     */
++    private val prewarmIds = intArrayOf(
++        R.id.nav_group,
++        R.id.nav_settings,
++        R.id.nav_route,
++        R.id.nav_tools,
++        R.id.nav_logcat,
++        R.id.nav_about,
++    )
++
++    private val prewarmRunnable = object : Runnable {
++        override fun run() {
++            if (isFinishing || isDestroyed) return
++            if (binding.drawerLayout.isOpen) {
++                binding.root.postDelayed(this, PREWARM_INTERVAL_MS)
++                return
++            }
++            // 弹窗/菜单/对话框持有窗口焦点时完全让路，绝不和用户正盯着的东西抢帧
++            if (!binding.root.hasWindowFocus()) {
++                binding.root.postDelayed(this, PREWARM_INTERVAL_MS)
++                return
++            }
++            while (prewarmIndex < prewarmIds.size) {
++                val id = prewarmIds[prewarmIndex++]
++                val fragment = fragmentCache.getOrPut(id) { createFragment(id)!! }
++                if (fragment.isAdded || fragment === currentMainFragment) continue
++                supportFragmentManager.beginTransaction()
++                    .setReorderingAllowed(true)
++                    .add(R.id.fragment_holder, fragment, tagOf(fragment))
++                    .hide(fragment)
++                    .setMaxLifecycle(fragment, Lifecycle.State.STARTED)
++                    .commitAllowingStateLoss()
++                // 立即执行该事务，并在同一拍里补全布局/绘制，
++                // 不留「已挂载但尚未补全」的窗口（避免用户此时点开而错过预热）
++                supportFragmentManager.executePendingTransactions()
++                warmUpHiddenFragment(fragment)
++                break
++            }
++            if (prewarmIndex < prewarmIds.size) {
++                binding.root.postDelayed(this, PREWARM_INTERVAL_MS)
++            }
++        }
++    }
++
++    /**
++     * 把隐藏页面「首次显示」的开销提前付掉：
++     *
++     * 隐藏（GONE）的视图不会参与 measure/layout/draw，所以第一次显示时仍要
++     * 现做一堆一次性工作——RecyclerView 首建列表项、设置页首次摆出偏好行、
++     * 日志页 50KB 长文首次排版、整页首次生成渲染显示列表……这正是「每页第
++     * 一次点开卡、之后都流畅」的根因。
++     *
++     * 这里：
++     *  1) 手动 measure + layout 整棵树（把建项/排版等一次性成本做掉）；
++     *  2) 让它在屏幕外“可见”过几帧（translationY 移出屏幕，用户看不到、
++     *     也点不到），从而生成整页的渲染显示列表（首次绘制成本）。
++     * 之后用户点开该页，就只剩一次轻量的可见性切换。
++     */
++    private fun warmUpHiddenFragment(fragment: ToolbarFragment) {
++        if (isFinishing || isDestroyed) return
++        val view = fragment.view ?: return
++        if (!fragment.isHidden) return // 用户已打开该页，交给正常流程
++        val holder = binding.fragmentHolder
++        var width = holder.width
++        var height = holder.height
++        if (width <= 0 || height <= 0) {
++            width = binding.root.width
++            height = binding.root.height
++        }
++        if (width <= 0 || height <= 0) return
++
++        view.measure(
++            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
++            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
++        )
++        view.layout(0, 0, width, height)
++
++        view.translationY = (height + 64).toFloat()
++        view.visibility = View.VISIBLE
++        view.postDelayed({
++            view.translationY = 0f
++            if (fragment.isHidden && view.isAttachedToWindow) {
++                view.visibility = View.GONE
++            }
++        }, WARM_FRAME_MS)
+     }
+ 
+     private fun syncMainControls(
+@@ -420,26 +691,18 @@ class MainActivity : ThemedActivity(),
+     }
+ 
+     fun displayFragmentWithId(@IdRes id: Int): Boolean {
+-        when (id) {
+-            R.id.nav_configuration -> {
+-                displayFragment(ConfigurationFragment())
+-            }
+-
+-            R.id.nav_group -> displayFragment(GroupFragment())
+-            R.id.nav_route -> displayFragment(RouteFragment())
+-            R.id.nav_settings -> displayFragment(SettingsFragment())
+-            R.id.nav_traffic -> displayFragment(WebviewFragment())
+-            R.id.nav_tools -> displayFragment(ToolsFragment())
+-            R.id.nav_logcat -> displayFragment(LogcatFragment())
+-            R.id.nav_faq -> {
+-                launchCustomTab("https://matsuridayo.github.io/")
+-                return false
+-            }
+-
+-            R.id.nav_about -> displayFragment(AboutFragment())
+-
+-            else -> return false
++        if (id == R.id.nav_faq) {
++            launchCustomTab("https://matsuridayo.github.io/")
++            return false
++        }
++        val fragment = if (id == R.id.nav_traffic) {
++            // 仪表盘：内含 WebView，保持原语义每次重建（不进缓存、不预热）
++            WebviewFragment()
++        } else {
++            fragmentCache[id] ?: (createFragment(id)?.also { fragmentCache[id] = it }
++                ?: return false)
+         }
++        displayFragment(fragment)
+         navigation.menu.findItem(id).isChecked = true
+         return true
+     }
+@@ -544,11 +807,24 @@ class MainActivity : ThemedActivity(),
+ 
+     override fun onDestroy() {
+         super.onDestroy()
++        binding.root.removeCallbacks(prewarmRunnable)
++        binding.drawerLayout.removeDrawerListener(drawerListener)
++        supportFragmentManager.unregisterFragmentLifecycleCallbacks(navInsetCallbacks)
++        pendingCommit = null
+         GroupManager.userInterface = null
+         DataStore.configurationStore.unregisterChangeListener(this)
+         connection.disconnect(this)
+     }
+ 
++    override fun onSaveInstanceState(outState: Bundle) {
++        super.onSaveInstanceState(outState)
++        outState.putInt(
++            STATE_NAV_ID,
++            fragmentCache.entries.firstOrNull { it.value === currentMainFragment }?.key
++                ?: R.id.nav_configuration,
++        )
++    }
++
+     /**
+      * 打开左侧抽屉。
+      * 顶栏的 ☰ 由 TopBarController 自绘（原先是 Toolbar 的 navigationIcon，
+@@ -577,8 +853,8 @@ class MainActivity : ThemedActivity(),
+         if (super.onKeyDown(keyCode, event)) return true
+         if (binding.drawerLayout.isOpen) return false
+ 
+-        val fragment =
+-            supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
++        val fragment = currentMainFragment
++            ?: supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
+         return fragment != null && fragment.onKeyDown(keyCode, event)
+     }
+ 

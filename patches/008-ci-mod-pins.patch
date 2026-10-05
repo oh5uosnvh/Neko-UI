@@ -1,0 +1,42 @@
+diff --git a/.github/workflows/build_mod.yml b/.github/workflows/build_mod.yml
+index c84919c..893686a 100644
+--- a/.github/workflows/build_mod.yml
++++ b/.github/workflows/build_mod.yml
+@@ -1,6 +1,9 @@
+ name: Build Mod APK
+ 
+ on:
++  push:
++    branches:
++      - fix/sidebar-jank
+   workflow_dispatch:
+     inputs:
+       anytls_commit:
+@@ -54,10 +57,10 @@ jobs:
+         env:
+           GH_PAT: ${{ secrets.GH_PAT }}
+         run: |
+-          sed -i "s/^export COMMIT_ANYTLS_SHANLIAN=.*/export COMMIT_ANYTLS_SHANLIAN=\"${{ inputs.anytls_commit }}\"/" buildScript/lib/core/get_source_env.sh
+-          sed -i "s/^export COMMIT_SING_SS_VT=.*/export COMMIT_SING_SS_VT=\"${{ inputs.vt_commit }}\"/" buildScript/lib/core/get_source_env.sh
+-          sed -i "s/^export COMMIT_FASTUP_MOD=.*/export COMMIT_FASTUP_MOD=\"${{ inputs.fastup_commit }}\"/" buildScript/lib/core/get_source_env.sh
+-          sed -i "s/^export COMMIT_OPPA_MOD=.*/export COMMIT_OPPA_MOD=\"${{ inputs.oppa_commit }}\"/" buildScript/lib/core/get_source_env.sh
++          sed -i "s/^export COMMIT_ANYTLS_SHANLIAN=.*/export COMMIT_ANYTLS_SHANLIAN=\"${{ github.event.inputs.anytls_commit || '35fe946085e3cd5782fd095dd5878c7388519895' }}\"/" buildScript/lib/core/get_source_env.sh
++          sed -i "s/^export COMMIT_SING_SS_VT=.*/export COMMIT_SING_SS_VT=\"${{ github.event.inputs.vt_commit || '8ad5da2' }}\"/" buildScript/lib/core/get_source_env.sh
++          sed -i "s/^export COMMIT_FASTUP_MOD=.*/export COMMIT_FASTUP_MOD=\"${{ github.event.inputs.fastup_commit || '2aba39c395916633200ac72d9fe6dbf10f2b80bd' }}\"/" buildScript/lib/core/get_source_env.sh
++          sed -i "s/^export COMMIT_OPPA_MOD=.*/export COMMIT_OPPA_MOD=\"${{ github.event.inputs.oppa_commit || 'e1c78129290656ca4e59ccc48b0c0a7e7acddf0a' }}\"/" buildScript/lib/core/get_source_env.sh
+           cat buildScript/lib/core/get_source_env.sh
+ 
+       - name: Build LibCore
+@@ -115,12 +118,3 @@ jobs:
+         with:
+           name: NekoBox-mod-arm64
+           path: app/build/outputs/apk/**/NekoBox*.apk
+-
+-      - name: Publish to Release
+-        uses: softprops/action-gh-release@v2
+-        with:
+-          tag_name: v1.4.2-mod-final
+-          files: app/build/outputs/apk/**/NekoBox*.apk
+-          overwrite_files: true
+-        env:
+-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

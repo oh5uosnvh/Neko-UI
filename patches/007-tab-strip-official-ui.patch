@@ -1,0 +1,81 @@
+diff --git a/app/src/main/res/layout/layout_appbar.xml b/app/src/main/res/layout/layout_appbar.xml
+index a8df256..9177647 100644
+--- a/app/src/main/res/layout/layout_appbar.xml
++++ b/app/src/main/res/layout/layout_appbar.xml
+@@ -5,8 +5,7 @@
+     android:layout_width="match_parent"
+     android:layout_height="?attr/actionBarSize"
+     android:background="?attr/colorPrimary"
+-    app:elevation="0dp"
+-    app:liftOnScroll="false">
++    android:elevation="4dp">
+ 
+     <com.google.android.material.appbar.MaterialToolbar
+         android:id="@+id/toolbar"
+@@ -17,4 +16,4 @@
+         android:touchscreenBlocksFocus="false"
+         app:popupTheme="@style/ThemeOverlay.AppCompat.DayNight"
+         app:title="@string/app_name" />
+-</com.google.android.material.appbar.AppBarLayout>
+\ No newline at end of file
++</com.google.android.material.appbar.AppBarLayout>
+diff --git a/app/src/main/res/layout/layout_group_list.xml b/app/src/main/res/layout/layout_group_list.xml
+index 0d39b53..053e428 100644
+--- a/app/src/main/res/layout/layout_group_list.xml
++++ b/app/src/main/res/layout/layout_group_list.xml
+@@ -1,4 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
++<!-- 顶部标签栏：官方上游 master 原文。唯一偏离：tabRippleColor 设为透明
++     （需求指定：点按/长按分组名不出现按压底色），其余逐行与官方一致。 -->
+ <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+     xmlns:app="http://schemas.android.com/apk/res-auto"
+     xmlns:tools="http://schemas.android.com/tools"
+@@ -15,26 +17,14 @@
+     <com.google.android.material.tabs.TabLayout
+         android:id="@+id/group_tab"
+         android:layout_width="match_parent"
+-        android:layout_height="40dp"
+-        android:layout_marginStart="8dp"
+-        android:layout_marginEnd="8dp"
+-        android:layout_marginTop="6dp"
+-        android:layout_marginBottom="4dp"
+-        android:background="@drawable/bg_group_tab_row"
++        android:layout_height="wrap_content"
++        android:background="?colorPrimary"
+         android:elevation="4dp"
+         android:visibility="gone"
+-        app:tabBackground="@android:color/transparent"
+-        app:tabGravity="fill"
+-        app:tabIndicator="@drawable/bg_tab_indicator_box"
+-        app:tabIndicatorAnimationMode="linear"
+         app:tabIndicatorColor="?tabIndicatorColor"
+-        app:tabIndicatorFullWidth="true"
+-        app:tabIndicatorGravity="stretch"
++        app:tabIndicatorFullWidth="false"
+         app:tabMode="scrollable"
+-        app:tabPaddingBottom="0dp"
+-        app:tabPaddingEnd="16dp"
+         app:tabPaddingStart="16dp"
+-        app:tabPaddingTop="0dp"
+         app:tabRippleColor="@android:color/transparent"
+         app:tabSelectedTextColor="?tabSelectedTextColor"
+         app:tabTextColor="?tabTextColor"
+diff --git a/app/src/main/res/layout/layout_tools.xml b/app/src/main/res/layout/layout_tools.xml
+index 08c0c50..b25a897 100644
+--- a/app/src/main/res/layout/layout_tools.xml
++++ b/app/src/main/res/layout/layout_tools.xml
+@@ -17,12 +17,12 @@
+         android:layout_width="match_parent"
+         android:layout_height="wrap_content"
+         android:background="?colorPrimary"
+-        android:elevation="0dp"
++        android:elevation="4dp"
+         app:tabIndicatorColor="?tabIndicatorColor"
+         app:tabIndicatorFullWidth="false"
+         app:tabMode="fixed"
+         app:tabPaddingStart="16dp"
+-        app:tabRippleColor="?tabRippleColor"
++        app:tabRippleColor="@android:color/transparent"
+         app:tabSelectedTextColor="?tabSelectedTextColor"
+         app:tabTextColor="?tabTextColor"
+         app:tabUnboundedRipple="false" />

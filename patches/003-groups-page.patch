@@ -1,0 +1,84 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
+index af75c17..5010a09 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
+@@ -67,6 +67,33 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+         private const val SORT_DESC = 2
+     }
+ 
++    /** 问题1-B：切回分组页时列表回顶部 */
++    override fun resetScrollState() {
++        if (::groupListView.isInitialized) groupListView.scrollToPosition(0)
++    }
++
++    /** MainActivity 复用本实例时的定位请求（替代一次性 arguments 方案） */
++    private var pendingScrollGroupId = -1L
++
++    /** 跳到指定分组（由 MainActivity#openGroupAt 调用） */
++    fun scrollToGroup(groupId: Long) {
++        pendingScrollGroupId = groupId
++        if (::groupListView.isInitialized) {
++            groupListView.post { consumePendingScroll() }
++        }
++    }
++
++    private fun consumePendingScroll() {
++        if (!::groupListView.isInitialized || !::groupAdapter.isInitialized) return
++        val targetId = pendingScrollGroupId
++        if (targetId <= 0L) return
++        val position = groupAdapter.groupList.indexOfFirst { it.id == targetId }
++        if (position >= 0) {
++            groupListView.scrollToPosition(position)
++            pendingScrollGroupId = -1L
++        }
++    }
++
+     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+         super.onViewCreated(view, savedInstanceState)
+         activity = requireActivity() as MainActivity
+@@ -111,8 +138,14 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+ 
+             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+                 val index = viewHolder.bindingAdapterPosition
++                val group = (viewHolder as GroupHolder).proxyGroup
+                 groupAdapter.remove(index)
+-                undoManager.remove(index to (viewHolder as GroupHolder).proxyGroup)
++                undoManager.remove(index to group)
++                // 立即同步到配置页：滑动即广播移除（撤销时在 undo 中广播恢复，
++                // 正式 commit 的广播对此幂等），不再等撤销条 2 秒超时
++                runOnDefaultDispatcher {
++                    GroupManager.iterator { groupRemoved(group.id) }
++                }
+             }
+ 
+             override fun onMove(
+@@ -462,6 +495,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+                     }
+                     arguments?.remove(EXTRA_TARGET_GROUP_ID)
+                 }
++                consumePendingScroll()
+             }
+         }
+ 
+@@ -602,6 +636,12 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+                 groupList.add(index, item)
+                 notifyItemInserted(index)
+             }
++            // 撤销 = 取消删除：把配置页刚移除的标签广播恢复
++            runOnDefaultDispatcher {
++                for ((_, item) in actions) {
++                    GroupManager.iterator { groupAdd(item) }
++                }
++            }
+         }
+ 
+         override fun commit(actions: List<Pair<Int, ProxyGroup>>) {
+@@ -613,6 +653,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+         }
+ 
+         override suspend fun groupAdd(group: ProxyGroup) {
++            // 撤销恢复时本地已在（undo 已加回），跳过，避免重复添加
++            if (groupList.any { it.id == group.id }) return
+             groupList.add(group)
+             delay(300L)
+ 

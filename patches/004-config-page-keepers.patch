@@ -1,0 +1,135 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+index afd90b7..d7212cb 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+@@ -40,6 +40,7 @@ import androidx.preference.PreferenceDataStore
+ import androidx.recyclerview.widget.ItemTouchHelper
+ import androidx.recyclerview.widget.LinearLayoutManager
+ import androidx.recyclerview.widget.RecyclerView
++import androidx.recyclerview.widget.DiffUtil
+ import androidx.viewpager2.adapter.FragmentStateAdapter
+ import androidx.viewpager2.widget.ViewPager2
+ import com.google.android.material.card.MaterialCardView
+@@ -520,15 +521,7 @@ class ConfigurationFragment @JvmOverloads constructor(
+             tab.view.setOnLongClickListener {
+                 if (position in adapter.groupList.indices) {
+                     val group = adapter.groupList[position]
+-                    val targetFragment = io.nekohasekai.sagernet.ui.GroupFragment().apply {
+-                        arguments = Bundle().apply {
+-                            putLong(io.nekohasekai.sagernet.ui.GroupFragment.EXTRA_TARGET_GROUP_ID, group.id)
+-                        }
+-                    }
+-                    (activity as? MainActivity)?.apply {
+-                        displayFragment(targetFragment)
+-                        navigation.menu.findItem(R.id.nav_group)?.isChecked = true
+-                    }
++                    (activity as? MainActivity)?.openGroupAt(group.id)
+                 }
+                 true
+             }
+@@ -616,6 +609,38 @@ class ConfigurationFragment @JvmOverloads constructor(
+         super.onDestroy()
+     }
+ 
++    override fun onHiddenChanged(hidden: Boolean) {
++        super.onHiddenChanged(hidden)
++        // 被抽屉切走（hide）时收起搜索，避免返回键拦截器在其它页面残留
++        if (hidden) {
++            topBar.collapseSearch()
++        } else if (::groupPager.isInitialized && ::tabLayout.isInitialized && ::adapter.isInitialized) {
++            // 显示修复：从分组管理页返回时，把顶部标签栏同步到当前选中的分组。
++            // 新建分组等操作发生在页面隐藏期间，标签栏在 GONE 状态下算不出滚动位置，
++            // 回来后停在旧位置（要触摸才纠正）；这里照 reload() 的既有同步方式补一次。
++            val index = groupPager.currentItem
++            if (index in adapter.groupList.indices) {
++                tabLayout.post {
++                    val tab = tabLayout.getTabAt(index)
++                    if (tab != null && !tab.isSelected) {
++                        tab.select()
++                    }
++                    tabLayout.setScrollPosition(index, 0f, true)
++                    tabLayout.post {
++                        if (index in 0 until tabLayout.tabCount) {
++                            tabLayout.setScrollPosition(index, 0f, true)
++                        }
++                    }
++                }
++            }
++        }
++    }
++
++    /** 问题1-B：切回配置页时，当前分组的节点列表回顶部 */
++    override fun resetScrollState() {
++        getCurrentGroupFragment()?.resetScrollState()
++    }
++
+     override fun onKeyDown(ketCode: Int, event: KeyEvent): Boolean {
+         val fragment = getCurrentGroupFragment()
+         fragment?.configurationListView?.apply {
+@@ -1529,8 +1554,9 @@ class ConfigurationFragment @JvmOverloads constructor(
+                     tabLayout.visibility = View.VISIBLE
+                 }
+ 
+-                notifyItemInserted(groupList.size - 1)
+-                tabLayout.getTabAt(groupList.size - 1)?.select()
++                val newIndex = groupList.size - 1
++                notifyItemInserted(newIndex)
++                tabLayout.getTabAt(newIndex)?.select()
+             }
+         }
+ 
+@@ -1598,6 +1624,11 @@ class ConfigurationFragment @JvmOverloads constructor(
+         lateinit var undoManager: UndoSnackbarManager<ProxyEntity>
+         var adapter: ConfigurationAdapter? = null
+ 
++        /** 问题1-B：切回配置页时节点列表回顶部 */
++        fun resetScrollState() {
++            if (::configurationListView.isInitialized) configurationListView.scrollToPosition(0)
++        }
++
+         override fun onSaveInstanceState(outState: Bundle) {
+             super.onSaveInstanceState(outState)
+ 
+@@ -2380,17 +2411,38 @@ class ConfigurationFragment @JvmOverloads constructor(
+                     selectedProfileIndex = newProfileIds.indexOf(selectedProxy)
+                 }
+ 
++                // 问题2 卡顿优化：在后台线程计算 DiffUtil，主线程只应用局部增量更新，
++                // 彻底消灭 notifyDataSetChanged 带来的全量销毁/重建和掉帧卡顿
++                val oldIds = synchronized(configurationIdList) { ArrayList(configurationIdList) }
++                val diffResult = if (oldIds.isNotEmpty()) {
++                    DiffUtil.calculateDiff(object : DiffUtil.Callback() {
++                        override fun getOldListSize(): Int = oldIds.size
++                        override fun getNewListSize(): Int = newProfileIds.size
++                        override fun areItemsTheSame(oldPos: Int, newPos: Int): Boolean =
++                            oldIds[oldPos] == newProfileIds[newPos]
++                        override fun areContentsTheSame(oldPos: Int, newPos: Int): Boolean {
++                            val oldId = oldIds[oldPos]
++                            val newId = newProfileIds[newPos]
++                            return configurationList[oldId] == newProfileMap[newId]
++                        }
++                    }, false)
++                } else null
++
+                 configurationListView.post {
+                     configurationList.clear()
+                     configurationList.putAll(newProfileMap)
+                     configurationIdList.clear()
+                     configurationIdList.addAll(newProfileIds)
+-                    notifyDataSetChanged()
++                    if (diffResult != null) {
++                        diffResult.dispatchUpdatesTo(this@ConfigurationAdapter)
++                    } else {
++                        notifyDataSetChanged()
++                    }
+ 
+                     if (selectedProfileIndex != -1) {
+-                        configurationListView.scrollTo(selectedProfileIndex, true)
+-                    } else if (newProfiles.isNotEmpty()) {
+-                        configurationListView.scrollTo(0, true)
++                        configurationListView.scrollTo(selectedProfileIndex, false)
++                    } else if (newProfiles.isNotEmpty() && oldIds.isEmpty()) {
++                        configurationListView.scrollToPosition(0)
+                     }
+ 
+                 }

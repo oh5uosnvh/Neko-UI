@@ -1,0 +1,192 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt
+index 75a64a8..624643b 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt
+@@ -15,6 +15,7 @@ import androidx.activity.result.component1
+ import androidx.activity.result.component2
+ import androidx.activity.result.contract.ActivityResultContracts
+ import androidx.core.view.ViewCompat
++import androidx.core.widget.NestedScrollView
+ import androidx.recyclerview.widget.RecyclerView
+ import com.danielstone.materialaboutlibrary.MaterialAboutFragment
+ import com.danielstone.materialaboutlibrary.items.MaterialAboutActionItem
+@@ -38,6 +39,17 @@ import org.json.JSONObject
+ 
+ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
+ 
++    /** 问题1-B：切回关于页时内容回顶部 */
++    override fun resetScrollState() {
++        val root = view ?: return
++        if (root is android.view.ViewGroup) {
++            for (i in 0 until root.childCount) {
++                val child = root.getChildAt(i)
++                if (child is NestedScrollView) child.scrollTo(0, 0)
++            }
++        }
++    }
++
+     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+         super.onViewCreated(view, savedInstanceState)
+ 
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/LogcatFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/LogcatFragment.kt
+index 2f276ee..93929f7 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/LogcatFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/LogcatFragment.kt
+@@ -62,26 +62,51 @@ class LogcatFragment : ToolbarFragment(R.layout.layout_logcat),
+         return color
+     }
+ 
++    /** 上次日志内容的哈希：内容没变就不重设文本，避免反复重排 50KB 长文 */
++    private var lastLogHash = 0
++
+     private fun reloadSession() {
+-        val span = SpannableString(
+-            String(SendLog.getNekoLog(50 * 1024))
+-        )
+-        var offset = 0
+-        for (line in span.lines()) {
+-            val color = getColorForLine(line)
+-            span.setSpan(
+-                color, offset, offset + line.length, SPAN_EXCLUSIVE_EXCLUSIVE
+-            )
+-            offset += line.length + 1
++        // 读日志 + 逐行构建高亮 span 是纯 IO/CPU 工作，放后台线程做，
++        // 主线程只贴结果（原先同步占主线程，是切到日志页卡顿的原因之一）。
++        runOnDefaultDispatcher {
++            val bytes = SendLog.getNekoLog(50 * 1024)
++            val hash = bytes.contentHashCode()
++            if (hash == lastLogHash) return@runOnDefaultDispatcher
++            val span = SpannableString(String(bytes))
++            var offset = 0
++            for (line in span.lines()) {
++                val color = getColorForLine(line)
++                span.setSpan(
++                    color, offset, offset + line.length, SPAN_EXCLUSIVE_EXCLUSIVE
++                )
++                offset += line.length + 1
++            }
++            onMainDispatcher {
++                if (!isAdded) return@onMainDispatcher
++                lastLogHash = hash
++                binding.textview.text = span
++                binding.textview.clearFocus()
++                // 等 textview 完成最终 layout 再滚动到底部
++                binding.textview.doOnLayout {
++                    binding.scroolview.scrollTo(0, binding.textview.height)
++                }
++            }
+         }
+-        binding.textview.text = span
+-        binding.textview.clearFocus()
+-        // 等 textview 完成最终 layout 再滚动到底部
+-        binding.textview.doOnLayout {
++    }
++
++    /** 问题1-B：切回日志页时滚到底部（与进入时的行为一致） */
++    override fun resetScrollState() {
++        if (::binding.isInitialized) {
+             binding.scroolview.scrollTo(0, binding.textview.height)
+         }
+     }
+ 
++    override fun onHiddenChanged(hidden: Boolean) {
++        super.onHiddenChanged(hidden)
++        // 重新显示时刷新日志（后台构建，不影响抽屉动画）
++        if (!hidden) reloadSession()
++    }
++
+     override fun onMenuItemClick(item: MenuItem): Boolean {
+         when (item.itemId) {
+             R.id.action_clear_logcat -> {
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/RouteFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/RouteFragment.kt
+index 1860794..473ca24 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/RouteFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/RouteFragment.kt
+@@ -29,6 +29,11 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
+     lateinit var ruleAdapter: RuleAdapter
+     lateinit var undoManager: UndoSnackbarManager<RuleEntity>
+ 
++    /** 问题1-B：切回路由页时列表回顶部 */
++    override fun resetScrollState() {
++        if (::ruleListView.isInitialized) ruleListView.scrollToPosition(0)
++    }
++
+     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+         super.onViewCreated(view, savedInstanceState)
+ 
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/SettingsFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/SettingsFragment.kt
+index c50f127..8d126a5 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/SettingsFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/SettingsFragment.kt
+@@ -3,11 +3,19 @@ package io.nekohasekai.sagernet.ui
+ import android.os.Bundle
+ import android.view.View
+ import androidx.core.view.ViewCompat
++import androidx.recyclerview.widget.RecyclerView
+ import io.nekohasekai.sagernet.R
+ import io.nekohasekai.sagernet.widget.ListListener
+ 
+ class SettingsFragment : ToolbarFragment(R.layout.layout_config_settings) {
+ 
++    /** 问题1-B：切回设置页时回到顶部（官方重建观感） */
++    override fun resetScrollState() {
++        val prefFrag = childFragmentManager.findFragmentById(R.id.settings) as? androidx.preference.PreferenceFragmentCompat
++            ?: parentFragmentManager.findFragmentById(R.id.settings) as? androidx.preference.PreferenceFragmentCompat
++        prefFrag?.listView?.scrollToPosition(0)
++    }
++
+     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+         super.onViewCreated(view, savedInstanceState)
+ 
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ToolbarFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ToolbarFragment.kt
+index 563a222..2eeb46d 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ToolbarFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ToolbarFragment.kt
+@@ -24,6 +24,20 @@ open class ToolbarFragment : Fragment {
+         }
+     }
+ 
++    /**
++     * 问题1-B：页面被侧边栏切走时的滚动复位钩子。
++     *
++     * 触发时机是 onHiddenChanged(hidden=true) —— 此刻页面已不可见，
++     * 复位只是给列表设一个 pending 滚动位置，既不暴露给用户（无跳变），
++     * 也不占用抽屉切换动画的主线程预算。子类按需覆写。
++     */
++    open fun resetScrollState() {}
++
++    override fun onHiddenChanged(hidden: Boolean) {
++        super.onHiddenChanged(hidden)
++        if (hidden) resetScrollState()
++    }
++
+     open fun onKeyDown(ketCode: Int, event: KeyEvent) = false
+     open fun onBackPressed(): Boolean = false
+ }
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ToolsFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ToolsFragment.kt
+index 32738ea..88574cb 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ToolsFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ToolsFragment.kt
+@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.ui
+ 
+ import android.os.Bundle
+ import android.view.View
++import android.widget.ScrollView
+ import androidx.fragment.app.Fragment
+ import androidx.viewpager2.adapter.FragmentStateAdapter
+ import com.google.android.material.tabs.TabLayoutMediator
+@@ -29,6 +30,14 @@ class ToolsFragment : ToolbarFragment(R.layout.layout_tools) {
+         }.attach()
+     }
+ 
++    /** 问题1-B：切回工具页时内部滚动视图回顶部 */
++    override fun resetScrollState() {
++        for (child in childFragmentManager.fragments) {
++            val v = child.view
++            if (v is ScrollView) v.scrollTo(0, 0)
++        }
++    }
++
+     inner class ToolsAdapter(val tools: List<Fragment>) : FragmentStateAdapter(this) {
+ 
+         override fun getItemCount() = tools.size

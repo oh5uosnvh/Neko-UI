@@ -1,0 +1,1064 @@
+diff --git a/.github/workflows/build_mod.yml b/.github/workflows/build_mod.yml
+index c84919c..893686a 100644
+--- a/.github/workflows/build_mod.yml
++++ b/.github/workflows/build_mod.yml
+@@ -1,6 +1,9 @@
+ name: Build Mod APK
+ 
+ on:
++  push:
++    branches:
++      - fix/sidebar-jank
+   workflow_dispatch:
+     inputs:
+       anytls_commit:
+@@ -54,10 +57,10 @@ jobs:
+         env:
+           GH_PAT: ${{ secrets.GH_PAT }}
+         run: |
+-          sed -i "s/^export COMMIT_ANYTLS_SHANLIAN=.*/export COMMIT_ANYTLS_SHANLIAN=\"${{ inputs.anytls_commit }}\"/" buildScript/lib/core/get_source_env.sh
+-          sed -i "s/^export COMMIT_SING_SS_VT=.*/export COMMIT_SING_SS_VT=\"${{ inputs.vt_commit }}\"/" buildScript/lib/core/get_source_env.sh
+-          sed -i "s/^export COMMIT_FASTUP_MOD=.*/export COMMIT_FASTUP_MOD=\"${{ inputs.fastup_commit }}\"/" buildScript/lib/core/get_source_env.sh
+-          sed -i "s/^export COMMIT_OPPA_MOD=.*/export COMMIT_OPPA_MOD=\"${{ inputs.oppa_commit }}\"/" buildScript/lib/core/get_source_env.sh
++          sed -i "s/^export COMMIT_ANYTLS_SHANLIAN=.*/export COMMIT_ANYTLS_SHANLIAN=\"${{ github.event.inputs.anytls_commit || '35fe946085e3cd5782fd095dd5878c7388519895' }}\"/" buildScript/lib/core/get_source_env.sh
++          sed -i "s/^export COMMIT_SING_SS_VT=.*/export COMMIT_SING_SS_VT=\"${{ github.event.inputs.vt_commit || '8ad5da2' }}\"/" buildScript/lib/core/get_source_env.sh
++          sed -i "s/^export COMMIT_FASTUP_MOD=.*/export COMMIT_FASTUP_MOD=\"${{ github.event.inputs.fastup_commit || '2aba39c395916633200ac72d9fe6dbf10f2b80bd' }}\"/" buildScript/lib/core/get_source_env.sh
++          sed -i "s/^export COMMIT_OPPA_MOD=.*/export COMMIT_OPPA_MOD=\"${{ github.event.inputs.oppa_commit || 'e1c78129290656ca4e59ccc48b0c0a7e7acddf0a' }}\"/" buildScript/lib/core/get_source_env.sh
+           cat buildScript/lib/core/get_source_env.sh
+ 
+       - name: Build LibCore
+@@ -115,12 +118,3 @@ jobs:
+         with:
+           name: NekoBox-mod-arm64
+           path: app/build/outputs/apk/**/NekoBox*.apk
+-
+-      - name: Publish to Release
+-        uses: softprops/action-gh-release@v2
+-        with:
+-          tag_name: v1.4.2-mod-final
+-          files: app/build/outputs/apk/**/NekoBox*.apk
+-          overwrite_files: true
+-        env:
+-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt
+index 75a64a8..624643b 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt
+@@ -15,6 +15,7 @@ import androidx.activity.result.component1
+ import androidx.activity.result.component2
+ import androidx.activity.result.contract.ActivityResultContracts
+ import androidx.core.view.ViewCompat
++import androidx.core.widget.NestedScrollView
+ import androidx.recyclerview.widget.RecyclerView
+ import com.danielstone.materialaboutlibrary.MaterialAboutFragment
+ import com.danielstone.materialaboutlibrary.items.MaterialAboutActionItem
+@@ -38,6 +39,17 @@ import org.json.JSONObject
+ 
+ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
+ 
++    /** 问题1-B：切回关于页时内容回顶部 */
++    override fun resetScrollState() {
++        val root = view ?: return
++        if (root is android.view.ViewGroup) {
++            for (i in 0 until root.childCount) {
++                val child = root.getChildAt(i)
++                if (child is NestedScrollView) child.scrollTo(0, 0)
++            }
++        }
++    }
++
+     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+         super.onViewCreated(view, savedInstanceState)
+ 
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+index afd90b7..d7212cb 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+@@ -40,6 +40,7 @@ import androidx.preference.PreferenceDataStore
+ import androidx.recyclerview.widget.ItemTouchHelper
+ import androidx.recyclerview.widget.LinearLayoutManager
+ import androidx.recyclerview.widget.RecyclerView
++import androidx.recyclerview.widget.DiffUtil
+ import androidx.viewpager2.adapter.FragmentStateAdapter
+ import androidx.viewpager2.widget.ViewPager2
+ import com.google.android.material.card.MaterialCardView
+@@ -520,15 +521,7 @@ class ConfigurationFragment @JvmOverloads constructor(
+             tab.view.setOnLongClickListener {
+                 if (position in adapter.groupList.indices) {
+                     val group = adapter.groupList[position]
+-                    val targetFragment = io.nekohasekai.sagernet.ui.GroupFragment().apply {
+-                        arguments = Bundle().apply {
+-                            putLong(io.nekohasekai.sagernet.ui.GroupFragment.EXTRA_TARGET_GROUP_ID, group.id)
+-                        }
+-                    }
+-                    (activity as? MainActivity)?.apply {
+-                        displayFragment(targetFragment)
+-                        navigation.menu.findItem(R.id.nav_group)?.isChecked = true
+-                    }
++                    (activity as? MainActivity)?.openGroupAt(group.id)
+                 }
+                 true
+             }
+@@ -616,6 +609,38 @@ class ConfigurationFragment @JvmOverloads constructor(
+         super.onDestroy()
+     }
+ 
++    override fun onHiddenChanged(hidden: Boolean) {
++        super.onHiddenChanged(hidden)
++        // 被抽屉切走（hide）时收起搜索，避免返回键拦截器在其它页面残留
++        if (hidden) {
++            topBar.collapseSearch()
++        } else if (::groupPager.isInitialized && ::tabLayout.isInitialized && ::adapter.isInitialized) {
++            // 显示修复：从分组管理页返回时，把顶部标签栏同步到当前选中的分组。
++            // 新建分组等操作发生在页面隐藏期间，标签栏在 GONE 状态下算不出滚动位置，
++            // 回来后停在旧位置（要触摸才纠正）；这里照 reload() 的既有同步方式补一次。
++            val index = groupPager.currentItem
++            if (index in adapter.groupList.indices) {
++                tabLayout.post {
++                    val tab = tabLayout.getTabAt(index)
++                    if (tab != null && !tab.isSelected) {
++                        tab.select()
++                    }
++                    tabLayout.setScrollPosition(index, 0f, true)
++                    tabLayout.post {
++                        if (index in 0 until tabLayout.tabCount) {
++                            tabLayout.setScrollPosition(index, 0f, true)
++                        }
++                    }
++                }
++            }
++        }
++    }
++
++    /** 问题1-B：切回配置页时，当前分组的节点列表回顶部 */
++    override fun resetScrollState() {
++        getCurrentGroupFragment()?.resetScrollState()
++    }
++
+     override fun onKeyDown(ketCode: Int, event: KeyEvent): Boolean {
+         val fragment = getCurrentGroupFragment()
+         fragment?.configurationListView?.apply {
+@@ -1529,8 +1554,9 @@ class ConfigurationFragment @JvmOverloads constructor(
+                     tabLayout.visibility = View.VISIBLE
+                 }
+ 
+-                notifyItemInserted(groupList.size - 1)
+-                tabLayout.getTabAt(groupList.size - 1)?.select()
++                val newIndex = groupList.size - 1
++                notifyItemInserted(newIndex)
++                tabLayout.getTabAt(newIndex)?.select()
+             }
+         }
+ 
+@@ -1598,6 +1624,11 @@ class ConfigurationFragment @JvmOverloads constructor(
+         lateinit var undoManager: UndoSnackbarManager<ProxyEntity>
+         var adapter: ConfigurationAdapter? = null
+ 
++        /** 问题1-B：切回配置页时节点列表回顶部 */
++        fun resetScrollState() {
++            if (::configurationListView.isInitialized) configurationListView.scrollToPosition(0)
++        }
++
+         override fun onSaveInstanceState(outState: Bundle) {
+             super.onSaveInstanceState(outState)
+ 
+@@ -2380,17 +2411,38 @@ class ConfigurationFragment @JvmOverloads constructor(
+                     selectedProfileIndex = newProfileIds.indexOf(selectedProxy)
+                 }
+ 
++                // 问题2 卡顿优化：在后台线程计算 DiffUtil，主线程只应用局部增量更新，
++                // 彻底消灭 notifyDataSetChanged 带来的全量销毁/重建和掉帧卡顿
++                val oldIds = synchronized(configurationIdList) { ArrayList(configurationIdList) }
++                val diffResult = if (oldIds.isNotEmpty()) {
++                    DiffUtil.calculateDiff(object : DiffUtil.Callback() {
++                        override fun getOldListSize(): Int = oldIds.size
++                        override fun getNewListSize(): Int = newProfileIds.size
++                        override fun areItemsTheSame(oldPos: Int, newPos: Int): Boolean =
++                            oldIds[oldPos] == newProfileIds[newPos]
++                        override fun areContentsTheSame(oldPos: Int, newPos: Int): Boolean {
++                            val oldId = oldIds[oldPos]
++                            val newId = newProfileIds[newPos]
++                            return configurationList[oldId] == newProfileMap[newId]
++                        }
++                    }, false)
++                } else null
++
+                 configurationListView.post {
+                     configurationList.clear()
+                     configurationList.putAll(newProfileMap)
+                     configurationIdList.clear()
+                     configurationIdList.addAll(newProfileIds)
+-                    notifyDataSetChanged()
++                    if (diffResult != null) {
++                        diffResult.dispatchUpdatesTo(this@ConfigurationAdapter)
++                    } else {
++                        notifyDataSetChanged()
++                    }
+ 
+                     if (selectedProfileIndex != -1) {
+-                        configurationListView.scrollTo(selectedProfileIndex, true)
+-                    } else if (newProfiles.isNotEmpty()) {
+-                        configurationListView.scrollTo(0, true)
++                        configurationListView.scrollTo(selectedProfileIndex, false)
++                    } else if (newProfiles.isNotEmpty() && oldIds.isEmpty()) {
++                        configurationListView.scrollToPosition(0)
+                     }
+ 
+                 }
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
+index af75c17..5010a09 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
+@@ -67,6 +67,33 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+         private const val SORT_DESC = 2
+     }
+ 
++    /** 问题1-B：切回分组页时列表回顶部 */
++    override fun resetScrollState() {
++        if (::groupListView.isInitialized) groupListView.scrollToPosition(0)
++    }
++
++    /** MainActivity 复用本实例时的定位请求（替代一次性 arguments 方案） */
++    private var pendingScrollGroupId = -1L
++
++    /** 跳到指定分组（由 MainActivity#openGroupAt 调用） */
++    fun scrollToGroup(groupId: Long) {
++        pendingScrollGroupId = groupId
++        if (::groupListView.isInitialized) {
++            groupListView.post { consumePendingScroll() }
++        }
++    }
++
++    private fun consumePendingScroll() {
++        if (!::groupListView.isInitialized || !::groupAdapter.isInitialized) return
++        val targetId = pendingScrollGroupId
++        if (targetId <= 0L) return
++        val position = groupAdapter.groupList.indexOfFirst { it.id == targetId }
++        if (position >= 0) {
++            groupListView.scrollToPosition(position)
++            pendingScrollGroupId = -1L
++        }
++    }
++
+     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+         super.onViewCreated(view, savedInstanceState)
+         activity = requireActivity() as MainActivity
+@@ -111,8 +138,14 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+ 
+             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+                 val index = viewHolder.bindingAdapterPosition
++                val group = (viewHolder as GroupHolder).proxyGroup
+                 groupAdapter.remove(index)
+-                undoManager.remove(index to (viewHolder as GroupHolder).proxyGroup)
++                undoManager.remove(index to group)
++                // 立即同步到配置页：滑动即广播移除（撤销时在 undo 中广播恢复，
++                // 正式 commit 的广播对此幂等），不再等撤销条 2 秒超时
++                runOnDefaultDispatcher {
++                    GroupManager.iterator { groupRemoved(group.id) }
++                }
+             }
+ 
+             override fun onMove(
+@@ -462,6 +495,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+                     }
+                     arguments?.remove(EXTRA_TARGET_GROUP_ID)
+                 }
++                consumePendingScroll()
+             }
+         }
+ 
+@@ -602,6 +636,12 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+                 groupList.add(index, item)
+                 notifyItemInserted(index)
+             }
++            // 撤销 = 取消删除：把配置页刚移除的标签广播恢复
++            runOnDefaultDispatcher {
++                for ((_, item) in actions) {
++                    GroupManager.iterator { groupAdd(item) }
++                }
++            }
+         }
+ 
+         override fun commit(actions: List<Pair<Int, ProxyGroup>>) {
+@@ -613,6 +653,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+         }
+ 
+         override suspend fun groupAdd(group: ProxyGroup) {
++            // 撤销恢复时本地已在（undo 已加回），跳过，避免重复添加
++            if (groupList.any { it.id == group.id }) return
+             groupList.add(group)
+             delay(300L)
+ 
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt
+index 346c742..30be375 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt
+@@ -330,6 +330,8 @@ class GroupSettingsActivity(
+         val editingId = DataStore.editingId
+         if (editingId == 0L) {
+             val newGroup = GroupManager.createGroup(ProxyGroup().apply { serialize() })
++            // 问题3：新建分组后自动设为选中分组，回到配置页直接定位到它
++            DataStore.selectedGroup = newGroup.id
+             if (newGroup.type == GroupType.SUBSCRIPTION && !newGroup.subscription?.link.isNullOrEmpty()) {
+                 GroupUpdater.startUpdate(newGroup, true)
+             }
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/LogcatFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/LogcatFragment.kt
+index 2f276ee..93929f7 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/LogcatFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/LogcatFragment.kt
+@@ -62,26 +62,51 @@ class LogcatFragment : ToolbarFragment(R.layout.layout_logcat),
+         return color
+     }
+ 
++    /** 上次日志内容的哈希：内容没变就不重设文本，避免反复重排 50KB 长文 */
++    private var lastLogHash = 0
++
+     private fun reloadSession() {
+-        val span = SpannableString(
+-            String(SendLog.getNekoLog(50 * 1024))
+-        )
+-        var offset = 0
+-        for (line in span.lines()) {
+-            val color = getColorForLine(line)
+-            span.setSpan(
+-                color, offset, offset + line.length, SPAN_EXCLUSIVE_EXCLUSIVE
+-            )
+-            offset += line.length + 1
++        // 读日志 + 逐行构建高亮 span 是纯 IO/CPU 工作，放后台线程做，
++        // 主线程只贴结果（原先同步占主线程，是切到日志页卡顿的原因之一）。
++        runOnDefaultDispatcher {
++            val bytes = SendLog.getNekoLog(50 * 1024)
++            val hash = bytes.contentHashCode()
++            if (hash == lastLogHash) return@runOnDefaultDispatcher
++            val span = SpannableString(String(bytes))
++            var offset = 0
++            for (line in span.lines()) {
++                val color = getColorForLine(line)
++                span.setSpan(
++                    color, offset, offset + line.length, SPAN_EXCLUSIVE_EXCLUSIVE
++                )
++                offset += line.length + 1
++            }
++            onMainDispatcher {
++                if (!isAdded) return@onMainDispatcher
++                lastLogHash = hash
++                binding.textview.text = span
++                binding.textview.clearFocus()
++                // 等 textview 完成最终 layout 再滚动到底部
++                binding.textview.doOnLayout {
++                    binding.scroolview.scrollTo(0, binding.textview.height)
++                }
++            }
+         }
+-        binding.textview.text = span
+-        binding.textview.clearFocus()
+-        // 等 textview 完成最终 layout 再滚动到底部
+-        binding.textview.doOnLayout {
++    }
++
++    /** 问题1-B：切回日志页时滚到底部（与进入时的行为一致） */
++    override fun resetScrollState() {
++        if (::binding.isInitialized) {
+             binding.scroolview.scrollTo(0, binding.textview.height)
+         }
+     }
+ 
++    override fun onHiddenChanged(hidden: Boolean) {
++        super.onHiddenChanged(hidden)
++        // 重新显示时刷新日志（后台构建，不影响抽屉动画）
++        if (!hidden) reloadSession()
++    }
++
+     override fun onMenuItemClick(item: MenuItem): Boolean {
+         when (item.itemId) {
+             R.id.action_clear_logcat -> {
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+index 063514c..8eaa88a 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+@@ -17,6 +17,10 @@ import androidx.activity.addCallback
+ import androidx.annotation.IdRes
+ import androidx.core.app.ActivityCompat
+ import androidx.core.content.ContextCompat
++import androidx.drawerlayout.widget.DrawerLayout
++import androidx.fragment.app.Fragment
++import androidx.fragment.app.FragmentManager
++import androidx.lifecycle.Lifecycle
+ import androidx.preference.PreferenceDataStore
+ import com.google.android.material.dialog.MaterialAlertDialogBuilder
+ import com.google.android.material.navigation.NavigationView
+@@ -64,6 +68,35 @@ class MainActivity : ThemedActivity(),
+     lateinit var navigation: NavigationView
+     private var currentMainFragment: ToolbarFragment? = null
+ 
++    // ---- 侧边栏切换优化 ----
++    // 官方实现每次点击都是 new Fragment + replace()，事务恰好在抽屉关闭动画
++    // 进行时执行：销毁旧页整棵视图树 + 新页 inflation/初始化，主线程被冻结，
++    // 于是「换页必卡、重点当前页不卡（走 isChecked 提前返回）」。现在：
++    // 页面实例缓存复用（hide/show），从未创建过的页面推迟到抽屉关闭后再提交。
++    /** nav id -> 已创建的 Fragment 实例（同一页面只 inflate 一次） */
++    private val fragmentCache = HashMap<Int, ToolbarFragment>()
++
++    /** 尚未创建过的页面：延迟到抽屉关闭动画结束后再执行的切换 */
++    private var pendingCommit: (() -> Unit)? = null
++
++    /** 启动预热下标 */
++    private var prewarmIndex = 0
++
++    companion object {
++        /** 参与实例缓存（重建时按 tag 找回）的页面 */
++        private val CACHED_NAV_IDS = intArrayOf(
++            R.id.nav_configuration, R.id.nav_group, R.id.nav_route,
++            R.id.nav_settings, R.id.nav_tools, R.id.nav_logcat, R.id.nav_about,
++        )
++        private const val NAV_TAG_PREFIX = "main_nav:"
++        private const val STATE_NAV_ID = "main_nav_id"
++        private const val PREWARM_DELAY_MS = 800L
++        private const val PREWARM_INTERVAL_MS = 500L
++
++        /** 预热时让页面在屏幕外“可见”若干毫秒，用于生成整页渲染列表 */
++        private const val WARM_FRAME_MS = 120L
++    }
++
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+         MessageStore.setCurrentActivity(this)
+@@ -83,14 +116,17 @@ class MainActivity : ThemedActivity(),
+         }
+         navigation.setNavigationItemSelectedListener(this)
+ 
++        binding.drawerLayout.addDrawerListener(drawerListener)
++        // 页面缓存复用后层次里会同时存在多个页面的 AppBarLayout，
++        // 每个页面视图创建时即时补一次状态栏内边距，避免顶栏顶进状态栏。
++        supportFragmentManager.registerFragmentLifecycleCallbacks(navInsetCallbacks, false)
+         if (savedInstanceState == null) {
+             displayFragmentWithId(R.id.nav_configuration)
+         } else {
+-            currentMainFragment =
+-                supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
++            restoreFragments(savedInstanceState)
+         }
+         onBackPressedDispatcher.addCallback {
+-            if (supportFragmentManager.findFragmentById(R.id.fragment_holder) is ConfigurationFragment) {
++            if (currentMainFragment is ConfigurationFragment) {
+                 moveTaskToBack(true)
+             } else {
+                 displayFragmentWithId(R.id.nav_configuration)
+@@ -105,9 +141,10 @@ class MainActivity : ThemedActivity(),
+         binding.stats.setOnClickListener { if (DataStore.serviceState.connected) binding.stats.testConnection() }
+ 
+         setContentView(binding.root)
+-        currentMainFragment =
+-            supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
+-                ?: currentMainFragment
++        if (currentMainFragment == null) {
++            currentMainFragment =
++                supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
++        }
+         if (!animateInitialControls) {
+             syncMainControls(showWhenConnected = false, animate = false)
+         }
+@@ -126,6 +163,11 @@ class MainActivity : ThemedActivity(),
+ 
+         refreshNavMenu(DataStore.enableClashAPI)
+ 
++        if (savedInstanceState == null) {
++            // 启动后错峰预热其它侧边栏页面，让第一次点击也是热切换
++            binding.root.postDelayed(prewarmRunnable, PREWARM_DELAY_MS)
++        }
++
+         // sdk 33 notification
+         if (Build.VERSION.SDK_INT >= 33) {
+             val checkPermission =
+@@ -156,12 +198,19 @@ class MainActivity : ThemedActivity(),
+         if (DataStore.hideFromRecentApps) {
+             applyHideFromRecentApps(DataStore.hideFromRecentApps)
+         }
++
++        // 兜底：抽屉已关闭但延迟切换还没执行（动画被系统回收等意外打断）
++        if (!binding.drawerLayout.isOpen) {
++            val pending = pendingCommit
++            pendingCommit = null
++            pending?.invoke()
++        }
+     }
+ 
+     override fun onPostResume() {
+         super.onPostResume()
+-        val restoredFragment =
+-            supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
++        val restoredFragment = currentMainFragment
++            ?: supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
+         if (restoredFragment != null && restoredFragment !== currentMainFragment) {
+             currentMainFragment = restoredFragment
+             syncMainControls(
+@@ -370,14 +419,236 @@ class MainActivity : ThemedActivity(),
+         return displayFragmentWithId(item.itemId)
+     }
+ 
++    /**
++     * 切换主内容页。
++     *
++     * 官方实现是每次 new XxxFragment() + replace()：事务恰好在抽屉关闭动画
++     * 进行时执行——销毁旧页整棵视图树 + 新页 inflation/初始化，一帧内做完
++     * 几十~几百 ms 的主线程工作，动画与点击反馈必卡。再点同一项只走
++     * onNavigationItemSelected 里的 isChecked 提前返回（仅收起抽屉），所以
++     * 表现为「换页必卡、点当前页不卡」。
++     *
++     * 现在：
++     *  1. 页面实例缓存复用，切换 = hide/show + 生命周期降级，不销毁不重建；
++     *  2. 从未创建过（或重建后视图待创建）的页面延迟到抽屉关闭动画结束后
++     *     再一次性提交，动画期间主线程零阻塞。
++     */
+     @SuppressLint("CommitTransaction")
+     fun displayFragment(fragment: ToolbarFragment) {
+-        currentMainFragment = fragment
+-        supportFragmentManager.beginTransaction()
+-            .replace(R.id.fragment_holder, fragment)
+-            .commitAllowingStateLoss()
++        // 该页可能正处于预热微露期（屏幕外），先把位移归零
++        fragment.view?.translationY = 0f
++        if (currentMainFragment === fragment) {
++            binding.drawerLayout.closeDrawers()
++            return
++        }
++
++        val commit = {
++            val old = currentMainFragment
++            val transaction = supportFragmentManager.beginTransaction()
++                .setReorderingAllowed(true)
++            if (old != null && old !== fragment && old.isAdded) {
++                if (fragmentCache.values.any { it === old }) {
++                    transaction.setMaxLifecycle(old, Lifecycle.State.STARTED)
++                    if (!old.isHidden) transaction.hide(old)
++                } else {
++                    // 不在缓存里的页面（仪表盘）：保持原语义，切走即销毁
++                    transaction.remove(old)
++                }
++            }
++            for (cached in fragmentCache.values) {
++                if (cached !== fragment && cached.isAdded && !cached.isHidden) {
++                    transaction.setMaxLifecycle(cached, Lifecycle.State.STARTED)
++                    transaction.hide(cached)
++                }
++            }
++            if (fragment.isAdded) {
++                transaction.show(fragment)
++            } else {
++                transaction.add(R.id.fragment_holder, fragment, tagOf(fragment))
++            }
++            transaction.setMaxLifecycle(fragment, Lifecycle.State.RESUMED)
++            transaction.commitAllowingStateLoss()
++
++            currentMainFragment = fragment
++            syncMainControls(fragment, showWhenConnected = false, animate = false)
++        }
++
+         binding.drawerLayout.closeDrawers()
+-        syncMainControls(fragment, showWhenConnected = false, animate = false)
++        if (fragment.view != null || !binding.drawerLayout.isOpen) {
++            // 热切换（页面已就绪）或抽屉没开：立即提交，与抽屉动画同步切换
++            pendingCommit = null
++            commit()
++        } else {
++            // 冷页面：先让抽屉关完，避免 inflation 冻结动画
++            pendingCommit = commit
++        }
++    }
++
++    private val drawerListener = object : DrawerLayout.SimpleDrawerListener() {
++        override fun onDrawerClosed(drawerView: View) {
++            val pending = pendingCommit
++            pendingCommit = null
++            pending?.invoke()
++        }
++    }
++
++    /** 页面视图创建时补齐顶栏的状态栏内边距（多页面共存场景） */
++    private val navInsetCallbacks = object : FragmentManager.FragmentLifecycleCallbacks() {
++        override fun onFragmentViewCreated(
++            fm: FragmentManager,
++            f: Fragment,
++            v: View,
++            savedInstanceState: Bundle?,
++        ) {
++            applyStatusBarInset(v)
++        }
++    }
++
++    private fun tagOf(fragment: ToolbarFragment): String? =
++        fragmentCache.entries.firstOrNull { it.value === fragment }?.let {
++            NAV_TAG_PREFIX + it.key
++        }
++
++    private fun createFragment(@IdRes id: Int): ToolbarFragment? = when (id) {
++        R.id.nav_configuration -> ConfigurationFragment()
++        R.id.nav_group -> GroupFragment()
++        R.id.nav_route -> RouteFragment()
++        R.id.nav_settings -> SettingsFragment()
++        R.id.nav_traffic -> WebviewFragment()
++        R.id.nav_tools -> ToolsFragment()
++        R.id.nav_logcat -> LogcatFragment()
++        R.id.nav_about -> AboutFragment()
++        else -> null
++    }
++
++    private fun obtainFragment(@IdRes id: Int): ToolbarFragment =
++        fragmentCache.getOrPut(id) { createFragment(id) ?: error("unknown nav id: $id") }
++
++    /** 配置页长按分组标签：跳转分组页并定位到该分组（复用实例，避免重建） */
++    fun openGroupAt(groupId: Long) {
++        val fragment = obtainFragment(R.id.nav_group) as GroupFragment
++        displayFragment(fragment)
++        navigation.menu.findItem(R.id.nav_group)?.isChecked = true
++        fragment.scrollToGroup(groupId)
++    }
++
++    /** 进程/配置变更重建后，从 tag 恢复缓存的页面实例 */
++    private fun restoreFragments(savedInstanceState: Bundle) {
++        for (id in CACHED_NAV_IDS) {
++            (supportFragmentManager.findFragmentByTag(NAV_TAG_PREFIX + id) as? ToolbarFragment)
++                ?.let { fragmentCache[id] = it }
++        }
++        // 清掉缓存外的残留顶层 Fragment（例如仪表盘页）
++        val kept = fragmentCache.values.toSet()
++        for (f in supportFragmentManager.fragments.toList()) {
++            if (f is ToolbarFragment && kept.none { it === f }) {
++                supportFragmentManager.beginTransaction()
++                    .setReorderingAllowed(true)
++                    .remove(f)
++                    .commitAllowingStateLoss()
++            }
++        }
++        val lastId = savedInstanceState.getInt(STATE_NAV_ID, R.id.nav_configuration)
++        val restored = fragmentCache[lastId]
++        if (restored != null) {
++            currentMainFragment = restored
++            navigation.menu.findItem(lastId)?.isChecked = true
++        } else if (lastId == R.id.nav_traffic) {
++            // 之前停在仪表盘（不进缓存）：重新打开一次
++            displayFragmentWithId(R.id.nav_traffic)
++        } else {
++            displayFragmentWithId(R.id.nav_configuration)
++        }
++    }
++
++    /**
++     * 启动后错峰预热其余侧边栏页面（逐个隐藏挂载），让「第一次点击」
++     * 也是热切换。不需要这部分启动开销时，清空 prewarmIds 即可。
++     */
++    private val prewarmIds = intArrayOf(
++        R.id.nav_group,
++        R.id.nav_settings,
++        R.id.nav_route,
++        R.id.nav_tools,
++        R.id.nav_logcat,
++        R.id.nav_about,
++    )
++
++    private val prewarmRunnable = object : Runnable {
++        override fun run() {
++            if (isFinishing || isDestroyed) return
++            if (binding.drawerLayout.isOpen) {
++                binding.root.postDelayed(this, PREWARM_INTERVAL_MS)
++                return
++            }
++            // 弹窗/菜单/对话框持有窗口焦点时完全让路，绝不和用户正盯着的东西抢帧
++            if (!binding.root.hasWindowFocus()) {
++                binding.root.postDelayed(this, PREWARM_INTERVAL_MS)
++                return
++            }
++            while (prewarmIndex < prewarmIds.size) {
++                val id = prewarmIds[prewarmIndex++]
++                val fragment = fragmentCache.getOrPut(id) { createFragment(id)!! }
++                if (fragment.isAdded || fragment === currentMainFragment) continue
++                supportFragmentManager.beginTransaction()
++                    .setReorderingAllowed(true)
++                    .add(R.id.fragment_holder, fragment, tagOf(fragment))
++                    .hide(fragment)
++                    .setMaxLifecycle(fragment, Lifecycle.State.STARTED)
++                    .commitAllowingStateLoss()
++                // 立即执行该事务，并在同一拍里补全布局/绘制，
++                // 不留「已挂载但尚未补全」的窗口（避免用户此时点开而错过预热）
++                supportFragmentManager.executePendingTransactions()
++                warmUpHiddenFragment(fragment)
++                break
++            }
++            if (prewarmIndex < prewarmIds.size) {
++                binding.root.postDelayed(this, PREWARM_INTERVAL_MS)
++            }
++        }
++    }
++
++    /**
++     * 把隐藏页面「首次显示」的开销提前付掉：
++     *
++     * 隐藏（GONE）的视图不会参与 measure/layout/draw，所以第一次显示时仍要
++     * 现做一堆一次性工作——RecyclerView 首建列表项、设置页首次摆出偏好行、
++     * 日志页 50KB 长文首次排版、整页首次生成渲染显示列表……这正是「每页第
++     * 一次点开卡、之后都流畅」的根因。
++     *
++     * 这里：
++     *  1) 手动 measure + layout 整棵树（把建项/排版等一次性成本做掉）；
++     *  2) 让它在屏幕外“可见”过几帧（translationY 移出屏幕，用户看不到、
++     *     也点不到），从而生成整页的渲染显示列表（首次绘制成本）。
++     * 之后用户点开该页，就只剩一次轻量的可见性切换。
++     */
++    private fun warmUpHiddenFragment(fragment: ToolbarFragment) {
++        if (isFinishing || isDestroyed) return
++        val view = fragment.view ?: return
++        if (!fragment.isHidden) return // 用户已打开该页，交给正常流程
++        val holder = binding.fragmentHolder
++        var width = holder.width
++        var height = holder.height
++        if (width <= 0 || height <= 0) {
++            width = binding.root.width
++            height = binding.root.height
++        }
++        if (width <= 0 || height <= 0) return
++
++        view.measure(
++            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
++            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
++        )
++        view.layout(0, 0, width, height)
++
++        view.translationY = (height + 64).toFloat()
++        view.visibility = View.VISIBLE
++        view.postDelayed({
++            view.translationY = 0f
++            if (fragment.isHidden && view.isAttachedToWindow) {
++                view.visibility = View.GONE
++            }
++        }, WARM_FRAME_MS)
+     }
+ 
+     private fun syncMainControls(
+@@ -420,26 +691,18 @@ class MainActivity : ThemedActivity(),
+     }
+ 
+     fun displayFragmentWithId(@IdRes id: Int): Boolean {
+-        when (id) {
+-            R.id.nav_configuration -> {
+-                displayFragment(ConfigurationFragment())
+-            }
+-
+-            R.id.nav_group -> displayFragment(GroupFragment())
+-            R.id.nav_route -> displayFragment(RouteFragment())
+-            R.id.nav_settings -> displayFragment(SettingsFragment())
+-            R.id.nav_traffic -> displayFragment(WebviewFragment())
+-            R.id.nav_tools -> displayFragment(ToolsFragment())
+-            R.id.nav_logcat -> displayFragment(LogcatFragment())
+-            R.id.nav_faq -> {
+-                launchCustomTab("https://matsuridayo.github.io/")
+-                return false
+-            }
+-
+-            R.id.nav_about -> displayFragment(AboutFragment())
+-
+-            else -> return false
++        if (id == R.id.nav_faq) {
++            launchCustomTab("https://matsuridayo.github.io/")
++            return false
++        }
++        val fragment = if (id == R.id.nav_traffic) {
++            // 仪表盘：内含 WebView，保持原语义每次重建（不进缓存、不预热）
++            WebviewFragment()
++        } else {
++            fragmentCache[id] ?: (createFragment(id)?.also { fragmentCache[id] = it }
++                ?: return false)
+         }
++        displayFragment(fragment)
+         navigation.menu.findItem(id).isChecked = true
+         return true
+     }
+@@ -544,11 +807,24 @@ class MainActivity : ThemedActivity(),
+ 
+     override fun onDestroy() {
+         super.onDestroy()
++        binding.root.removeCallbacks(prewarmRunnable)
++        binding.drawerLayout.removeDrawerListener(drawerListener)
++        supportFragmentManager.unregisterFragmentLifecycleCallbacks(navInsetCallbacks)
++        pendingCommit = null
+         GroupManager.userInterface = null
+         DataStore.configurationStore.unregisterChangeListener(this)
+         connection.disconnect(this)
+     }
+ 
++    override fun onSaveInstanceState(outState: Bundle) {
++        super.onSaveInstanceState(outState)
++        outState.putInt(
++            STATE_NAV_ID,
++            fragmentCache.entries.firstOrNull { it.value === currentMainFragment }?.key
++                ?: R.id.nav_configuration,
++        )
++    }
++
+     /**
+      * 打开左侧抽屉。
+      * 顶栏的 ☰ 由 TopBarController 自绘（原先是 Toolbar 的 navigationIcon，
+@@ -577,8 +853,8 @@ class MainActivity : ThemedActivity(),
+         if (super.onKeyDown(keyCode, event)) return true
+         if (binding.drawerLayout.isOpen) return false
+ 
+-        val fragment =
+-            supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
++        val fragment = currentMainFragment
++            ?: supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
+         return fragment != null && fragment.onKeyDown(keyCode, event)
+     }
+ 
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/RouteFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/RouteFragment.kt
+index 1860794..473ca24 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/RouteFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/RouteFragment.kt
+@@ -29,6 +29,11 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
+     lateinit var ruleAdapter: RuleAdapter
+     lateinit var undoManager: UndoSnackbarManager<RuleEntity>
+ 
++    /** 问题1-B：切回路由页时列表回顶部 */
++    override fun resetScrollState() {
++        if (::ruleListView.isInitialized) ruleListView.scrollToPosition(0)
++    }
++
+     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+         super.onViewCreated(view, savedInstanceState)
+ 
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/SettingsFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/SettingsFragment.kt
+index c50f127..8d126a5 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/SettingsFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/SettingsFragment.kt
+@@ -3,11 +3,19 @@ package io.nekohasekai.sagernet.ui
+ import android.os.Bundle
+ import android.view.View
+ import androidx.core.view.ViewCompat
++import androidx.recyclerview.widget.RecyclerView
+ import io.nekohasekai.sagernet.R
+ import io.nekohasekai.sagernet.widget.ListListener
+ 
+ class SettingsFragment : ToolbarFragment(R.layout.layout_config_settings) {
+ 
++    /** 问题1-B：切回设置页时回到顶部（官方重建观感） */
++    override fun resetScrollState() {
++        val prefFrag = childFragmentManager.findFragmentById(R.id.settings) as? androidx.preference.PreferenceFragmentCompat
++            ?: parentFragmentManager.findFragmentById(R.id.settings) as? androidx.preference.PreferenceFragmentCompat
++        prefFrag?.listView?.scrollToPosition(0)
++    }
++
+     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+         super.onViewCreated(view, savedInstanceState)
+ 
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ThemedActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ThemedActivity.kt
+index 208734b..5a7ae96 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ThemedActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ThemedActivity.kt
+@@ -3,6 +3,8 @@ package io.nekohasekai.sagernet.ui
+ import android.content.res.Configuration
+ import android.os.Build
+ import android.os.Bundle
++import android.view.View
++import android.view.ViewGroup
+ import android.widget.TextView
+ import androidx.annotation.StringRes
+ import androidx.appcompat.app.AppCompatActivity
+@@ -10,8 +12,6 @@ import androidx.core.app.ActivityCompat
+ import androidx.core.view.ViewCompat
+ import androidx.core.view.WindowCompat
+ import androidx.core.view.WindowInsetsCompat
+-import androidx.core.view.updatePadding
+-import com.google.android.material.appbar.AppBarLayout
+ import com.google.android.material.snackbar.Snackbar
+ import io.nekohasekai.sagernet.R
+ import io.nekohasekai.sagernet.database.DataStore
+@@ -48,17 +48,44 @@ abstract class ThemedActivity : AppCompatActivity {
+                 if (DataStore.appTheme == Theme.BLACK) !isNight else false
+         }
+ 
+-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(android.R.id.content)) { _, insets ->
++        ViewCompat.setOnApplyWindowInsetsListener(findViewById(android.R.id.content)) { view, insets ->
+             val bars = insets.getInsets(
+                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+             )
+-            findViewById<AppBarLayout>(R.id.appbar)?.apply {
+-                updatePadding(top = bars.top)
+-            }
++            statusBarTopInset = bars.top
++            applyStatusBarInset(view, bars.top)
+             insets
+         }
+     }
+ 
++    /** 当前状态栏顶部高度（px），供页面视图创建时补齐顶栏内边距 */
++    private var statusBarTopInset = 0
++
++    /**
++     * 给层次中**所有** AppBarLayout 补上状态栏高度的顶部内边距。
++     *
++     * 原实现用 findViewById 只处理第一个 appbar：官方每次 replace() 时层次里
++     * 只有一个 appbar，所以成立；主界面把页面改成缓存复用（hide/show）后，多个
++     * 页面的 appbar 同时存在，findViewById 永远只命中第一个，后显示的页面顶栏
++     * 就会顶进状态栏。这里改为递归处理，配合页面视图创建时的即时补正。
++     */
++    fun applyStatusBarInset(root: View? = null, topInset: Int = statusBarTopInset) {
++        if (topInset <= 0) return
++        val target = root ?: findViewById<View>(android.R.id.content) ?: return
++        applyStatusBarInsetTo(target, topInset)
++    }
++
++    private fun applyStatusBarInsetTo(view: View, top: Int) {
++        if (view.id == R.id.appbar && view.paddingTop != top) {
++            view.setPadding(view.paddingLeft, top, view.paddingRight, view.paddingBottom)
++        }
++        if (view is ViewGroup) {
++            for (index in 0 until view.childCount) {
++                applyStatusBarInsetTo(view.getChildAt(index), top)
++            }
++        }
++    }
++
+     override fun setTheme(resId: Int) {
+         super.setTheme(resId)
+ 
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ToolbarFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ToolbarFragment.kt
+index 563a222..2eeb46d 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ToolbarFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ToolbarFragment.kt
+@@ -24,6 +24,20 @@ open class ToolbarFragment : Fragment {
+         }
+     }
+ 
++    /**
++     * 问题1-B：页面被侧边栏切走时的滚动复位钩子。
++     *
++     * 触发时机是 onHiddenChanged(hidden=true) —— 此刻页面已不可见，
++     * 复位只是给列表设一个 pending 滚动位置，既不暴露给用户（无跳变），
++     * 也不占用抽屉切换动画的主线程预算。子类按需覆写。
++     */
++    open fun resetScrollState() {}
++
++    override fun onHiddenChanged(hidden: Boolean) {
++        super.onHiddenChanged(hidden)
++        if (hidden) resetScrollState()
++    }
++
+     open fun onKeyDown(ketCode: Int, event: KeyEvent) = false
+     open fun onBackPressed(): Boolean = false
+ }
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ToolsFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ToolsFragment.kt
+index 32738ea..88574cb 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ToolsFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ToolsFragment.kt
+@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.ui
+ 
+ import android.os.Bundle
+ import android.view.View
++import android.widget.ScrollView
+ import androidx.fragment.app.Fragment
+ import androidx.viewpager2.adapter.FragmentStateAdapter
+ import com.google.android.material.tabs.TabLayoutMediator
+@@ -29,6 +30,14 @@ class ToolsFragment : ToolbarFragment(R.layout.layout_tools) {
+         }.attach()
+     }
+ 
++    /** 问题1-B：切回工具页时内部滚动视图回顶部 */
++    override fun resetScrollState() {
++        for (child in childFragmentManager.fragments) {
++            val v = child.view
++            if (v is ScrollView) v.scrollTo(0, 0)
++        }
++    }
++
+     inner class ToolsAdapter(val tools: List<Fragment>) : FragmentStateAdapter(this) {
+ 
+         override fun getItemCount() = tools.size
+diff --git a/app/src/main/res/layout/layout_appbar.xml b/app/src/main/res/layout/layout_appbar.xml
+index a8df256..9177647 100644
+--- a/app/src/main/res/layout/layout_appbar.xml
++++ b/app/src/main/res/layout/layout_appbar.xml
+@@ -5,8 +5,7 @@
+     android:layout_width="match_parent"
+     android:layout_height="?attr/actionBarSize"
+     android:background="?attr/colorPrimary"
+-    app:elevation="0dp"
+-    app:liftOnScroll="false">
++    android:elevation="4dp">
+ 
+     <com.google.android.material.appbar.MaterialToolbar
+         android:id="@+id/toolbar"
+@@ -17,4 +16,4 @@
+         android:touchscreenBlocksFocus="false"
+         app:popupTheme="@style/ThemeOverlay.AppCompat.DayNight"
+         app:title="@string/app_name" />
+-</com.google.android.material.appbar.AppBarLayout>
+\ No newline at end of file
++</com.google.android.material.appbar.AppBarLayout>
+diff --git a/app/src/main/res/layout/layout_group_list.xml b/app/src/main/res/layout/layout_group_list.xml
+index 0d39b53..053e428 100644
+--- a/app/src/main/res/layout/layout_group_list.xml
++++ b/app/src/main/res/layout/layout_group_list.xml
+@@ -1,4 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
++<!-- 顶部标签栏：官方上游 master 原文。唯一偏离：tabRippleColor 设为透明
++     （需求指定：点按/长按分组名不出现按压底色），其余逐行与官方一致。 -->
+ <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+     xmlns:app="http://schemas.android.com/apk/res-auto"
+     xmlns:tools="http://schemas.android.com/tools"
+@@ -15,26 +17,14 @@
+     <com.google.android.material.tabs.TabLayout
+         android:id="@+id/group_tab"
+         android:layout_width="match_parent"
+-        android:layout_height="40dp"
+-        android:layout_marginStart="8dp"
+-        android:layout_marginEnd="8dp"
+-        android:layout_marginTop="6dp"
+-        android:layout_marginBottom="4dp"
+-        android:background="@drawable/bg_group_tab_row"
++        android:layout_height="wrap_content"
++        android:background="?colorPrimary"
+         android:elevation="4dp"
+         android:visibility="gone"
+-        app:tabBackground="@android:color/transparent"
+-        app:tabGravity="fill"
+-        app:tabIndicator="@drawable/bg_tab_indicator_box"
+-        app:tabIndicatorAnimationMode="linear"
+         app:tabIndicatorColor="?tabIndicatorColor"
+-        app:tabIndicatorFullWidth="true"
+-        app:tabIndicatorGravity="stretch"
++        app:tabIndicatorFullWidth="false"
+         app:tabMode="scrollable"
+-        app:tabPaddingBottom="0dp"
+-        app:tabPaddingEnd="16dp"
+         app:tabPaddingStart="16dp"
+-        app:tabPaddingTop="0dp"
+         app:tabRippleColor="@android:color/transparent"
+         app:tabSelectedTextColor="?tabSelectedTextColor"
+         app:tabTextColor="?tabTextColor"
+diff --git a/app/src/main/res/layout/layout_tools.xml b/app/src/main/res/layout/layout_tools.xml
+index 08c0c50..b25a897 100644
+--- a/app/src/main/res/layout/layout_tools.xml
++++ b/app/src/main/res/layout/layout_tools.xml
+@@ -17,12 +17,12 @@
+         android:layout_width="match_parent"
+         android:layout_height="wrap_content"
+         android:background="?colorPrimary"
+-        android:elevation="0dp"
++        android:elevation="4dp"
+         app:tabIndicatorColor="?tabIndicatorColor"
+         app:tabIndicatorFullWidth="false"
+         app:tabMode="fixed"
+         app:tabPaddingStart="16dp"
+-        app:tabRippleColor="?tabRippleColor"
++        app:tabRippleColor="@android:color/transparent"
+         app:tabSelectedTextColor="?tabSelectedTextColor"
+         app:tabTextColor="?tabTextColor"
+         app:tabUnboundedRipple="false" />
+diff --git a/nb4a.properties b/nb4a.properties
+index aafe242..1b93518 100644
+--- a/nb4a.properties
++++ b/nb4a.properties
+@@ -1,4 +1,4 @@
+ PACKAGE_NAME=com.nb4a.qiyiguo112
+ VERSION_NAME=1.4.2-rev-26
+-PRE_VERSION_NAME=pre-1.4.2-20260214-3
++PRE_VERSION_NAME=A02
+ VERSION_CODE=48

@@ -1,0 +1,13 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt
+index 346c742..30be375 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt
+@@ -330,6 +330,8 @@ class GroupSettingsActivity(
+         val editingId = DataStore.editingId
+         if (editingId == 0L) {
+             val newGroup = GroupManager.createGroup(ProxyGroup().apply { serialize() })
++            // 问题3：新建分组后自动设为选中分组，回到配置页直接定位到它
++            DataStore.selectedGroup = newGroup.id
+             if (newGroup.type == GroupType.SUBSCRIPTION && !newGroup.subscription?.link.isNullOrEmpty()) {
+                 GroupUpdater.startUpdate(newGroup, true)
+             }
