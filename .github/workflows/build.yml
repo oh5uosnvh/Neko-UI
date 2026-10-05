@@ -8,7 +8,7 @@ on:
         required: true
         default: 'oh5uosnvh/NekoBoxForAndroid'
       upstream_ref:
-        description: '上游分支/标签/commit（基线=A01，新上游填其release tag）'
+        description: '上游分支/标签/commit（基线=A01 tag@f167ebc，新上游填其release tag）'
         required: true
         default: 'A01'
       anytls_commit:
@@ -31,10 +31,15 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: build-from-patches-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build patched APK
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - name: Checkout kit
         uses: actions/checkout@v4
@@ -48,10 +53,10 @@ jobs:
           if [ -n "$GH_PAT" ]; then
             git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "https://github.com/"
           fi
-          git clone --recurse-submodules "https://github.com/${REPO}.git" upstream
+          git clone --recurse-submodules --jobs 8 "https://github.com/${REPO}.git" upstream
           cd upstream
           git checkout "$REF"
-          git submodule update --init --recursive
+          git submodule update --init --recursive --jobs 8
           git log --oneline -1
 
       - name: Apply mod patches (9)
@@ -68,7 +73,7 @@ jobs:
       - name: Install Golang
         uses: actions/setup-go@v5
         with:
-          go-version: '^1.24'
+          go-version: '^1.25'
 
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
@@ -85,7 +90,15 @@ jobs:
           sed -i "s/^export COMMIT_FASTUP_MOD=.*/export COMMIT_FASTUP_MOD=\"${{ github.event.inputs.fastup_commit || '2aba39c395916633200ac72d9fe6dbf10f2b80bd' }}\"/" buildScript/lib/core/get_source_env.sh
           sed -i "s/^export COMMIT_OPPA_MOD=.*/export COMMIT_OPPA_MOD=\"${{ github.event.inputs.oppa_commit || 'e1c78129290656ca4e59ccc48b0c0a7e7acddf0a' }}\"/" buildScript/lib/core/get_source_env.sh
 
+      - name: LibCore cache
+        id: libcore-cache
+        uses: actions/cache@v4
+        with:
+          path: upstream/app/libs/libcore.aar
+          key: libcore-${{ hashFiles('upstream/libcore/**', 'upstream/buildScript/**') }}
+
       - name: Build LibCore
+        if: steps.libcore-cache.outputs.cache-hit != 'true'
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
           GOSUMDB: off
@@ -125,3 +138,4 @@ jobs:
         with:
           name: NekoBoxF-patched-arm64
           path: upstream/app/build/outputs/apk/**/NekoBox*.apk
+          if-no-files-found: error
