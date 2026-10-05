@@ -90,12 +90,19 @@ jobs:
           sed -i "s/^export COMMIT_FASTUP_MOD=.*/export COMMIT_FASTUP_MOD=\"${{ github.event.inputs.fastup_commit || '2aba39c395916633200ac72d9fe6dbf10f2b80bd' }}\"/" buildScript/lib/core/get_source_env.sh
           sed -i "s/^export COMMIT_OPPA_MOD=.*/export COMMIT_OPPA_MOD=\"${{ github.event.inputs.oppa_commit || 'e1c78129290656ca4e59ccc48b0c0a7e7acddf0a' }}\"/" buildScript/lib/core/get_source_env.sh
 
+      - name: LibCore cache key
+        id: libcore-key
+        run: |
+          cd upstream
+          K=$( { git ls-files libcore buildScript | sort; git ls-files -z libcore buildScript | xargs -0 cat 2>/dev/null; } | sha1sum | cut -d' ' -f1 )
+          echo "key=libcore-$K" >> "$GITHUB_OUTPUT"
+
       - name: LibCore cache
         id: libcore-cache
         uses: actions/cache@v4
         with:
           path: upstream/app/libs/libcore.aar
-          key: libcore-${{ hashFiles('upstream/libcore/**', 'upstream/buildScript/**') }}
+          key: ${{ steps.libcore-key.outputs.key }}
 
       - name: Build LibCore
         if: steps.libcore-cache.outputs.cache-hit != 'true'
