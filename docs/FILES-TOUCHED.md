@@ -18,7 +18,7 @@
 | `res/layout/layout_appbar.xml` | 007 | = 官方原文（elevation 4dp） |
 | `res/layout/layout_group_list.xml` | 007 | = 官方原文 + 透明 ripple（唯一偏离） |
 | `res/layout/layout_tools.xml` | 007 | = 官方原文（elevation 4dp）+ 透明 ripple |
-| `res/layout/layout_group_item.xml` | 008 | 移除 ☷ 拖动手柄（长按卡片=唯一拖动入口） |
+| `res/layout/layout_group_item.xml` | 008 | 卡片布局净化：不放置拖动手柄图标（长按=唯一拖动入口） |
 | `.github/workflows/build_mod.yml` | 009 | 协议 mod 源钉扎 + libgojni 校验 + GOSUMDB=off |
 | `nb4a.properties` | 不打包 | 发版时更新 `PRE_VERSION_NAME`（sbNN） |
 
@@ -43,7 +43,7 @@
    `prefetchJob`、`prefetchGroupPages`、`warmUpJob`、`startPageWarmUp`、
    `pageWarmStep`、`pageWarmCap`、`isPagerBusy`、`ensureProfilesLoaded`、
    `profilesLoadStarted`、`sharedRecycledViewPool`、`pendingStateRefreshes`、
-   `drawerBusy`、`sortButton`、`groupSort`（☷ 已按需求移除）。
+   `drawerBusy`、`sortButton`、`groupSort`（已移除的拖动手柄资源符号）。
 3. **顶部栏三布局**：只许「官方原文 + 透明 ripple」形态；不要恢复
    `bg_group_tab_row` 容器、`bg_tab_indicator_box` 包围框、任何 elevation=0dp。
 4. **允许动的小区域**（保留项）：

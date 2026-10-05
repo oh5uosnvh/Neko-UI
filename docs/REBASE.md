@@ -81,7 +81,7 @@ python3 /path/to/kit/scripts/verify_build.py "$(find app/build/outputs/apk -name
 3. 分组页 [默认|排序] 两个选择器可用；
 4. 进入大分组首屏不空白（动态加载）；
 5. 冷启动后逐页点开无首次卡顿；打开 App 立刻点 ☰ 不卡；
-6. 分组页**长按**卡片拖动排序（无 ☷）；拖到边缘滚动速度均匀（最大速度的 50%）；
+6. 分组页**长按**卡片拖动排序，边缘滚动速度均匀（最大速度的 50%）；
    快速连拖多卡不崩溃；拖完立刻返回配置页顺序已生效；
 7. 配置页左右滑/点标签切换 = 官方手感。
 
@@ -98,4 +98,4 @@ python3 /path/to/kit/scripts/verify_build.py "$(find app/build/outputs/apk -name
 | `ConfigurationFragment.kt` | 最高（改动最频繁） | 先恢复官方原文，再按锚点逐项移植 |
 | `MainActivity.kt` | 高（页面管理可能重构） | 对齐 displayFragmentWithId/displayFragment/restoreFragments |
 | `GroupFragment.kt` | 中（删除/撤销/拖动可能重构） | 保语义（长按拖动+50%+实时广播+锁快照），实现可换 |
-| 布局四件套 | 低 | 采用官方新版 + 两处小偏离（透明 ripple / 无 ☷） |
+| 布局四件套 | 低 | 采用官方新版 + 两处小偏离（透明 ripple / 卡片布局净化） |

@@ -82,13 +82,13 @@
 
 ---
 
-## 规格第 8 项：长按拖动排序（补丁 `003-groups-page-drag.patch` + `008-group-item-longpress-only.patch`）
+## 规格第 8 项：分组卡片长按拖动排序（补丁 `003-groups-page-drag.patch`）
 
-- **意图**：分组管理页卡片排序回到官方交互——**长按卡片触发拖动**（☷ 手柄已按
-  需求移除，长按是唯一入口）；拖到列表上下边缘时自动滚动**不是渐进加速**，
-  而是**固定为最大速度的 50%**；每次换位**立即落库并广播**（配置页标签栏与 ☴
-  列表实时跟随，拖完立刻返回必然生效）；并发写防护（快速连拖多卡不崩）。
-- **文件**：`ui/GroupFragment.kt`（003）、`res/layout/layout_group_item.xml`（008）
+- **意图**：分组管理页卡片拖动排序为基线官方机制（长按卡片触发，SimpleCallback
+  UP|DOWN）。补丁仅两处增强：拖到列表上下边缘的自动滚动**固定为最大速度的
+  50%**（非渐进加速）；每次换位**立即落库并广播**（配置页标签栏与 ☴ 列表实时
+  跟随，拖完立刻返回必然生效），并做并发写防护（快速连拖多卡不崩）。
+- **文件**：`ui/GroupFragment.kt`
 - **关键符号**：
   - `isLongPressDragEnabled() = true`（官方机制，SimpleCallback(UP|DOWN, START)）；
   - `interpolateOutOfBoundsScroll`：`speed = (maxScroll * 0.5f).toInt().coerceAtLeast(1)`
@@ -99,14 +99,18 @@
     `GroupManager.iterator { groupUpdated(group) }` 广播；
   - 配置页侧兜底：`syncOrderFromDb()`（004）——每次配置页显示时按数据库
     userOrder 就地对齐一次（广播竞态保险丝，只在集合一致、仅顺序不同时动作）。
-- **验证**：dex 含 `syncOrderFromDb`；**dex 不得含** `sortButton`/`groupSort`；
-  长按卡片可拖动；拖到边缘滚动速度均匀（约为官方最大滚动速度的一半）；
-  快速连续拖多张卡片不崩溃；拖完立刻返回配置页顺序已生效。
+- **验证**：dex 含 `syncOrderFromDb`；长按卡片可拖动；拖到边缘滚动速度均匀
+  （约为官方最大滚动速度的一半）；快速连续拖多张卡片不崩溃；拖完立刻返回
+  配置页顺序已生效。
 - **红线**：
-  - 不恢复 ☷ 手柄、不恢复 `selectableItemBackgroundBorderless` 触摸底色；
   - 边缘速度系数 **0.5f 固定**（勿改渐进插值、勿改其它系数）；
   - `updated` 的增删必须在主线程锁内，后台只碰快照；
-  - 撤销删除功能必须保留（见附加保留项 #003 的 groupRemoved/groupAdd 广播）。
+  - 拖动保持官方长按触发，不得引入额外触发入口；
+  - 撤销删除功能必须保留（见附加保留项 B 的 groupRemoved/groupAdd 广播）。
+
+> 分组界面布局（`008-group-item-longpress-only.patch`）仅一处净化：卡片上不放置
+> 任何拖动手柄图标，长按是唯一拖动入口。分组界面的功能改动只有顶栏
+> [默认|排序] 连体按钮（规格 4，基线自带）。
 
 ---
 
@@ -137,8 +141,8 @@
   `layout_appbar.xml`/`layout_tools.xml` = 官方原文（elevation 4dp）。
 - **红线**：白色圆角短线指示器保留；勿恢复旧的深色圆角容器/包围式方框。
 
-### F. 分组卡片布局：移除 ☷ 手柄（补丁 `008-group-item-longpress-only.patch`）
-- 删除 `group_sort` ImageView 及其注释块；长按卡片成为唯一拖动入口。
+### F. 分组卡片布局净化（补丁 `008-group-item-longpress-only.patch`）
+- 卡片上不放置任何拖动手柄图标；长按卡片是唯一拖动入口（拖动本身=基线官方机制）。
 
 ### G. CI 协议 mod 源钉扎 + 构建环境修复（补丁 `009-ci-mod-pins-gosumdb.patch`）
 - anytls(shanlian)/vt/fastup/oppa 四个协议 mod 源钉到指定 commit（secrets.GH_PAT）；
@@ -157,4 +161,4 @@
    重新对齐 `displayFragmentWithId/displayFragment/restoreFragments`。
 3. `GroupFragment.kt` —— 若上游改了删除/撤销/拖动体系，保留「长按拖动 + 固定
    50% 边缘速度 + 实时广播 + 锁内快照」语义即可，实现可换。
-4. 布局四件套 —— 直接采用官方新版，再叠透明 ripple / 移除 ☷ 两处小偏离。
+4. 布局四件套 —— 直接采用官方新版，再叠透明 ripple / 卡片布局净化两处小偏离。
