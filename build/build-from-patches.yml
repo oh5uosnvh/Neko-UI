@@ -17,7 +17,7 @@ on:
       upstream_ref:
         description: '上游分支/标签/commit'
         required: true
-        default: 'main'
+        default: 'A01'
       mods_ref:
         description: 'Nekobox-MG ref (协议魔改源码, 空=HEAD)'
         required: false
@@ -173,9 +173,11 @@ jobs:
                    libcore/protocol/xhttp/cipher.go ; do
             [ -f "$f" ] || { echo "::error::$f missing after integration"; exit 1; }
           done
-          # the v2 session opener must be present in the x365 source we ship
-          grep -q 'PrologueVersion' libcore/protocol/x365/conn.go \
-            || { echo "::error::x365 v2 prologue not present"; exit 1; }
+          # A 5-byte X365+00 in a memory dump was incorrectly labelled a
+          # client prologue. The captured 29-byte request is the supported
+          # evidence; fail fast if that unverified addition comes back.
+          ! grep -q 'PrologueVersion' libcore/protocol/x365/conn.go \
+            || { echo "::error::unverified x365 prologue reintroduced"; exit 1; }
           grep -q 'libcoreX365' libcore/box_include.go \
             || { echo "::error::x365 outbound not registered"; exit 1; }
           echo "x365 mod applied:"; git -C . diff --stat -- libcore app | tail -3
@@ -259,7 +261,9 @@ jobs:
         id: libcore-key
         run: |
           cd upstream
-          K=$( { git ls-files libcore buildScript | sort; git ls-files -z libcore buildScript | xargs -0 cat 2>/dev/null; } | sha1sum | cut -d' ' -f1 )
+          # Source overlays are not git-tracked. Hash the actual bytes being
+          # built, including newly overlaid protocol files and symlink targets.
+          K=$( { find libcore buildScript -type f -print0 | sort -z | xargs -0 sha256sum; git rev-parse HEAD; } | sha256sum | cut -d' ' -f1 )
           echo "key=libcore-$K" >> "$GITHUB_OUTPUT"
 
       - name: LibCore cache
