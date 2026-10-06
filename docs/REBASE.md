@@ -36,7 +36,7 @@ git submodule update --init --recursive
 python3 /path/to/kit/scripts/apply_all.py --check
 ```
 
-输出会把 9 个补丁分成 `CLEAN（可直接 apply）` 与 `CONFLICT（需手工移植）`。
+输出会把 10 个补丁分成 `CLEAN（可直接 apply）` 与 `CONFLICT（需手工移植）`。
 基线自带的规格 1-4（TopBarController / setupFilterBar）不在此列——直接在新上游
 里按 CHANGES #0 的锚点核对它们是否仍然存在。
 
@@ -67,7 +67,7 @@ python3 /path/to/kit/scripts/verify_build.py "$(find app/build/outputs/apk -name
 
 `verify_build.py` 会检查：
 - dex **必需符号**：`openGroupAt`/`scrollToGroup`/`resetScrollState`/`calculateDiff`/
-  `ensureLoadedIfEmpty`/`applyFirstFill`/`syncOrderFromDb`/`drawerWarmRunnable`；
+  `armFallback`/`applyFirstFill`/`syncOrderFromDb`/`drawerWarmRunnable`/`applyGroupCounts`；
 - dex **禁止符号**（历史废案 + 已移除功能）：`prefetchJob`/`pageWarmStep`/
   `isPagerBusy`/`sortButton`/`groupSort` 等；
 - libgojni.so 协议 mod 标记：`x365`/`viewTurbo`/`fastup`/`oppa-mod`/`mihomo/1.19.25`。
@@ -97,5 +97,5 @@ python3 /path/to/kit/scripts/verify_build.py "$(find app/build/outputs/apk -name
 |---|---|---|
 | `ConfigurationFragment.kt` | 最高（改动最频繁） | 先恢复官方原文，再按锚点逐项移植 |
 | `MainActivity.kt` | 高（页面管理可能重构） | 对齐 displayFragmentWithId/displayFragment/restoreFragments |
-| `GroupFragment.kt` | 中（删除/撤销/拖动可能重构） | 保语义（长按拖动+50%+实时广播+锁快照），实现可换 |
+| `GroupFragment.kt` | 中（删除/撤销/拖动可能重构） | 保语义（长按拖动官方手感+50%边缘速度+松手落库广播+锁快照），实现可换 |
 | 布局四件套 | 低 | 采用官方新版 + 两处小偏离（透明 ripple / 卡片布局净化） |

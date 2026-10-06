@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""A02 补丁应用器。在**上游源码树根目录**运行。
+"""Neko-UI 补丁应用器（10 补丁）。在**上游源码树根目录**运行。
 
 用法:
   python3 apply_all.py --check          # 只预检，报告每个补丁 CLEAN/CONFLICT

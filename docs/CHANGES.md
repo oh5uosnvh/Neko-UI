@@ -50,9 +50,10 @@
   读库由 `applyFirstFill`（20/20）接管流式补齐；正常装载先落地，看门狗自动
   作废。除此之外零改动。
 - **文件**：`ui/ConfigurationFragment.kt`（GroupPagerAdapter 内）
-- **关键符号**：`ensureLoadedIfEmpty`、`applyFirstFill`、`loadInFlight`
-  （AtomicBoolean 单飞护栏）、`resetScrollState`。
-- **验证**：dex 含 `ensureLoadedIfEmpty`/`applyFirstFill`；进入 500+ 节点分组首屏立即可见。
+- **关键符号**：`armFallback`（看门狗）、`applyFirstFill`（20/20 兜底填充）、
+  `resetScrollState`。
+- **验证**：dex 含 `armFallback`/`applyFirstFill`；左右滑 = 官方手感（空白停滞 →
+  一次出卡），慢装载分组 800ms 内由兜底接管，大分组不再长时间白屏。
 - **红线**：不做 ±1 邻页预取（曾因大分组内存压力卡顿被移除）；填充只在数据为空时触发。
 - **拖动松手广播的就地重排**（`groupUpdated` 的 `orderChanged` 分支）：分组页
   松手落库广播后，标签栏/☴ 按 `userOrder` 就地 `notifyItemMoved` 重排并保持
@@ -210,5 +211,5 @@
 2. `MainActivity.kt` —— 若上游也改了页面管理（displayFragment 体系），缓存方案需
    重新对齐 `displayFragmentWithId/displayFragment/restoreFragments`。
 3. `GroupFragment.kt` —— 若上游改了删除/撤销/拖动体系，保留「长按拖动 + 固定
-   50% 边缘速度 + 实时广播 + 锁内快照」语义即可，实现可换。
+   50% 边缘速度 + 松手落库广播 + 锁内快照」语义即可，实现可换。
 4. 布局四件套 —— 直接采用官方新版，再叠透明 ripple / 卡片布局净化两处小偏离。
