@@ -145,10 +145,23 @@ jobs:
       - name: Apply Nekobox-MG protocol mods
         run: |
           set -euo pipefail
-          # integrate.sh applies patches/000-integration.patch (40 modified
-          # files) then overlays files/ (12 new files, incl. the current x365
-          # and xhttp sources). Idempotent and fails loudly on upstream drift.
-          bash mods/Neko-gjgx/integrate.sh upstream
+          # Two cases:
+          #  a) upstream is a BARE NekoBoxForAndroid -> integrate.sh applies
+          #     patches/000-integration.patch (40 modified files) then overlays
+          #     files/ (12 new files).
+          #  b) upstream already carries the integration (tag A01 and friends)
+          #     -> patching again would conflict, so we only refresh the
+          #     protocol sources from Nekobox-MG, which is what we actually
+          #     want to ship.
+          cd upstream
+          if [ -f libcore/protocol/x365/conn.go ] && grep -q libcoreX365 libcore/box_include.go; then
+            echo ">> upstream already integrated — refreshing protocol sources only"
+            cp -v ../mods/Neko-365/libcore/protocol/x365/*.go libcore/protocol/x365/
+            cp -v ../mods/Neko-gjgx/files/libcore/protocol/xhttp/*.go libcore/protocol/xhttp/ 2>/dev/null || true
+          else
+            echo ">> bare upstream — running full integration"
+            bash ../mods/Neko-gjgx/integrate.sh .
+          fi
 
       - name: Assert current x365 is in place
         run: |
