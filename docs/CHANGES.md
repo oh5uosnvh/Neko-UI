@@ -18,8 +18,9 @@
 - **验证**：顶栏一排 ☰ Neko ⊙ ☴ 🔍 📄➕ ⋮，间隔一致；标题与 ⊙ 为粗体形态。
 
 ### 规格2 ☴ 点击列表
-- **锚点**：`groups()` / `jumpTo(index)` / `jumpToLastGroup()` / 弹窗行渲染。
-- **验证**：点 ☴ 弹出分组列表，点击即跳到该分组。
+- **锚点**：`groups()` / `jumpTo(index)` / `jumpToLastGroup()` / 弹窗行渲染 / `applyGroupCounts`（补丁 010）。
+- **验证**：点 ☴ 弹出分组列表，点击即跳到该分组；每行名称后跟灰阶 `·数量`
+  （`365·29` 形态，数量与分组卡片同源 `countByGroup`、同色 textColorSecondary）。
 
 ### 规格3 长按分组名
 - **锚点**：弹窗行 `rowView.setOnLongClickListener` → `openGroupAt(group.id)`
@@ -84,25 +85,35 @@
 
 ## 规格第 8 项：分组卡片长按拖动排序（补丁 `003-groups-page-drag.patch`）
 
-- **意图**：分组管理页卡片拖动排序为基线官方机制（长按卡片触发，SimpleCallback
-  UP|DOWN）。补丁仅两处增强：拖到列表上下边缘的自动滚动**固定为最大速度的
-  50%**（非渐进加速）；每次换位**立即落库并广播**（配置页标签栏与 ☴ 列表实时
-  跟随，拖完立刻返回必然生效），并做并发写防护（快速连拖多卡不崩）。
+- **意图**：拖动手感 = **starifly 官方原文**（ItemTouchHelper 默认换位判定/动画，
+  clearView 才是官方的收尾点）。历史 bug：补丁曾把「每次换位 → 落库 → 广播」
+  全链路放在拖动中途执行，而分组页自身 adapter 也是 GroupManager 监听者——
+  回声 `groupUpdated` 里的 `notifyItemChanged` 会重绑**正在拖拽的卡片**，打乱
+  ItemTouchHelper 的位置记账，导致手指刚碰到相邻卡片就提前换位。
+  **修复**：拖动中（首个 onMove → clearView）用 `suppressSelfEcho` 屏蔽自身
+  回声；**实时广播保留**——配置页分组标签与 ☴ 列表等其他监听者照常即时跟随。
 - **文件**：`ui/GroupFragment.kt`
 - **关键符号**：
   - `isLongPressDragEnabled() = true`（官方机制，SimpleCallback(UP|DOWN, START)）；
   - `interpolateOutOfBoundsScroll`：`speed = (maxScroll * 0.5f).toInt().coerceAtLeast(1)`
     （固定值、无插值渐加速；maxScroll = `R.dimen.item_touch_helper_max_drag_scroll_per_frame`）；
-  - `move()`：每次换位末尾调用 `commitMove()`（实时同步）+ NO_POSITION/越界防护；
+  - `onMove`：首行置 `groupAdapter.suppressSelfEcho = true`，再 `move()`；
+  - `clearView`：`commitMove()` 后置 `suppressSelfEcho = false`
+    （拖动结束后的最终回声正常处理，顺带对齐外部更新）；
+  - `move()`：NO_POSITION/越界防护 + 每次换位末尾 `commitMove()`（实时同步保留）；
   - `commitMove()`：`synchronized(updated)` 锁内取快照后清空，后台只遍历快照——
     修复快速连拖多卡的 `ConcurrentModificationException`；落库后
-    `GroupManager.iterator { groupUpdated(group) }` 广播；
+    `GroupManager.iterator { groupUpdated(group) }` 广播（保留）；
+  - adapter `groupUpdated(group)`：首行 `if (suppressSelfEcho) return`（回声吞掉）；
   - 配置页侧兜底：`syncOrderFromDb()`（004）——每次配置页显示时按数据库
     userOrder 就地对齐一次（广播竞态保险丝，只在集合一致、仅顺序不同时动作）。
-- **验证**：dex 含 `syncOrderFromDb`；长按卡片可拖动；拖到边缘滚动速度均匀
-  （约为官方最大滚动速度的一半）；快速连续拖多张卡片不崩溃；拖完立刻返回
-  配置页顺序已生效。
+- **验证**：dex 含 `syncOrderFromDb`；长按卡片可拖动；**必须拖过相邻卡片中线
+  才换位、未松手时不再提前换位**；拖到边缘滚动速度均匀（官方最大速度的 50%）；
+  快速连续拖多卡不崩溃；拖动期间配置页/☴ 的顺序实时跟随。
 - **红线**：
+  - `move()`/`commitMove()` 的换位与落库语义 = 官方 + 上述增强，**回声屏蔽
+    只许挂在 `suppressSelfEcho` 上**，不得改成砍广播、不得在换位路径上加
+    刷新/重载；
   - 边缘速度系数 **0.5f 固定**（勿改渐进插值、勿改其它系数）；
   - `updated` 的增删必须在主线程锁内，后台只碰快照；
   - 拖动保持官方长按触发，不得引入额外触发入口；
@@ -111,6 +122,22 @@
 > 分组界面布局（`008-group-item-longpress-only.patch`）仅一处净化：卡片上不放置
 > 任何拖动手柄图标，长按是唯一拖动入口。分组界面的功能改动只有顶栏
 > [默认|排序] 连体按钮（规格 4，基线自带）。
+
+---
+
+## 规格第 2 项扩展：☴ 列表行 名称·数量（补丁 `010-group-list-count.patch`）
+
+- **意图**：☴ 快速列表每行分组名后跟灰阶 `·N`（N = `countByGroup`，与分组卡片
+  group_status 完全同源；颜色 = 卡片同款 `?android:attr/textColorSecondary`）。
+  异步查库：行先展示名称，数量随后补上，不阻塞弹窗打开。
+- **文件**：`ui/TopBarController.kt`
+- **关键符号**：`applyGroupCounts`（私有方法，verify_build 必需符号）、
+  `countTargets`、`SpannableString` + `ForegroundColorSpan(textColorSecondary)`。
+- **验证**：dex 含 `applyGroupCounts`；☴ 行显示 `365·29` 形态，「·29」为灰阶；
+  点击跳转与长按进分组设置行为不变。
+- **红线**：行结构（nameCard/rowView/长按入口）不得改动；数量必须走
+  `countByGroup(group.id)`，勿换数据源；灰阶必须用 `textColorSecondary` 主题色，
+  不得写死色值。
 
 ---
 

@@ -15,7 +15,7 @@ import zipfile
 REQUIRED_DEX = [
     b"openGroupAt", b"scrollToGroup", b"resetScrollState", b"calculateDiff",
     b"ensureLoadedIfEmpty", b"applyFirstFill", b"syncOrderFromDb",
-    b"drawerWarmRunnable",
+    b"drawerWarmRunnable", b"applyGroupCounts",
 ]
 FORBIDDEN_DEX = [
     b"prefetchJob", b"prefetchGroupPages", b"pageWarmStep", b"pageWarmCap",

@@ -418,7 +418,7 @@ index afd90b7..187781e 100644
  
          }
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
-index af75c17..764e939 100644
+index af75c17..f6268ee 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
 +++ b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
 @@ -67,6 +67,33 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
@@ -455,7 +455,7 @@ index af75c17..764e939 100644
      override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
          super.onViewCreated(view, savedInstanceState)
          activity = requireActivity() as MainActivity
-@@ -111,10 +138,19 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+@@ -111,14 +138,27 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
  
              override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                  val index = viewHolder.bindingAdapterPosition
@@ -476,17 +476,35 @@ index af75c17..764e939 100644
              override fun onMove(
                  recyclerView: RecyclerView,
                  viewHolder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder,
-@@ -141,7 +177,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+             ): Boolean {
++                // 拖动开始：屏蔽自身 commitMove 广播的回声。回声的 notifyItemChanged
++                // 会重绑正在拖拽的卡片、打乱 ItemTouchHelper 的位置记账 → 未过中线
++                // 就提前换位。配置页分组与 ☴ 列表等其他监听者不受影响，实时同步保留。
++                groupAdapter.suppressSelfEcho = true
+                 groupAdapter.move(viewHolder.bindingAdapterPosition, target.bindingAdapterPosition)
+                 return true
+             }
+@@ -129,8 +169,10 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+             ) {
+                 super.clearView(recyclerView, viewHolder)
+                 groupAdapter.commitMove()
++                groupAdapter.suppressSelfEcho = false
+             }
+ 
++            // 长按拖动到列表上下边缘：固定为最大速度的 50%（规格8，非渐进加速）
+             override fun interpolateOutOfBoundsScroll(
+                 recyclerView: RecyclerView,
+                 viewSize: Int,
+@@ -141,7 +183,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                  val maxScroll = recyclerView.resources.getDimensionPixelSize(
                      R.dimen.item_touch_helper_max_drag_scroll_per_frame
                  )
 -                val speed = (maxScroll * 0.4f).toInt().coerceAtLeast(1)
-+                // 长按拖动到边界边缘：固定为最大速度的 50%（非渐进加速，最终规格）
 +                val speed = (maxScroll * 0.5f).toInt().coerceAtLeast(1)
                  return if (viewSizeOutOfBounds > 0) speed else -speed
              }
          })
-@@ -462,6 +499,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+@@ -462,6 +504,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                      }
                      arguments?.remove(EXTRA_TARGET_GROUP_ID)
                  }
@@ -494,9 +512,13 @@ index af75c17..764e939 100644
              }
          }
  
-@@ -567,6 +605,10 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+@@ -566,7 +609,14 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+ 
          private val updated = HashSet<ProxyGroup>()
  
++        // 拖动进行中：屏蔽自身 commitMove 广播的回声（见 ItemTouchHelper#onMove）
++        var suppressSelfEcho = false
++
          fun move(from: Int, to: Int) {
 +            // 防护：拖动动画期间 bindingAdapterPosition 可能为 NO_POSITION
 +            if (from == to || from < 0 || to < 0 ||
@@ -505,7 +527,7 @@ index af75c17..764e939 100644
              val first = groupList[from]
              var previousOrder = first.userOrder
              val (step, range) = if (from < to) Pair(1, from until to) else Pair(
-@@ -578,17 +620,32 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+@@ -578,17 +628,30 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                  next.userOrder = previousOrder
                  previousOrder = order
                  groupList[i] = next
@@ -517,16 +539,15 @@ index af75c17..764e939 100644
 -            updated.add(first)
 +            synchronized(updated) { updated.add(first) }
              notifyItemMoved(from, to)
-+            // 实时同步：每次换位立即落库并广播（配置页标签栏 + ☴ 列表即时跟随，
-+            // 拖完立刻返回也必然生效，不再需要等待）
++            // 实时同步：每次换位立即落库并广播（配置页标签栏 + ☴ 列表即时跟随）；
++            // 分组页自身的回声由 suppressSelfEcho 屏蔽，避免打断拖拽
 +            commitMove()
          }
  
          fun commitMove() = runOnDefaultDispatcher {
 -            updated.forEach { SagerDatabase.groupDao.updateGroup(it) }
 -            updated.clear()
-+            // 后台线程只碰快照；updated 的增删全部在主线程锁内完成。
-+            // 修复快速连续拖动多张卡片时的 ConcurrentModificationException
++            // 后台线程只碰快照；updated 的增删全部在主线程锁内完成
 +            val moved = synchronized(updated) {
 +                val snapshot = ArrayList(updated)
 +                updated.clear()
@@ -535,14 +556,13 @@ index af75c17..764e939 100644
 +            for (group in moved) {
 +                SagerDatabase.groupDao.updateGroup(group)
 +            }
-+            // 拖动排序同步：广播更新——配置页标签栏与 ☴ 快速列表据此整体重排
 +            for (group in moved) {
 +                GroupManager.iterator { groupUpdated(group) }
 +            }
          }
  
          fun remove(index: Int) {
-@@ -602,6 +659,12 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+@@ -602,6 +665,12 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                  groupList.add(index, item)
                  notifyItemInserted(index)
              }
@@ -555,7 +575,7 @@ index af75c17..764e939 100644
          }
  
          override fun commit(actions: List<Pair<Int, ProxyGroup>>) {
-@@ -613,6 +676,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+@@ -613,6 +682,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
          }
  
          override suspend fun groupAdd(group: ProxyGroup) {
@@ -564,7 +584,16 @@ index af75c17..764e939 100644
              groupList.add(group)
              delay(300L)
  
-@@ -696,7 +761,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+@@ -643,6 +714,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+         }
+ 
+         override suspend fun groupUpdated(group: ProxyGroup) {
++            // 拖动中的自身回声直接吞掉：数据与本地一致，重绑反而打断拖拽
++            if (suppressSelfEcho) return
+             val index = groupList.indexOfFirst { it.id == group.id }
+             if (index == -1) {
+                 reload()
+@@ -696,7 +769,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
          val groupUser = binding.groupUser
          val editButton = binding.edit
          val optionsButton = binding.options
@@ -572,7 +601,7 @@ index af75c17..764e939 100644
          val updateButton = binding.groupUpdate
          val subscriptionUpdateProgress = binding.subscriptionUpdateProgress
  
-@@ -756,16 +820,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+@@ -756,16 +828,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
  
              itemView.setOnClickListener { }
  
@@ -1296,6 +1325,85 @@ index 32738ea..88574cb 100644
      inner class ToolsAdapter(val tools: List<Fragment>) : FragmentStateAdapter(this) {
  
          override fun getItemCount() = tools.size
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/TopBarController.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/TopBarController.kt
+index 8828735..a1de339 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/TopBarController.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/TopBarController.kt
+@@ -9,7 +9,10 @@ import android.graphics.drawable.ColorDrawable
+ import android.graphics.drawable.Drawable
+ import android.graphics.drawable.GradientDrawable
+ import android.os.Bundle
++import android.text.Spannable
++import android.text.SpannableString
+ import android.text.TextUtils
++import android.text.style.ForegroundColorSpan
+ import android.util.TypedValue
+ import android.view.Gravity
+ import android.view.MotionEvent
+@@ -32,6 +35,8 @@ import io.nekohasekai.sagernet.database.DataStore
+ import io.nekohasekai.sagernet.database.ProxyGroup
+ import io.nekohasekai.sagernet.database.SagerDatabase
+ import io.nekohasekai.sagernet.ktx.Logs
++import io.nekohasekai.sagernet.ktx.onMainDispatcher
++import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+ import io.nekohasekai.sagernet.ktx.snackbar
+ 
+ /**
+@@ -584,6 +589,9 @@ internal class TopBarController(
+         // 记下选中项那一行，稍后用滚动位置把它带到视口里
+         var selectedRow: View? = null
+ 
++        // 名称后缀 ·N（配置数）：与分组卡片 group_status 同源 countByGroup
++        val countTargets = ArrayList<Pair<TextView, Long>>()
++
+         for ((index, g) in list.withIndex()) {
+             val isCurrent = g.id == currentId
+ 
+@@ -629,6 +637,8 @@ internal class TopBarController(
+                 ),
+             )
+ 
++            countTargets.add(label to g.id)
++
+             val rowView = LinearLayout(context).apply {
+                 orientation = LinearLayout.HORIZONTAL
+                 gravity = Gravity.CENTER_VERTICAL
+@@ -729,6 +739,35 @@ internal class TopBarController(
+         }
+ 
+         groupPopup = popup
++
++        applyGroupCounts(countTargets)
++    }
++
++    /**
++     * 行名称后缀 ·N：N = 该分组的配置数（与分组卡片 group_status 同源：
++     * SagerDatabase.proxyDao.countByGroup）；「·N」用卡片同款灰阶
++     * ?android:attr/textColorSecondary。异步查库：行先展示名称，数量随后补上。
++     */
++    private fun applyGroupCounts(targets: List<Pair<TextView, Long>>) {
++        if (targets.isEmpty()) return
++        runOnDefaultDispatcher {
++            val counts = targets.map { (tv, id) -> tv to SagerDatabase.proxyDao.countByGroup(id) }
++            onMainDispatcher {
++                val secondary = themeColor(android.R.attr.textColorSecondary)
++                for ((tv, count) in counts) {
++                    val name = tv.text.toString()
++                    val full = "$name·$count"
++                    tv.text = SpannableString(full).apply {
++                        setSpan(
++                            ForegroundColorSpan(secondary),
++                            name.length,
++                            full.length,
++                            Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
++                        )
++                    }
++                }
++            }
++        }
+     }
+ 
+     /**
 diff --git a/app/src/main/res/layout/layout_appbar.xml b/app/src/main/res/layout/layout_appbar.xml
 index a8df256..9177647 100644
 --- a/app/src/main/res/layout/layout_appbar.xml

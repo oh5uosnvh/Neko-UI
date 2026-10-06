@@ -28,6 +28,7 @@ ORDERED = [
     "007-tab-strip-official-ui.patch",
     "008-group-item-longpress-only.patch",
     "009-ci-mod-pins-gosumdb.patch",
+    "010-group-list-count.patch",
 ]
 
 

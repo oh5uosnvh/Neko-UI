@@ -1,0 +1,79 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/TopBarController.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/TopBarController.kt
+index 8828735..a1de339 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/TopBarController.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/TopBarController.kt
+@@ -9,7 +9,10 @@ import android.graphics.drawable.ColorDrawable
+ import android.graphics.drawable.Drawable
+ import android.graphics.drawable.GradientDrawable
+ import android.os.Bundle
++import android.text.Spannable
++import android.text.SpannableString
+ import android.text.TextUtils
++import android.text.style.ForegroundColorSpan
+ import android.util.TypedValue
+ import android.view.Gravity
+ import android.view.MotionEvent
+@@ -32,6 +35,8 @@ import io.nekohasekai.sagernet.database.DataStore
+ import io.nekohasekai.sagernet.database.ProxyGroup
+ import io.nekohasekai.sagernet.database.SagerDatabase
+ import io.nekohasekai.sagernet.ktx.Logs
++import io.nekohasekai.sagernet.ktx.onMainDispatcher
++import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+ import io.nekohasekai.sagernet.ktx.snackbar
+ 
+ /**
+@@ -584,6 +589,9 @@ internal class TopBarController(
+         // 记下选中项那一行，稍后用滚动位置把它带到视口里
+         var selectedRow: View? = null
+ 
++        // 名称后缀 ·N（配置数）：与分组卡片 group_status 同源 countByGroup
++        val countTargets = ArrayList<Pair<TextView, Long>>()
++
+         for ((index, g) in list.withIndex()) {
+             val isCurrent = g.id == currentId
+ 
+@@ -629,6 +637,8 @@ internal class TopBarController(
+                 ),
+             )
+ 
++            countTargets.add(label to g.id)
++
+             val rowView = LinearLayout(context).apply {
+                 orientation = LinearLayout.HORIZONTAL
+                 gravity = Gravity.CENTER_VERTICAL
+@@ -729,6 +739,35 @@ internal class TopBarController(
+         }
+ 
+         groupPopup = popup
++
++        applyGroupCounts(countTargets)
++    }
++
++    /**
++     * 行名称后缀 ·N：N = 该分组的配置数（与分组卡片 group_status 同源：
++     * SagerDatabase.proxyDao.countByGroup）；「·N」用卡片同款灰阶
++     * ?android:attr/textColorSecondary。异步查库：行先展示名称，数量随后补上。
++     */
++    private fun applyGroupCounts(targets: List<Pair<TextView, Long>>) {
++        if (targets.isEmpty()) return
++        runOnDefaultDispatcher {
++            val counts = targets.map { (tv, id) -> tv to SagerDatabase.proxyDao.countByGroup(id) }
++            onMainDispatcher {
++                val secondary = themeColor(android.R.attr.textColorSecondary)
++                for ((tv, count) in counts) {
++                    val name = tv.text.toString()
++                    val full = "$name·$count"
++                    tv.text = SpannableString(full).apply {
++                        setSpan(
++                            ForegroundColorSpan(secondary),
++                            name.length,
++                            full.length,
++                            Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
++                        )
++                    }
++                }
++            }
++        }
+     }
+ 
+     /**

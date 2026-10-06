@@ -59,7 +59,7 @@ jobs:
           git submodule update --init --recursive --jobs 8
           git log --oneline -1
 
-      - name: Apply mod patches (9)
+      - name: Apply mod patches (10)
         run: |
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"

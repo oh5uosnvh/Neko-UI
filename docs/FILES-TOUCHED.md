@@ -1,6 +1,6 @@
 # 文件 → 补丁 → 功能映射（A01 → 最终修订）
 
-## 已改动文件（补丁覆盖，共 16 个 + 版本文件）
+## 已改动文件（补丁覆盖，共 17 个 + 版本文件）
 
 | 文件 | 补丁 | 功能 |
 |---|---|---|
@@ -11,9 +11,10 @@
 | `ui/ToolsFragment.kt` | 002 | 滚动复位覆写（ScrollView） |
 | `ui/LogcatFragment.kt` | 002 | 滚动复位 + 日志文本复位 |
 | `ui/AboutFragment.kt` | 002 | 滚动复位覆写（NestedScrollView） |
-| `ui/GroupFragment.kt` | 003 | scrollToGroup 定位、删除即时同步+幂等护栏、**长按拖动（官方机制）+ 固定 50% 边缘速度 + 实时 commitMove + 锁内快照防崩溃**、滚动复位 |
+| `ui/GroupFragment.kt` | 003 | scrollToGroup 定位、删除即时同步+幂等护栏、**长按拖动=官方手感 + suppressSelfEcho 回声屏蔽（修中途换位 bug）+ 固定 50% 边缘速度 + 实时 commitMove + 锁内快照防崩溃**、滚动复位 |
 | `ui/ConfigurationFragment.kt` | 004 | 动态加载（ensureLoadedIfEmpty/applyFirstFill）、DiffUtil 增量刷新、syncOrderFromDb 顺序兜底、标签栏回中同步、切换路径=官方 |
 | `ui/GroupSettingsActivity.kt` | 005 | 返回自动选中新分组 |
+| `ui/TopBarController.kt` | 010 | ☴ 列表行 名称·数量（`applyGroupCounts`，灰阶 textColorSecondary，异步 countByGroup） |
 | `ui/ThemedActivity.kt` | 006 | 多页面状态栏内边距修复 |
 | `res/layout/layout_appbar.xml` | 007 | = 官方原文（elevation 4dp） |
 | `res/layout/layout_group_list.xml` | 007 | = 官方原文 + 透明 ripple（唯一偏离） |
@@ -27,9 +28,12 @@
 | 功能 | 文件 | 锚点符号 |
 |---|---|---|
 | 规格1 顶栏（粗体 Neko/⊙/☴/等距单排） | `ui/TopBarController.kt` | `setTypeface(BOLD)`、`ic_topbar_*` |
-| 规格2 ☴ 快速跳转列表 | `ui/TopBarController.kt` | `groups()/jumpTo()` |
+| 规格2 ☴ 快速跳转列表（行结构/跳转/长按编辑） | `ui/TopBarController.kt` | `groups()/jumpTo()`、`rowView.setOnLongClickListener` |
 | 规格3 长按分组名跳转 | `ui/TopBarController.kt` | `rowView.setOnLongClickListener` |
 | 规格4 [默认\|排序] 连体按钮 | `ui/GroupFragment.kt` | `setupFilterBar()/showFilterPicker()/showSortPicker()` |
+
+> 注：TopBarController 同时被补丁 010 以**纯增量**方式触碰（只加行内数量后缀，
+> 不改行结构）；上表所列锚点符号仍属基线原文。
 
 ## 不可触碰区域（改这些 = 破坏验收标准）
 
@@ -68,6 +72,6 @@ MainActivity(001: 缓存/预热/抽屉预热/openGroupAt/内边距)
 ConfigurationFragment(004: 长按→openGroupAt; onHiddenChanged 同步; 动态加载; syncOrderFromDb)
 GroupFragment(003: scrollToGroup 被 openGroupAt 调用; 拖动/删除同步)
      ↑ 联动
-布局 007 独立 | 008 独立 | 005/006 独立 | 009(CI) 独立 | 002 其余页面 独立
-基线自带: TopBarController（规格1-3）、GroupFragment.setupFilterBar（规格4）
+TopBarController(010: ☴ 行数量后缀, 独立) | 布局 007 独立 | 008 独立 | 005/006 独立 | 009(CI) 独立 | 002 其余页面 独立
+基线自带: TopBarController（规格1-4 主体）、GroupFragment.setupFilterBar（规格4）
 ```
