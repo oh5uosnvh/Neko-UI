@@ -38,7 +38,9 @@
 ## 规格第 5 项：分组卡片动态加载（补丁 `004-config-page.patch`）
 
 - **意图**：配置页首次进入/切到大分组时首屏不空白：数据级空检查兜底 + 首屏
-  渐进渲染（每帧 30 条分片填充，数据随后整体缓存），杜绝官方「进大分组白屏片刻」。
+  渐进渲染（**每帧 20 条**分片填充，`postOnAnimation` 逐帧推进——每帧最多一个
+  小分片，与滑动手势动画共享帧预算，掉帧自动降载；数据随后整体缓存），
+  复刻官方「左右滑先空白后迅速呈现」的丝滑手感，又无官方大分组长时间白屏。
 - **文件**：`ui/ConfigurationFragment.kt`（GroupPagerAdapter 内）
 - **关键符号**：`ensureLoadedIfEmpty`、`applyFirstFill`、`loadInFlight`
   （AtomicBoolean 单飞护栏）、`resetScrollState`。

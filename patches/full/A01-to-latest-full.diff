@@ -87,7 +87,7 @@ index 75a64a8..624643b 100644
          super.onViewCreated(view, savedInstanceState)
  
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
-index afd90b7..eb4f680 100644
+index afd90b7..1f7d067 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
 +++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
 @@ -40,6 +40,7 @@ import androidx.preference.PreferenceDataStore
@@ -337,7 +337,7 @@ index afd90b7..eb4f680 100644
              private val profileStatePayload = Any()
  
              private fun getItem(profileId: Long): ProxyEntity {
-@@ -2380,20 +2515,86 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -2380,20 +2515,90 @@ class ConfigurationFragment @JvmOverloads constructor(
                      selectedProfileIndex = newProfileIds.indexOf(selectedProxy)
                  }
  
@@ -346,7 +346,7 @@ index afd90b7..eb4f680 100644
 +                val oldIds = synchronized(configurationIdList) { ArrayList(configurationIdList) }
 +
 +                if (oldIds.isEmpty()) {
-+                    // 首次装载：30 个/帧 高速分片渲染——先出卡，再流式补齐。
++                    // 首次装载：20 个/帧 分片渲染——先出卡，再流式补齐（压力对齐滑动手感）。
 +                    // 期间 loadInFlight 保持 true，兜底/防重入不会重复触发
 +                    configurationListView.post {
 +                        applyFirstFill(newProfileMap, newProfileIds, selectedProfileIndex)
@@ -384,16 +384,18 @@ index afd90b7..eb4f680 100644
 +            }
  
 +            /**
-+             * 首次装载分片渲染：每帧 30 个，主线程 post 链式推进。
-+             * 大分组先出前 30 张卡片，其余流式补齐；每步校验数据一致性，
-+             * 检测到并发写入时直接一次性全量刷新收尾。完成后数据常驻适配器。
++             * 首次装载分片渲染：每帧 20 个，postOnAnimation 逐帧推进。
++             * 每帧最多一个小分片，与滑动手势动画共享帧预算——复刻官方
++             * 「空白页 → 迅速呈现」的丝滑手感，又无官方大分组长时间白屏的问题。
++             * 每步校验数据一致性，检测到并发写入时直接一次性全量刷新收尾。
++             * 完成后数据常驻适配器。
 +             */
 +            private fun applyFirstFill(
 +                map: Map<Long, ProxyEntity>,
 +                ids: List<Long>,
 +                selectedProfileIndex: Int,
 +            ) {
-+                val chunk = 30
++                val chunk = 20
 +                var from = 0
 +                fun step() {
 +                    if (!::configurationListView.isInitialized) return
@@ -422,7 +424,9 @@ index afd90b7..eb4f680 100644
 +                    }
 +                    from = to
 +                    if (from < ids.size) {
-+                        configurationListView.post { step() }
++                        // 逐帧推进（每帧最多一个分片）：压力随掉帧自动降载，
++                        // 不会像 View.post 那样一帧内挤进多个分片
++                        configurationListView.postOnAnimation { step() }
 +                    }
                  }
 +                step()
