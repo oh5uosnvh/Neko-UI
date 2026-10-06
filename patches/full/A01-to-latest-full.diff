@@ -87,7 +87,7 @@ index 75a64a8..624643b 100644
          super.onViewCreated(view, savedInstanceState)
  
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
-index afd90b7..187781e 100644
+index afd90b7..eb4f680 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
 +++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
 @@ -40,6 +40,7 @@ import androidx.preference.PreferenceDataStore
@@ -203,7 +203,7 @@ index afd90b7..187781e 100644
              }
          }
  
-@@ -1555,9 +1597,62 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -1555,9 +1597,74 @@ class ConfigurationFragment @JvmOverloads constructor(
              // 于是拿到的还是改名前那个旧对象 —— 表现就是「名字像没改一样」，
              // 直到列表被整体重建（切页/进设置再回来）才刷新。
              // 就地替换保持原有顺序，同时把 ☴ 列表和 tab 一起更新掉。
@@ -213,11 +213,23 @@ index afd90b7..187781e 100644
 -                tabLayout.getTabAt(index)?.text = group.displayName()
 +
 +            if (orderChanged) {
-+                // 分组页拖动排序：整体重排（标签栏 + ☴ 快速列表），保持当前分组选中
++                // 分组页拖动排序（003：松手落库后广播一次）：就地重排
++                // （标签栏 + ☴ 快速列表），保持当前分组选中。
++                // 只发 notifyItemMoved 平移既有页面——pager 已用分组 id 作稳定 ID，
++                // 页面原位跟随不重建；禁止 notifyDataSetChanged（FragmentStateAdapter
++                // 会销毁重建全部分组页，松手后必卡一下）。
 +                val currentId = DataStore.selectedGroup
 +                tabLayout.post {
-+                    groupList.sortBy { it.userOrder }
-+                    notifyDataSetChanged()
++                    val target = groupList.sortedBy { it.userOrder }
++                    if (target.map { it.id } != groupList.map { it.id }) {
++                        for (i in target.indices) {
++                            val cur = groupList.indexOfFirst { it.id == target[i].id }
++                            if (cur != i) {
++                                groupList.add(i, groupList.removeAt(cur))
++                                notifyItemMoved(cur, i)
++                            }
++                        }
++                    }
 +                    val newIndex = groupList.indexOfFirst { it.id == currentId }
 +                    if (newIndex >= 0) {
 +                        groupPager.setCurrentItem(newIndex, false)
@@ -268,7 +280,7 @@ index afd90b7..187781e 100644
              }
          }
  
-@@ -1598,6 +1693,30 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -1598,6 +1705,30 @@ class ConfigurationFragment @JvmOverloads constructor(
          lateinit var undoManager: UndoSnackbarManager<ProxyEntity>
          var adapter: ConfigurationAdapter? = null
  
@@ -299,7 +311,7 @@ index afd90b7..187781e 100644
          override fun onSaveInstanceState(outState: Bundle) {
              super.onSaveInstanceState(outState)
  
-@@ -1732,10 +1851,11 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -1732,10 +1863,11 @@ class ConfigurationFragment @JvmOverloads constructor(
  
              if (::configurationListView.isInitialized && configurationListView.size == 0) {
                  configurationListView.adapter = adapter
@@ -315,7 +327,7 @@ index afd90b7..187781e 100644
                  onViewCreated(requireView(), null)
              }
              checkOrderMenu()
-@@ -1931,6 +2051,9 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -1931,6 +2063,9 @@ class ConfigurationFragment @JvmOverloads constructor(
              var configurationIdList: MutableList<Long> = mutableListOf()
              val configurationList = HashMap<Long, ProxyEntity>()
              private val pendingTrafficUpdates = HashSet<Long>()
@@ -325,7 +337,7 @@ index afd90b7..187781e 100644
              private val profileStatePayload = Any()
  
              private fun getItem(profileId: Long): ProxyEntity {
-@@ -2380,20 +2503,86 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -2380,20 +2515,86 @@ class ConfigurationFragment @JvmOverloads constructor(
                      selectedProfileIndex = newProfileIds.indexOf(selectedProxy)
                  }
  
@@ -418,7 +430,7 @@ index afd90b7..187781e 100644
  
          }
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
-index af75c17..f6268ee 100644
+index af75c17..45c7c4d 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
 +++ b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
 @@ -67,6 +67,33 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
@@ -527,7 +539,7 @@ index af75c17..f6268ee 100644
              val first = groupList[from]
              var previousOrder = first.userOrder
              val (step, range) = if (from < to) Pair(1, from until to) else Pair(
-@@ -578,17 +628,30 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+@@ -578,17 +628,29 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                  next.userOrder = previousOrder
                  previousOrder = order
                  groupList[i] = next
@@ -539,11 +551,10 @@ index af75c17..f6268ee 100644
 -            updated.add(first)
 +            synchronized(updated) { updated.add(first) }
              notifyItemMoved(from, to)
-+            // 实时同步：每次换位立即落库并广播（配置页标签栏 + ☴ 列表即时跟随）；
-+            // 分组页自身的回声由 suppressSelfEcho 屏蔽，避免打断拖拽
-+            commitMove()
          }
  
++        // 官方语义：clearView（松手落位）时统一落库；在此官方点之后追加一轮广播，
++        // 让配置页标签栏与 ☴ 快速列表即时跟随新顺序。拖动中途零落库、零广播。
          fun commitMove() = runOnDefaultDispatcher {
 -            updated.forEach { SagerDatabase.groupDao.updateGroup(it) }
 -            updated.clear()
@@ -562,7 +573,7 @@ index af75c17..f6268ee 100644
          }
  
          fun remove(index: Int) {
-@@ -602,6 +665,12 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+@@ -602,6 +664,12 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                  groupList.add(index, item)
                  notifyItemInserted(index)
              }
@@ -575,7 +586,7 @@ index af75c17..f6268ee 100644
          }
  
          override fun commit(actions: List<Pair<Int, ProxyGroup>>) {
-@@ -613,6 +682,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
+@@ -613,6 +681,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
          }
  
          override suspend fun groupAdd(group: ProxyGroup) {
@@ -584,15 +595,16 @@ index af75c17..f6268ee 100644
              groupList.add(group)
              delay(300L)
  
-@@ -643,6 +714,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
-         }
- 
-         override suspend fun groupUpdated(group: ProxyGroup) {
-+            // 拖动中的自身回声直接吞掉：数据与本地一致，重绑反而打断拖拽
-+            if (suppressSelfEcho) return
-             val index = groupList.indexOfFirst { it.id == group.id }
-             if (index == -1) {
+@@ -648,6 +718,9 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                  reload()
+                 return
+             }
++            // 自身回声（move 原地改的同一实例）无需重绑，否则松手后卡片闪一下；
++            // 拖动中的一切广播先吞掉，松手时本地已是最终状态
++            if (suppressSelfEcho || groupList[index] === group) return
+             groupList[index] = group
+             onMainDispatcher {
+                 undoManager.flush()
 @@ -696,7 +769,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
          val groupUser = binding.groupUser
          val editButton = binding.edit

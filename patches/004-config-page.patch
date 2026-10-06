@@ -1,5 +1,5 @@
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
-index afd90b7..187781e 100644
+index afd90b7..eb4f680 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
 +++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
 @@ -40,6 +40,7 @@ import androidx.preference.PreferenceDataStore
@@ -115,7 +115,7 @@ index afd90b7..187781e 100644
              }
          }
  
-@@ -1555,9 +1597,62 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -1555,9 +1597,74 @@ class ConfigurationFragment @JvmOverloads constructor(
              // 于是拿到的还是改名前那个旧对象 —— 表现就是「名字像没改一样」，
              // 直到列表被整体重建（切页/进设置再回来）才刷新。
              // 就地替换保持原有顺序，同时把 ☴ 列表和 tab 一起更新掉。
@@ -125,11 +125,23 @@ index afd90b7..187781e 100644
 -                tabLayout.getTabAt(index)?.text = group.displayName()
 +
 +            if (orderChanged) {
-+                // 分组页拖动排序：整体重排（标签栏 + ☴ 快速列表），保持当前分组选中
++                // 分组页拖动排序（003：松手落库后广播一次）：就地重排
++                // （标签栏 + ☴ 快速列表），保持当前分组选中。
++                // 只发 notifyItemMoved 平移既有页面——pager 已用分组 id 作稳定 ID，
++                // 页面原位跟随不重建；禁止 notifyDataSetChanged（FragmentStateAdapter
++                // 会销毁重建全部分组页，松手后必卡一下）。
 +                val currentId = DataStore.selectedGroup
 +                tabLayout.post {
-+                    groupList.sortBy { it.userOrder }
-+                    notifyDataSetChanged()
++                    val target = groupList.sortedBy { it.userOrder }
++                    if (target.map { it.id } != groupList.map { it.id }) {
++                        for (i in target.indices) {
++                            val cur = groupList.indexOfFirst { it.id == target[i].id }
++                            if (cur != i) {
++                                groupList.add(i, groupList.removeAt(cur))
++                                notifyItemMoved(cur, i)
++                            }
++                        }
++                    }
 +                    val newIndex = groupList.indexOfFirst { it.id == currentId }
 +                    if (newIndex >= 0) {
 +                        groupPager.setCurrentItem(newIndex, false)
@@ -180,7 +192,7 @@ index afd90b7..187781e 100644
              }
          }
  
-@@ -1598,6 +1693,30 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -1598,6 +1705,30 @@ class ConfigurationFragment @JvmOverloads constructor(
          lateinit var undoManager: UndoSnackbarManager<ProxyEntity>
          var adapter: ConfigurationAdapter? = null
  
@@ -211,7 +223,7 @@ index afd90b7..187781e 100644
          override fun onSaveInstanceState(outState: Bundle) {
              super.onSaveInstanceState(outState)
  
-@@ -1732,10 +1851,11 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -1732,10 +1863,11 @@ class ConfigurationFragment @JvmOverloads constructor(
  
              if (::configurationListView.isInitialized && configurationListView.size == 0) {
                  configurationListView.adapter = adapter
@@ -227,7 +239,7 @@ index afd90b7..187781e 100644
                  onViewCreated(requireView(), null)
              }
              checkOrderMenu()
-@@ -1931,6 +2051,9 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -1931,6 +2063,9 @@ class ConfigurationFragment @JvmOverloads constructor(
              var configurationIdList: MutableList<Long> = mutableListOf()
              val configurationList = HashMap<Long, ProxyEntity>()
              private val pendingTrafficUpdates = HashSet<Long>()
@@ -237,7 +249,7 @@ index afd90b7..187781e 100644
              private val profileStatePayload = Any()
  
              private fun getItem(profileId: Long): ProxyEntity {
-@@ -2380,20 +2503,86 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -2380,20 +2515,86 @@ class ConfigurationFragment @JvmOverloads constructor(
                      selectedProfileIndex = newProfileIds.indexOf(selectedProxy)
                  }
  

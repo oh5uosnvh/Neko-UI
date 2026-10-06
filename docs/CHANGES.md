@@ -44,6 +44,11 @@
   （AtomicBoolean 单飞护栏）、`resetScrollState`。
 - **验证**：dex 含 `ensureLoadedIfEmpty`/`applyFirstFill`；进入 500+ 节点分组首屏立即可见。
 - **红线**：不做 ±1 邻页预取（曾因大分组内存压力卡顿被移除）；填充只在数据为空时触发。
+- **拖动松手广播的就地重排**（`groupUpdated` 的 `orderChanged` 分支）：分组页
+  松手落库广播后，标签栏/☴ 按 `userOrder` 就地 `notifyItemMoved` 重排并保持
+  选中分组——**禁止 notifyDataSetChanged**（FragmentStateAdapter 全量销毁重建
+  分组页 = 拖动掉帧元凶）。pager 已用分组 id 作稳定 ID
+  （`getItemId`/`containsItem`），页面原位跟随不重建。
 
 ---
 
@@ -85,35 +90,43 @@
 
 ## 规格第 8 项：分组卡片长按拖动排序（补丁 `003-groups-page-drag.patch`）
 
-- **意图**：拖动手感 = **starifly 官方原文**（ItemTouchHelper 默认换位判定/动画，
-  clearView 才是官方的收尾点）。历史 bug：补丁曾把「每次换位 → 落库 → 广播」
-  全链路放在拖动中途执行，而分组页自身 adapter 也是 GroupManager 监听者——
-  回声 `groupUpdated` 里的 `notifyItemChanged` 会重绑**正在拖拽的卡片**，打乱
-  ItemTouchHelper 的位置记账，导致手指刚碰到相邻卡片就提前换位。
-  **修复**：拖动中（首个 onMove → clearView）用 `suppressSelfEcho` 屏蔽自身
-  回声；**实时广播保留**——配置页分组标签与 ☴ 列表等其他监听者照常即时跟随。
+- **意图**：拖动路径 = **starifly 官方原文逐行对齐**：拖动中途只做
+  `notifyItemMoved`（零落库、零广播），松手 `clearView → commitMove()` 统一
+  落库——这是官方「首次打开拖动也丝滑」的根本原因。历史两次翻车：
+  ①「每次换位 → 落库 → 广播」放拖动中途：广播打进配置页 pager，`orderChanged`
+  命中 `notifyDataSetChanged()` → FragmentStateAdapter 把**所有分组页 fragment
+  销毁重建**，每换位一轮 → 全程掉帧（首次打开 pager 满载时最重）；
+  ② 广播回声 `groupUpdated` 重绑正在拖拽的卡片 → 未过中线提前换位。
+  **修复**：中途零工作 + `suppressSelfEcho`/同实例判断双闸吞回声 + 配置页
+  就地重排（notifyItemMoved）。官方语义之上只追加一件事：**松手落库后广播
+  一轮**（☴ 列表与配置页标签栏需要跟随）。
 - **文件**：`ui/GroupFragment.kt`
 - **关键符号**：
   - `isLongPressDragEnabled() = true`（官方机制，SimpleCallback(UP|DOWN, START)）；
   - `interpolateOutOfBoundsScroll`：`speed = (maxScroll * 0.5f).toInt().coerceAtLeast(1)`
     （固定值、无插值渐加速；maxScroll = `R.dimen.item_touch_helper_max_drag_scroll_per_frame`）；
   - `onMove`：首行置 `groupAdapter.suppressSelfEcho = true`，再 `move()`；
-  - `clearView`：`commitMove()` 后置 `suppressSelfEcho = false`
-    （拖动结束后的最终回声正常处理，顺带对齐外部更新）；
-  - `move()`：NO_POSITION/越界防护 + 每次换位末尾 `commitMove()`（实时同步保留）；
-  - `commitMove()`：`synchronized(updated)` 锁内取快照后清空，后台只遍历快照——
-    修复快速连拖多卡的 `ConcurrentModificationException`；落库后
-    `GroupManager.iterator { groupUpdated(group) }` 广播（保留）；
-  - adapter `groupUpdated(group)`：首行 `if (suppressSelfEcho) return`（回声吞掉）；
-  - 配置页侧兜底：`syncOrderFromDb()`（004）——每次配置页显示时按数据库
-    userOrder 就地对齐一次（广播竞态保险丝，只在集合一致、仅顺序不同时动作）。
-- **验证**：dex 含 `syncOrderFromDb`；长按卡片可拖动；**必须拖过相邻卡片中线
-  才换位、未松手时不再提前换位**；拖到边缘滚动速度均匀（官方最大速度的 50%）；
-  快速连续拖多卡不崩溃；拖动期间配置页/☴ 的顺序实时跟随。
+  - `move()`：官方原文（NO_POSITION 防护 + `notifyItemMoved`），**无任何落库/广播**；
+  - `clearView`：`commitMove()`（官方落位点，松手才落库）→ 置 `suppressSelfEcho = false`；
+  - `commitMove()`：官方落库 + **追加一轮广播**（配置页标签栏 + ☴ 列表即时跟随）；
+    `synchronized(updated)` 锁内取快照——修复快速连拖多卡的
+    `ConcurrentModificationException`；
+  - adapter `groupUpdated(group)`：
+    `if (suppressSelfEcho || groupList[index] === group) return`（拖动中/自身
+    回声双闸——同实例无需重绑，否则松手后卡片闪一下）；
+  - 配置页侧（004）：`groupUpdated` 的 `orderChanged` 分支 = 按 `userOrder`
+    **就地 `notifyItemMoved` 重排**（pager 已用分组 id 作稳定 ID，页面原位跟随），
+    **禁止 notifyDataSetChanged**；`syncOrderFromDb()` 兜底保持。
+- **验证**：dex 含 `syncOrderFromDb`；长按卡片可拖动；**首次打开分组页拖动
+  全程丝滑（与切换后再拖无差别）**；必须拖过相邻卡片中线才换位；拖到边缘
+  滚动速度均匀（官方最大速度的 50%）；快速连续拖多卡不崩溃；**松手后**配置页
+  标签栏与 ☴ 列表顺序即时生效。
 - **红线**：
-  - `move()`/`commitMove()` 的换位与落库语义 = 官方 + 上述增强，**回声屏蔽
-    只许挂在 `suppressSelfEcho` 上**，不得改成砍广播、不得在换位路径上加
-    刷新/重载；
+  - 拖动中途（onMove 路径）**不得出现任何落库、广播、刷新、重载**；
+  - 同步点只在 `clearView → commitMove()`（官方语义），广播是官方点之后的
+    唯一追加物；
+  - 配置页 `orderChanged` 分支**禁止 notifyDataSetChanged**（FragmentStateAdapter
+    全量销毁重建分组页），只许就地 `notifyItemMoved`；
   - 边缘速度系数 **0.5f 固定**（勿改渐进插值、勿改其它系数）；
   - `updated` 的增删必须在主线程锁内，后台只碰快照；
   - 拖动保持官方长按触发，不得引入额外触发入口；

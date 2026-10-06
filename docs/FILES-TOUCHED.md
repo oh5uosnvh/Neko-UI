@@ -12,7 +12,7 @@
 | `ui/LogcatFragment.kt` | 002 | 滚动复位 + 日志文本复位 |
 | `ui/AboutFragment.kt` | 002 | 滚动复位覆写（NestedScrollView） |
 | `ui/GroupFragment.kt` | 003 | scrollToGroup 定位、删除即时同步+幂等护栏、**长按拖动=官方手感 + suppressSelfEcho 回声屏蔽（修中途换位 bug）+ 固定 50% 边缘速度 + 实时 commitMove + 锁内快照防崩溃**、滚动复位 |
-| `ui/ConfigurationFragment.kt` | 004 | 动态加载（ensureLoadedIfEmpty/applyFirstFill）、DiffUtil 增量刷新、syncOrderFromDb 顺序兜底、标签栏回中同步、切换路径=官方 |
+| `ui/ConfigurationFragment.kt` | 004 | 动态加载（ensureLoadedIfEmpty/applyFirstFill）、DiffUtil 增量刷新、拖动松手广播就地重排（notifyItemMoved，禁 notifyDataSetChanged）、syncOrderFromDb 顺序兜底、标签栏回中同步、切换路径=官方 |
 | `ui/GroupSettingsActivity.kt` | 005 | 返回自动选中新分组 |
 | `ui/TopBarController.kt` | 010 | ☴ 列表行 名称·数量（`applyGroupCounts`，灰阶 textColorSecondary，异步 countByGroup） |
 | `ui/ThemedActivity.kt` | 006 | 多页面状态栏内边距修复 |
