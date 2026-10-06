@@ -65,7 +65,11 @@ jobs:
           set -euo pipefail
           URL="https://github.com/oh5uosnvh/Nekobox-MG.git"
           [ -n "$GH_PAT" ] && URL="https://x-access-token:${GH_PAT}@github.com/oh5uosnvh/Nekobox-MG.git"
-          git clone --depth 1 $([ -n "$MODS_REF" ] && echo "-b $MODS_REF") "$URL" mods
+          git clone --depth 1 "$URL" mods
+          if [ -n "$MODS_REF" ]; then
+            git -C mods fetch --depth 1 origin "$MODS_REF"
+            git -C mods checkout --detach FETCH_HEAD
+          fi
           git -C mods log --oneline -1
 
       - name: Setup Go
@@ -139,7 +143,11 @@ jobs:
           set -euo pipefail
           URL="https://github.com/oh5uosnvh/Nekobox-MG.git"
           [ -n "$GH_PAT" ] && URL="https://x-access-token:${GH_PAT}@github.com/oh5uosnvh/Nekobox-MG.git"
-          git clone --depth 1 $([ -n "$MODS_REF" ] && echo "-b $MODS_REF") "$URL" mods
+          git clone --depth 1 "$URL" mods
+          if [ -n "$MODS_REF" ]; then
+            git -C mods fetch --depth 1 origin "$MODS_REF"
+            git -C mods checkout --detach FETCH_HEAD
+          fi
           echo "mods @ $(git -C mods log --oneline -1)"
 
       - name: Apply Nekobox-MG protocol mods
