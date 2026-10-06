@@ -38,11 +38,16 @@
 ## 规格第 5 项：分组卡片动态加载（补丁 `004-config-page.patch`）
 
 - **意图**：切换路径（左右滑 / 顶栏滑到某分组点击 / ☴ 点分组名）的呈现机制 =
-  **官方 100% 原文**（官方 `reloadProfiles` 一次性装载逐行对齐：短暂空白停滞 →
-  一次出卡，post 体内零附加）。**20/20 分片填充只是兜底**：`reloadProfiles`
-  入口武装看门狗（`armFallback`，800ms 复查）——官方装载偏慢（部分 70-80
-  节点分组）或竞态未落地、复查适配器仍空 → 自带读库由 `applyFirstFill`
-  （20/20）接管流式补齐，预防长时间/一直白屏；正常装载先落地，看门狗自动
+  **官方 100% 原文**。装载触发时机同为官方原文：页面 fragment onResume
+  （ViewPager2 在滑动 settle 后才把进入页 RESUME → 装载天然发生在滑动动画
+  之后，滑动全程零竞争）；`onPageSelected` 零装载逻辑。历史补丁曾在
+  onPageSelected + 120ms 防抖里提前装载 = 「上一页卡片未消失、下一页就出卡 +
+  中途卡顿」的根因，已删除（settleEnsureJob/loadInFlight/ensureLoadedIfEmpty
+  一并清除）；官方 onResume 的渲染态判空（`configurationListView.size == 0` →
+  挂 adapter + reload）天然自愈「数据在但不渲染」竞态。**20/20 分片填充只是
+  兜底**：`reloadProfiles` 入口武装看门狗（`armFallback`，800ms 复查）——
+  官方装载偏慢（部分 70-80 节点分组）或竞态未落地、复查适配器仍空 → 自带
+  读库由 `applyFirstFill`（20/20）接管流式补齐；正常装载先落地，看门狗自动
   作废。除此之外零改动。
 - **文件**：`ui/ConfigurationFragment.kt`（GroupPagerAdapter 内）
 - **关键符号**：`ensureLoadedIfEmpty`、`applyFirstFill`、`loadInFlight`
