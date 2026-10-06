@@ -1,5 +1,12 @@
 name: Build from patches
 
+# NekoBoxF = upstream NekoBoxForAndroid  +  Neko-UI 10 UI patches
+#            +  Nekobox-MG protocol mods (x365 / xhttp / shanlian / vt / fastup / oppa)
+#
+# The protocol mods are NOT baked into the upstream checkout: this workflow
+# pulls Nekobox-MG at a pinned ref and injects its patched integration layer so
+# the two repos always build together from a single run.
+
 on:
   workflow_dispatch:
     inputs:
@@ -8,25 +15,29 @@ on:
         required: true
         default: 'oh5uosnvh/NekoBoxForAndroid'
       upstream_ref:
-        description: '上游分支/标签/commit（基线=A01 tag@f167ebc，新上游填其release tag）'
+        description: '上游分支/标签/commit'
         required: true
-        default: 'A01'
+        default: 'main'
+      mods_ref:
+        description: 'Nekobox-MG ref (协议魔改源码, 空=HEAD)'
+        required: false
+        default: ''
       anytls_commit:
-        description: 'sing-anytls-shanlian commit'
+        description: 'sing-anytls-shanlian commit (空=HEAD)'
         required: false
-        default: 'a2ad0b9226ede04ef2d8c1a57b67d4784888d45f'
+        default: ''
       vt_commit:
-        description: 'sing-shadowsocks2-vt commit'
+        description: 'sing-shadowsocks2-vt commit (空=HEAD)'
         required: false
-        default: '96cc5b0f2825e2aecaa90d769d56b40669e8a7c5'
+        default: ''
       fastup_commit:
         description: 'fastup-mod commit (空=HEAD)'
         required: false
-        default: '21ee92f65a96541e33a3c60dc40e658aeeba12af'
+        default: ''
       oppa_commit:
         description: 'oppa-mod commit (空=HEAD)'
         required: false
-        default: '9fdcabaa040fe1b16d22a0043008dd23f0416204'
+        default: ''
 
 permissions:
   contents: write
@@ -36,9 +47,70 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ---------------------------------------------------------------- wire test
+  # Compiles Nekobox-MG's x365 package and runs the byte-exact vectors captured
+  # from the official 1.0.63 client. Fails in ~30s instead of ~20min.
+  wire-test:
+    name: x365 wire-format tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout kit
+        uses: actions/checkout@v4
+
+      - name: Clone Nekobox-MG (protocol mods)
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          MODS_REF: ${{ github.event.inputs.mods_ref }}
+        run: |
+          set -euo pipefail
+          URL="https://github.com/oh5uosnvh/Nekobox-MG.git"
+          [ -n "$GH_PAT" ] && URL="https://x-access-token:${GH_PAT}@github.com/oh5uosnvh/Nekobox-MG.git"
+          git clone --depth 1 $([ -n "$MODS_REF" ] && echo "-b $MODS_REF") "$URL" mods
+          git -C mods log --oneline -1
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.23'
+
+      - name: Build minimal module around protocol/x365
+        run: |
+          set -euo pipefail
+          rm -rf wirecheck && mkdir -p wirecheck/x365
+          cp mods/Neko-365/libcore/protocol/x365/conn.go \
+             mods/Neko-365/libcore/protocol/x365/conn_test.go wirecheck/x365/
+          cd wirecheck
+          cat > go.mod <<'EOF'
+          module x365check
+
+          go 1.23
+
+          require (
+              github.com/gofrs/uuid/v5 v5.3.0
+              github.com/sagernet/sing v0.6.0
+              github.com/sagernet/sing-vmess v0.2.0
+          )
+          EOF
+
+      - name: go mod tidy
+        working-directory: wirecheck
+        env:
+          GOFLAGS: -mod=mod
+          GOTOOLCHAIN: local
+        run: go mod tidy
+
+      - name: Run wire tests
+        working-directory: wirecheck
+        env:
+          GOFLAGS: -mod=mod
+          GOTOOLCHAIN: local
+        run: go test ./x365/ -v
+
+  # -------------------------------------------------------------------- build
   build:
     name: Build patched APK
     runs-on: ubuntu-latest
+    needs: wire-test
     timeout-minutes: 90
     steps:
       - name: Checkout kit
@@ -58,6 +130,42 @@ jobs:
           git checkout "$REF"
           git submodule update --init --recursive --jobs 8
           git log --oneline -1
+
+      - name: Clone Nekobox-MG (protocol mods)
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          MODS_REF: ${{ github.event.inputs.mods_ref }}
+        run: |
+          set -euo pipefail
+          URL="https://github.com/oh5uosnvh/Nekobox-MG.git"
+          [ -n "$GH_PAT" ] && URL="https://x-access-token:${GH_PAT}@github.com/oh5uosnvh/Nekobox-MG.git"
+          git clone --depth 1 $([ -n "$MODS_REF" ] && echo "-b $MODS_REF") "$URL" mods
+          echo "mods @ $(git -C mods log --oneline -1)"
+
+      - name: Apply Nekobox-MG protocol mods
+        run: |
+          set -euo pipefail
+          # integrate.sh applies patches/000-integration.patch (40 modified
+          # files) then overlays files/ (12 new files, incl. the current x365
+          # and xhttp sources). Idempotent and fails loudly on upstream drift.
+          bash mods/Neko-gjgx/integrate.sh upstream
+
+      - name: Assert current x365 is in place
+        run: |
+          set -euo pipefail
+          cd upstream
+          for f in libcore/protocol/x365/conn.go \
+                   libcore/protocol/x365/outbound.go \
+                   libcore/protocol/xhttp/outbound.go \
+                   libcore/protocol/xhttp/cipher.go ; do
+            [ -f "$f" ] || { echo "::error::$f missing after integration"; exit 1; }
+          done
+          # the v2 session opener must be present in the x365 source we ship
+          grep -q 'PrologueVersion' libcore/protocol/x365/conn.go \
+            || { echo "::error::x365 v2 prologue not present"; exit 1; }
+          grep -q 'libcoreX365' libcore/box_include.go \
+            || { echo "::error::x365 outbound not registered"; exit 1; }
+          echo "x365 mod applied:"; git -C . diff --stat -- libcore app | tail -3
 
       - name: Apply mod patches (10)
         run: |
@@ -80,15 +188,59 @@ jobs:
         with:
           ndk-version: r25c
 
-      - name: Pin external mod repos
+      # Resolve every external mod repo to a concrete commit. The 2026-10-05
+      # rebuild recreated these repos and changed all shas; empty input = HEAD.
+      - name: Resolve external mod refs
+        id: resolve
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
+          set -euo pipefail
+          resolve() {
+            repo="$1"; ref="$2"
+            if [ -n "$ref" ]; then
+              code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: token ${GH_PAT}" \
+                     "https://api.github.com/repos/${repo}/commits/${ref}")
+              if [ "$code" = "200" ]; then echo "$ref"; return; fi
+              echo "::warning::${repo}: ref '${ref}' not found (HTTP ${code}); using HEAD" >&2
+            fi
+            curl -s -H "Authorization: token ${GH_PAT}" \
+              "https://api.github.com/repos/${repo}/commits/HEAD" \
+              | python3 -c 'import sys,json; print(json.load(sys.stdin)["sha"])'
+          }
+          ANYTLS=$(resolve oh5uosnvh/sing-anytls-shanlian "${{ github.event.inputs.anytls_commit }}")
+          VT=$(resolve oh5uosnvh/sing-shadowsocks2-vt "${{ github.event.inputs.vt_commit }}")
+          FASTUP=$(resolve oh5uosnvh/fastup-mod "${{ github.event.inputs.fastup_commit }}")
+          OPPA=$(resolve oh5uosnvh/oppa-mod "${{ github.event.inputs.oppa_commit }}")
+          echo "anytls=${ANYTLS}" >> "$GITHUB_OUTPUT"
+          echo "vt=${VT}"         >> "$GITHUB_OUTPUT"
+          echo "fastup=${FASTUP}" >> "$GITHUB_OUTPUT"
+          echo "oppa=${OPPA}"     >> "$GITHUB_OUTPUT"
+
+      - name: Pin external mod repos
+        env:
+          ANYTLS: ${{ steps.resolve.outputs.anytls }}
+          VT: ${{ steps.resolve.outputs.vt }}
+          FASTUP: ${{ steps.resolve.outputs.fastup }}
+          OPPA: ${{ steps.resolve.outputs.oppa }}
+        run: |
+          set -euo pipefail
           cd upstream
-          sed -i "s/^export COMMIT_ANYTLS_SHANLIAN=.*/export COMMIT_ANYTLS_SHANLIAN=\"${{ github.event.inputs.anytls_commit || 'a2ad0b9226ede04ef2d8c1a57b67d4784888d45f' }}\"/" buildScript/lib/core/get_source_env.sh
-          sed -i "s/^export COMMIT_SING_SS_VT=.*/export COMMIT_SING_SS_VT=\"${{ github.event.inputs.vt_commit || '96cc5b0f2825e2aecaa90d769d56b40669e8a7c5' }}\"/" buildScript/lib/core/get_source_env.sh
-          sed -i "s/^export COMMIT_FASTUP_MOD=.*/export COMMIT_FASTUP_MOD=\"${{ github.event.inputs.fastup_commit || '21ee92f65a96541e33a3c60dc40e658aeeba12af' }}\"/" buildScript/lib/core/get_source_env.sh
-          sed -i "s/^export COMMIT_OPPA_MOD=.*/export COMMIT_OPPA_MOD=\"${{ github.event.inputs.oppa_commit || '9fdcabaa040fe1b16d22a0043008dd23f0416204' }}\"/" buildScript/lib/core/get_source_env.sh
+          F=buildScript/lib/core/get_source_env.sh
+          [ -f "$F" ] || { echo "::error::$F missing"; exit 1; }
+          set_kv() {
+            key="$1"; val="$2"
+            if grep -q "^export ${key}=" "$F"; then
+              sed -i "s|^export ${key}=.*|export ${key}=\"${val}\"|" "$F"
+            else
+              echo "export ${key}=\"${val}\"" >> "$F"
+            fi
+          }
+          set_kv COMMIT_ANYTLS_SHANLIAN "$ANYTLS"
+          set_kv COMMIT_SING_SS_VT       "$VT"
+          set_kv COMMIT_FASTUP_MOD       "$FASTUP"
+          set_kv COMMIT_OPPA_MOD         "$OPPA"
+          echo "--- $F ---"; cat "$F"
 
       - name: LibCore cache key
         id: libcore-key
@@ -130,19 +282,36 @@ jobs:
 
       - name: Verify mods are in the binary
         run: |
+          set -euo pipefail
           cd upstream
           APK=$(find app/build/outputs/apk -name '*arm64-v8a*.apk' | head -1)
           unzip -o -q "$APK" 'lib/arm64-v8a/libgojni.so' -d /tmp/apkchk
-          grep -q "x365" /tmp/apkchk/lib/arm64-v8a/libgojni.so || { echo "::error::x365 missing"; exit 1; }
-          grep -q "viewTurbo" /tmp/apkchk/lib/arm64-v8a/libgojni.so || { echo "::error::viewTurbo missing"; exit 1; }
-          grep -q "fastup" /tmp/apkchk/lib/arm64-v8a/libgojni.so || { echo "::error::fastup missing"; exit 1; }
-          grep -q "oppa-mod/oppa" /tmp/apkchk/lib/arm64-v8a/libgojni.so || { echo "::error::oppa missing"; exit 1; }
-          grep -q "mihomo/1.19.25" /tmp/apkchk/lib/arm64-v8a/libgojni.so || { echo "::error::mihomo spoof missing"; exit 1; }
+          SO=/tmp/apkchk/lib/arm64-v8a/libgojni.so
+          check() {
+            n=$(strings -a "$SO" | grep -c "$2" || true)
+            echo "  $1: $n"
+            [ "$n" -ge "$3" ] || { echo "::error::$1 (\"$2\") missing"; exit 1; }
+          }
+          check x365      x365          1
+          check viewTurbo viewTurbo     1
+          check fastup    fastup        1
+          check oppa      oppa-mod/oppa 1
+          check mihomo    mihomo/1.19.25 1
           python3 "$GITHUB_WORKSPACE/scripts/verify_build.py" "$APK"
+
+      - name: Rename APK
+        run: |
+          set -euo pipefail
+          cd "$APK_DIR"
+          APK=$(ls *.apk | head -1)
+          NEW="NekoBoxF-mod-r${{ github.run_number }}-arm64-v8a.apk"
+          mv "$APK" "$NEW"
+          echo "APK_FINAL=$APK_DIR/$NEW" >> "$GITHUB_ENV"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: NekoBoxF-patched-arm64
-          path: upstream/app/build/outputs/apk/**/NekoBox*.apk
+          path: ${{ env.APK_FINAL }}
           if-no-files-found: error
+          retention-days: 30
