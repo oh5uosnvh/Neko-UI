@@ -208,6 +208,17 @@ jobs:
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
 
+      - name: Assert 011 group-update progress fix is in place
+        run: |
+          set -euo pipefail
+          cd upstream
+          F=app/src/main/java/io/nekohasekai/sagernet/group/GroupUpdater.kt
+          grep -q 'GroupManager.postUpdate(proxyGroup.id)' "$F" \
+            || { echo "::error::011 fix missing (progress bar sticky bug)"; exit 1; }
+          ! grep -q 'GroupManager.postUpdate(proxyGroup)$' "$F" \
+            || { echo "::error::011 not applied (old same-instance broadcast)"; exit 1; }
+          echo "011 group-update progress fix present"
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
