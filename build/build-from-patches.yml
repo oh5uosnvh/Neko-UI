@@ -291,6 +291,15 @@ jobs:
           go version
           ./run lib core
 
+      - name: Test integrated x365 outbound transport
+        if: steps.libcore-cache.outputs.cache-hit != 'true'
+        env:
+          GOSUMDB: off
+        run: |
+          set -euo pipefail
+          cd upstream/libcore
+          go test ./protocol/x365 -run 'TestPrepareX365Transport|TestEncodeMatchesLiveCapture' -count=1 -v
+
       - name: Build APK
         env:
           BUILD_PLUGIN: none
