@@ -21,6 +21,7 @@
 | `res/layout/layout_tools.xml` | 007 | = 官方原文（elevation 4dp）+ 透明 ripple |
 | `res/layout/layout_group_item.xml` | 008 | 卡片布局净化：不放置拖动手柄图标（长按=唯一拖动入口） |
 | `.github/workflows/build_mod.yml` | 009 | 协议 mod 源钉扎 + libgojni 校验 + GOSUMDB=off |
+| `group/GroupUpdater.kt` | 011 | finishUpdate 广播数据库最新对象——修复“更新完成但卡片进度条永不收起”（003 同实例回声去重吞掉了完成通知） |
 | `nb4a.properties` | 不打包 | 发版时更新 `PRE_VERSION_NAME`（sbNN） |
 
 ## 基线自带（A01 已有、补丁不触碰——升级上游随基线走）
@@ -62,7 +63,10 @@
 - `interpolateOutOfBoundsScroll` 固定 `maxScroll * 0.5f`（最终规格，勿改渐进/系数）；
 - `move()` 末尾无落库（官方原文）+ NO_POSITION 防护；落库/广播只在 `clearView → commitMove()`；
 - `commitMove()` = `synchronized(updated)` 快照 → 后台落库 → 广播；
-- 长按入口之外不得再引入手柄/按钮触发。
+- 长按入口之外不得再引入手柄/按钮触发；
+- `groupUpdated(group)` 的同实例回声去重保留（防松手闪烁）——**配套前提**是 011：
+  更新完成的广播必须来自数据库新对象（`GroupUpdater.finishUpdate`），两者成对存在，
+  移植时缺一就会出现“进度条永不收起”或“松手闪烁”二选一的回归。
 
 ## 依赖关系图
 

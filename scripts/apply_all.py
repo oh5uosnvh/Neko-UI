@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Neko-UI 补丁应用器（10 补丁）。在**上游源码树根目录**运行。
+"""Neko-UI 补丁应用器（11 补丁）。在**上游源码树根目录**运行。
 
 用法:
   python3 apply_all.py --check          # 只预检，报告每个补丁 CLEAN/CONFLICT
@@ -29,6 +29,7 @@ ORDERED = [
     "008-group-item-longpress-only.patch",
     "009-ci-mod-pins-gosumdb.patch",
     "010-group-list-count.patch",
+    "011-group-update-progress-stuck.patch",
 ]
 
 

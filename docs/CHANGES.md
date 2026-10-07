@@ -202,6 +202,22 @@
 - **移植注意**：新 CI 必须继承钉扎、校验与 GOSUMDB 三件套
   （参考 `build/build-from-patches.yml`）。
 
+### H. 分组卡片“更新进度条永不收起”修复（补丁 `011-group-update-progress-stuck.patch`）
+- **根因（对比官方）**：官方 `GroupAdapter.groupUpdated(group)` 无条件重绑
+  （`groupList[index] = group` + `notifyItemChanged(index)`）。003 为消除拖动落库后的
+  卡片闪烁，追加了同实例回声去重：`groupList[index] === group` 直接 return。
+  而 `startUpdate` 传入的正是分组卡片适配器列表里的**同一个对象**——
+  `finishUpdate → postUpdate(proxyGroup)` 的“更新完成”广播因此被当作回声吞掉。
+  表现 = 订阅内容已更新（对象字段是就地改的，中途的 tick 广播已把它画上屏），
+  但卡片顶部进度条永远转圈、✏️ 按钮一直隐藏。官方源码无此问题（无去重分支）。
+- **修复**：`GroupUpdater.finishUpdate` 改为 `GroupManager.postUpdate(proxyGroup.id)`——
+  从数据库重取最新持久化对象广播。完成通知不再是同一实例，重绑必然发生；
+  003 的拖动去重语义完全不变。
+- **验证**：点卡片更新 → 订阅拉取完成 → 进度条立即收起、✏️ 恢复；
+  拖动排序松手依旧无闪烁；自动更新（SubscriptionUpdater）同样走此路径一并修复。
+- **红线**：`groupUpdated(group)` 的回声去重必须保留；不得把 finishUpdate 改回
+  `postUpdate(proxyGroup)`（同实例广播）；003 的拖动去重与 011 的完成通知互不覆盖。
+
 ---
 
 ## 移植到新上游时的冲突热区（按历史经验排序）

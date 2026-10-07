@@ -1,0 +1,21 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/group/GroupUpdater.kt b/app/src/main/java/io/nekohasekai/sagernet/group/GroupUpdater.kt
+index 426e3d7..9e0891e 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/group/GroupUpdater.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/group/GroupUpdater.kt
+@@ -163,7 +163,15 @@ abstract class GroupUpdater {
+         suspend fun finishUpdate(proxyGroup: ProxyGroup) {
+             updating.remove(proxyGroup.id)
+             progress.remove(proxyGroup.id)
+-            GroupManager.postUpdate(proxyGroup)
++            // 修复：广播数据库中的最新持久化对象，而不是调用方手里的同一实例。
++            // 官方 groupUpdated 无条件重绑；Neko-UI 003 为消除拖动落库后的卡片
++            // 闪烁，对“同一实例回声”做了去重（groupList[index] === group 直接
++            // return）。而 startUpdate 传入的正是分组卡片适配器列表里的同一个
++            // 对象——更新完成的通知因此被当作回声吞掉，卡片顶部的更新进度条
++            // 再也没有机会收起（表现：订阅内容已更新，进度条永远转圈）。
++            // 改为经 postUpdate(groupId) 从数据库重取后广播：完成通知不再是
++            // 同一实例，重绑必然发生；拖动去重逻辑不受任何影响。
++            GroupManager.postUpdate(proxyGroup.id)
+         }
+ 
+     }
