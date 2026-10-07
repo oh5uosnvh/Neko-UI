@@ -22,6 +22,7 @@
 | `res/layout/layout_group_item.xml` | 008 | 卡片布局净化：不放置拖动手柄图标（长按=唯一拖动入口） |
 | `.github/workflows/build_mod.yml` | 009 | 协议 mod 源钉扎 + libgojni 校验 + GOSUMDB=off |
 | `group/GroupUpdater.kt` | 011 | finishUpdate 广播数据库最新对象——修复“更新完成但卡片进度条永不收起”（003 同实例回声去重吞掉了完成通知） |
+| `ui/ConfigurationFragment.kt` | 012 | TestDialog 防抖批量实时回写（250ms）+ 两处 cancel 先放行 runningTest——修复延迟 2~3 秒滞后与测试空档期 |
 | `nb4a.properties` | 不打包 | 发版时更新 `PRE_VERSION_NAME`（sbNN） |
 
 ## 基线自带（A01 已有、补丁不触碰——升级上游随基线走）

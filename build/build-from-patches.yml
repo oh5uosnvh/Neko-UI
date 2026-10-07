@@ -219,6 +219,19 @@ jobs:
             || { echo "::error::011 not applied (old same-instance broadcast)"; exit 1; }
           echo "011 group-update progress fix present"
 
+      - name: Assert 012 connection-test fixes are in place
+        run: |
+          set -euo pipefail
+          cd upstream
+          F=app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+          grep -q 'fun scheduleFlush()' "$F" \
+            || { echo "::error::012 live flush missing"; exit 1; }
+          [ "$(grep -c 'test.flushPending()' "$F")" = "2" ] \
+            || { echo "::error::012 cancel flush wiring wrong"; exit 1; }
+          ! grep -q 'test.results.forEach' "$F" \
+            || { echo "::error::012 not applied (old sequential write-back)"; exit 1; }
+          echo "012 connection-test fixes present"
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:

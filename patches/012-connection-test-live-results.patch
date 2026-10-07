@@ -1,0 +1,105 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+index c19813d..aa6f5bd 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+@@ -136,6 +136,7 @@ import java.net.URLDecoder
+ import java.net.UnknownHostException
+ import java.util.concurrent.ConcurrentHashMap
+ import java.util.concurrent.ConcurrentLinkedQueue
++import java.util.concurrent.atomic.AtomicBoolean
+ import java.util.concurrent.atomic.AtomicInteger
+ import java.util.concurrent.atomic.AtomicLong
+ import java.util.zip.ZipInputStream
+@@ -1134,12 +1135,43 @@ class ConfigurationFragment @JvmOverloads constructor(
+         var notification: ConnectionTestNotification? = null
+ 
+         val results: MutableSet<ProxyEntity> = ConcurrentHashMap.newKeySet()
++        private val flushScheduled = AtomicBoolean(false)
++        private val resultsLock = Any()
+         var proxyN = 0
+         val finishedN = AtomicInteger(0)
+ 
++        // 012: 单个节点测完即防抖批量回写（250ms 合并窗口）。
++        // 行延迟经 ProfileManager.onUpdated 定点刷新，实时变化；
++        // 不再等全部测完/取消后串行回写（旧实现 180 节点要等 2~3 秒才变化）。
++        fun scheduleFlush() {
++            if (dialogStatus.get() == 2) return
++            if (!flushScheduled.compareAndSet(false, true)) return
++            runOnDefaultDispatcher {
++                delay(250)
++                flushScheduled.set(false)
++                flushPending()
++            }
++        }
++
++        // 取出当前累积结果一次性批量落库；cancel 收尾也复用同一入口。
++        suspend fun flushPending() {
++            val snapshot = synchronized(resultsLock) {
++                val copy = ArrayList(results)
++                results.clear()
++                copy
++            }
++            if (snapshot.isEmpty()) return
++            try {
++                ProfileManager.updateProfile(snapshot)
++            } catch (e: Exception) {
++                Logs.w(e)
++            }
++        }
++
+         fun update(profile: ProxyEntity) {
+             if (dialogStatus.get() != 2) {
+-                results.add(profile)
++                synchronized(resultsLock) { results.add(profile) }
++                scheduleFlush()
+             }
+             runOnMainDispatcher {
+                 val context = context ?: return@runOnMainDispatcher
+@@ -1329,18 +1361,15 @@ class ConfigurationFragment @JvmOverloads constructor(
+         test.cancel = {
+             test.dialogStatus.set(2)
+             dialog.dismiss()
++            // 012: 先放行下一次测试（空档期≈0）；取消与回写全部后台收尾。
++            // 进行中的 urlTest 实例最多再跑自身超时（默认 3s）后自行关闭，不阻塞新测试。
++            DataStore.runningTest = false
+             runOnDefaultDispatcher {
+                 mainJob.cancel()
+                 testJobs.forEach { it.cancel() }
+-                test.results.forEach {
+-                    try {
+-                        ProfileManager.updateProfile(it)
+-                    } catch (e: Exception) {
+-                        Logs.w(e)
+-                    }
+-                }
++                // update() 已在测试过程中实时批量落库；这里只补冲最后一批收尾结果。
++                test.flushPending()
+                 GroupManager.postReload(DataStore.currentGroupId())
+-                DataStore.runningTest = false
+             }
+         }
+         test.minimize = {
+@@ -1398,18 +1427,15 @@ class ConfigurationFragment @JvmOverloads constructor(
+         test.cancel = {
+             test.dialogStatus.set(2)
+             dialog.dismiss()
++            // 012: 先放行下一次测试（空档期≈0）；取消与回写全部后台收尾。
++            // 进行中的 urlTest 实例最多再跑自身超时（默认 3s）后自行关闭，不阻塞新测试。
++            DataStore.runningTest = false
+             runOnDefaultDispatcher {
+                 mainJob.cancel()
+                 testJobs.forEach { it.cancel() }
+-                test.results.forEach {
+-                    try {
+-                        ProfileManager.updateProfile(it)
+-                    } catch (e: Exception) {
+-                        Logs.w(e)
+-                    }
+-                }
++                // update() 已在测试过程中实时批量落库；这里只补冲最后一批收尾结果。
++                test.flushPending()
+                 GroupManager.postReload(DataStore.currentGroupId())
+-                DataStore.runningTest = false
+             }
+         }
+         test.minimize = {

@@ -36,7 +36,7 @@ git submodule update --init --recursive
 python3 /path/to/kit/scripts/apply_all.py --check
 ```
 
-输出会把 10 个补丁分成 `CLEAN（可直接 apply）` 与 `CONFLICT（需手工移植）`。
+输出会把 12 个补丁分成 `CLEAN（可直接 apply）` 与 `CONFLICT（需手工移植）`。
 基线自带的规格 1-4（TopBarController / setupFilterBar）不在此列——直接在新上游
 里按 CHANGES #0 的锚点核对它们是否仍然存在。
 

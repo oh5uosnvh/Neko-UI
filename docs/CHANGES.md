@@ -218,6 +218,22 @@
 - **红线**：`groupUpdated(group)` 的回声去重必须保留；不得把 finishUpdate 改回
   `postUpdate(proxyGroup)`（同实例广播）；003 的拖动去重与 011 的完成通知互不覆盖。
 
+### I. 连接测试实时回显 + 取消零空档（补丁 `012-connection-test-live-results.patch`）
+- **根因**：测试过程中 `TestDialog.update()` 只把结果塞进 `results` 集合并刷新弹窗，
+  **不写库、不通知列表**；所有延迟都等全部测完/取消后由 `test.cancel` 串行
+  `ProfileManager.updateProfile` 逐条回写（180 节点 = 180 次写库+广播 + 整页重载，
+  观察为 2~3 秒滞后）。`DataStore.runningTest = false` 又排在这串回写**之后**，
+  于是回写期间点 TCPing/URL Test 被 `runningTest` 静默挡住 = 空档期。
+- **修复**：① `TestDialog` 新增 `scheduleFlush()`/`flushPending()`——每有结果即调度
+  250ms 防抖批量回写（`AtomicBoolean` 防重入 + `resultsLock` 快照），行延迟经
+  `onUpdated` 定点刷新，测试过程中列表实时变化；② 两个 `test.cancel` 均改为
+  **第一行先 `runningTest = false`**，取消/兜底回写/整页同步全部后台收尾，空档期≈0。
+- **验证**：TCPing/URL Test 过程中各节点延迟陆续实时刷新（≤0.3s/节点）；
+  中途取消立即出结果；测完或取消后马上可再次发起测试（<0.5s）。
+  进行中的 `urlTest` 实例最多再跑自身超时（默认 3s）后自行关闭，不阻塞新测试。
+- **红线**：`flushPending()` 必须保持「同步取走快照、批量一次落库」语义；
+  `runningTest = false` 必须在 `runOnDefaultDispatcher` **之前**执行。
+
 ---
 
 ## 移植到新上游时的冲突热区（按历史经验排序）

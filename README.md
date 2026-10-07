@@ -1,6 +1,6 @@
 # Neko-UI
 
-NekoBoxF 的 UI 定制补丁与构建管线。基线 `A01`（tag @ f167ebc，fork 原版），10 个补丁按序应用即得成品。
+NekoBoxF 的 UI 定制补丁与构建管线。基线 `A01`（tag @ f167ebc，fork 原版），12 个补丁按序应用即得成品。
 
 **当前版本：[Neko 0.01](../../releases/tag/v0.01)** · APK 见 [Releases](../../releases)
 
@@ -31,13 +31,15 @@ NekoBoxF 的 UI 定制补丁与构建管线。基线 `A01`（tag @ f167ebc，for
 | 008 | 分组卡片布局净化（长按为唯一拖动入口） |
 | 009 | CI 协议 mod 源钉扎 + GOSUMDB（管线已内建同等逻辑） |
 | 010 | ☴ 列表行 名称·数量（applyGroupCounts） |
+| 011 | 分组更新完成进度条永不收起修复（finishUpdate 广播数据库新对象） |
+| 012 | 连接测试实时回显（250ms 防抖批量回写）+ 取消/测完零空档 |
 
 ## 构建
 
 ```bash
 git clone --recurse-submodules https://github.com/oh5uosnvh/NekoBoxForAndroid.git upstream
 cd upstream && git checkout A01
-python3 ../scripts/apply_all.py                # 应用 10 补丁（--check 仅预检）
+python3 ../scripts/apply_all.py                # 应用 12 补丁（--check 仅预检）
 ./run init action gradle && ./gradlew assemblePreviewDebug
 python3 ../scripts/verify_build.py <apk>       # 成品校验
 ```
