@@ -164,8 +164,8 @@ jobs:
           # Never let the x365 refresh silently replace a newer Blackstone
           # implementation with an archived fixed-magic cipher again.
           for file in cipher.go cipher_test.go outbound.go; do
-            cmp ../mods/Neko-xhttp/libcore/protocol/xhttp/$file \
-                ../mods/Neko-gjgx/files/libcore/protocol/xhttp/$file
+            cmp mods/Neko-xhttp/libcore/protocol/xhttp/$file \
+                mods/Neko-gjgx/files/libcore/protocol/xhttp/$file
           done
           cd upstream
           if [ -f libcore/protocol/x365/conn.go ] && grep -q libcoreX365 libcore/box_include.go; then
