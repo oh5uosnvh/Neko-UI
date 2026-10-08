@@ -23,6 +23,13 @@
 | `.github/workflows/build_mod.yml` | 009 | 协议 mod 源钉扎 + libgojni 校验 + GOSUMDB=off |
 | `group/GroupUpdater.kt` | 011 | finishUpdate 广播数据库最新对象——修复“更新完成但卡片进度条永不收起”（003 同实例回声去重吞掉了完成通知） |
 | `ui/ConfigurationFragment.kt` | 012 | TestDialog 防抖批量实时回写（250ms）+ 两处 cancel 先放行 runningTest——修复延迟 2~3 秒滞后与测试空档期 |
+| `bg/proto/TestInstance.kt` | 013 | suspendCancellableCoroutine + invokeOnCancellation 即时关实例（僵尸秒死）；阻塞段 withContext 进专用池 |
+| `bg/proto/UrlTest.kt` | 013 | 接收每轮专用阻塞线程池，不再占用 Dispatchers.Default |
+| `ui/ConfigurationFragment.kt` | 013 | urlTest 创建 newFixedThreadPool(concurrent∈[1,16])；test.cancel 关池 |
+| `ui/ConfigurationFragment.kt` | 014 | 清理不可用/去重接 undoManager“还原”snackbar（可见卡可还原，隐藏卡立即删）+ isUndoReady 兜底 |
+| `ui/GroupSettingsActivity.kt` | 015 | child 空安全（as?）+ 菜单事件护栏——修高频点击 NPE fatal |
+| `ui/profile/ProfileSettingsActivity.kt` | 015 | 同上 |
+| `ui/RouteSettingsActivity.kt` | 015 | 同上 |
 | `nb4a.properties` | 不打包 | 发版时更新 `PRE_VERSION_NAME`（sbNN） |
 
 ## 基线自带（A01 已有、补丁不触碰——升级上游随基线走）

@@ -1,0 +1,122 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+index 87ec582..9118c15 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+@@ -998,21 +998,44 @@ class ConfigurationFragment @JvmOverloads constructor(
+                             MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
+                                 .setMessage(R.string.delete_confirm_prompt)
+                                 .setPositiveButton(R.string.yes) { _, _ ->
+-                                    for (profile in toClear) {
+-                                        adapter.groupFragments[DataStore.selectedGroup]?.adapter?.apply {
+-                                            val index = configurationIdList.indexOf(profile.id)
++                                    // 014: 与滑动删除同一撤销通道 —— 卡片即时移除 +
++                                    // "已删除 N 项 | 还原" snackbar；snackbar 消失后
++                                    // 才经 undoManager.commit 真正删库。被过滤隐藏、
++                                    // 无卡可还原的节点维持旧的立即删除语义。
++                                    val groupFragment =
++                                        adapter.groupFragments[DataStore.selectedGroup]
++                                    val currentAdapter = groupFragment?.adapter
++                                    val visible = mutableListOf<Pair<Int, ProxyEntity>>()
++                                    val invisible = mutableListOf<ProxyEntity>()
++                                    if (currentAdapter != null) {
++                                        for (profile in toClear) {
++                                            val index =
++                                                currentAdapter.configurationIdList.indexOf(profile.id)
+                                             if (index >= 0) {
+-                                                configurationIdList.removeAt(index)
+-                                                configurationList.remove(profile.id)
+-                                                notifyItemRemoved(index)
++                                                // 逐个移除再取下一个 index，避免位移错位
++                                                currentAdapter.remove(index)
++                                                visible.add(index to profile)
++                                            } else {
++                                                invisible.add(profile)
+                                             }
+                                         }
++                                    } else {
++                                        invisible.addAll(toClear)
+                                     }
+-                                    runOnDefaultDispatcher {
+-                                        for (profile in toClear) {
+-                                            ProfileManager.deleteProfile2(
+-                                                profile.groupId, profile.id
+-                                            )
++                                    if (visible.isNotEmpty() && groupFragment?.isUndoReady() == true) {
++                                        groupFragment.undoManager.remove(visible)
++                                    } else {
++                                        visible.forEach {
++                                            runOnDefaultDispatcher {
++                                                ProfileManager.deleteProfile2(
++                                                    it.second.groupId, it.second.id
++                                                )
++                                            }
++                                        }
++                                    }
++                                    invisible.forEach {
++                                        runOnDefaultDispatcher {
++                                            ProfileManager.deleteProfile2(it.groupId, it.id)
+                                         }
+                                     }
+                                 }
+@@ -1050,21 +1073,40 @@ class ConfigurationFragment @JvmOverloads constructor(
+                                             }.joinToString("\n")
+                                 )
+                                 .setPositiveButton(R.string.yes) { _, _ ->
+-                                    for (profile in toClear) {
+-                                        adapter.groupFragments[DataStore.selectedGroup]?.adapter?.apply {
+-                                            val index = configurationIdList.indexOf(profile.id)
++                                    // 014: 与清理不可用同一撤销通道（可见卡片可还原）。
++                                    val groupFragment =
++                                        adapter.groupFragments[DataStore.selectedGroup]
++                                    val currentAdapter = groupFragment?.adapter
++                                    val visible = mutableListOf<Pair<Int, ProxyEntity>>()
++                                    val invisible = mutableListOf<ProxyEntity>()
++                                    if (currentAdapter != null) {
++                                        for (profile in toClear) {
++                                            val index =
++                                                currentAdapter.configurationIdList.indexOf(profile.id)
+                                             if (index >= 0) {
+-                                                configurationIdList.removeAt(index)
+-                                                configurationList.remove(profile.id)
+-                                                notifyItemRemoved(index)
++                                                currentAdapter.remove(index)
++                                                visible.add(index to profile)
++                                            } else {
++                                                invisible.add(profile)
+                                             }
+                                         }
++                                    } else {
++                                        invisible.addAll(toClear)
+                                     }
+-                                    runOnDefaultDispatcher {
+-                                        for (profile in toClear) {
+-                                            ProfileManager.deleteProfile2(
+-                                                profile.groupId, profile.id
+-                                            )
++                                    if (visible.isNotEmpty() && groupFragment?.isUndoReady() == true) {
++                                        groupFragment.undoManager.remove(visible)
++                                    } else {
++                                        visible.forEach {
++                                            runOnDefaultDispatcher {
++                                                ProfileManager.deleteProfile2(
++                                                    it.second.groupId, it.second.id
++                                                )
++                                            }
++                                        }
++                                    }
++                                    invisible.forEach {
++                                        runOnDefaultDispatcher {
++                                            ProfileManager.deleteProfile2(it.groupId, it.id)
+                                         }
+                                     }
+                                 }
+@@ -1732,6 +1774,9 @@ class ConfigurationFragment @JvmOverloads constructor(
+         lateinit var undoManager: UndoSnackbarManager<ProxyEntity>
+         var adapter: ConfigurationAdapter? = null
+ 
++        // 014: 撤销通道是否就绪（select 模式下不初始化 undoManager）。
++        fun isUndoReady(): Boolean = ::undoManager.isInitialized
++
+         /** 问题1-B：切回配置页时节点列表回顶部 */
+         fun resetScrollState() {
+             if (::configurationListView.isInitialized) configurationListView.scrollToPosition(0)

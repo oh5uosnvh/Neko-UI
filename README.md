@@ -1,6 +1,6 @@
 # Neko-UI
 
-NekoBoxF 的 UI 定制补丁与构建管线。基线 `A01`（tag @ f167ebc，fork 原版），12 个补丁按序应用即得成品。
+NekoBoxF 的 UI 定制补丁与构建管线。基线 `A01`（tag @ f167ebc，fork 原版），15 个补丁按序应用即得成品。
 
 **当前版本：[Neko 0.01](../../releases/tag/v0.01)** · APK 见 [Releases](../../releases)
 
@@ -33,18 +33,23 @@ NekoBoxF 的 UI 定制补丁与构建管线。基线 `A01`（tag @ f167ebc，for
 | 010 | ☴ 列表行 名称·数量（applyGroupCounts） |
 | 011 | 分组更新完成进度条永不收起修复（finishUpdate 广播数据库新对象） |
 | 012 | 连接测试实时回显（250ms 防抖批量回写）+ 取消/测完零空档 |
+| 013 | 连接测试提速（专用阻塞池，有效并发不再被核数封顶）+ 取消即停（invokeOnCancellation 关实例，僵尸秒死） |
+| 014 | 清理不可用/去重接入“还原”snackbar（与滑动删除同契约） |
+| 015 | 设置页菜单高频点击 NPE 根治（child 空安全 + 护栏） |
 
 ## 构建
 
 ```bash
 git clone --recurse-submodules https://github.com/oh5uosnvh/NekoBoxForAndroid.git upstream
 cd upstream && git checkout A01
-python3 ../scripts/apply_all.py                # 应用 12 补丁（--check 仅预检）
-./run init action gradle && ./gradlew assemblePreviewDebug
+python3 ../scripts/apply_all.py                # 应用 15 补丁（--check 仅预检）
+./run init action gradle && ./gradlew app:assemblePreviewRelease   # release=R8 混淆+收缩，APK ≈16MB
 python3 ../scripts/verify_build.py <apk>       # 成品校验
 ```
 
 云端：Actions → **Build from patches** → Run（`upstream_ref=A01`）。
+CI 产出 **release 签名包**（稳定 keystore 存于私有 Nekobox-MG `keystore/`，
+覆盖安装友好；debug 构建的 runner 随机调试签名已废弃）。
 
 ## 校验
 

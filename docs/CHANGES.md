@@ -234,6 +234,41 @@
 - **红线**：`flushPending()` 必须保持「同步取走快照、批量一次落库」语义；
   `runningTest = false` 必须在 `runOnDefaultDispatcher` **之前**执行。
 
+### J. 连接测试提速 + 取消即停（补丁 `013-connection-test-cancel-and-speed.patch`）
+- **根因**：`TestInstance.doTest` 把 `init/launch/Libcore.urlTest` 整条阻塞链跑在
+  `Dispatchers.Default`——每个在测实例钉死一个 Default 线程直到 HTTP 完成/超时，
+  有效并发恒等于 CPU 核数（8），`connectionTestConcurrent` 形同虚设；取消测试后
+  `use{}` 块挂在 GlobalScope 不可取消，僵尸实例霸占全部 Default 线程跑满 3s 超时
+  = “取消后重测 2~3 秒空档”。（012 只修了写库滞后，没动阻塞链，故未根治。）
+- **修复**：`suspendCancellableCoroutine + invokeOnCancellation { closeOnce() }`
+  （取消即关实例，Go 侧秒回错误）；阻塞段 `withContext` 进每轮测试专用的
+  `newFixedThreadPool(concurrent.coerceIn(1,16))`，两条收尾路径都关池；
+  闭池竞态由 catch 干净失败。真实 HTTP 延迟测量路径零改动。
+- **验证**：取消后重测空档 ≪0.5s；并发 25 下吞吐 ≈2~3 倍；`Assert 013` 通过。
+- **红线**：不得改回 `Dispatchers.Default`；`testPool` 只在 `test.cancel` 关闭；
+  `closeOnce` 幂等；`Libcore.urlTest` 参数（link/timeout）不动。
+
+### K. 清理不可用/去重接入“还原”snackbar（补丁 `014-delete-unavailable-undo.patch`）
+- **根因**：官方这两处批量删除从未接 undoManager（裸删：手动移卡 + 立即删库），
+  卡片删了就没了。
+- **修复**：与滑动删除同契约——`adapter.remove(index)` 即时移卡 →
+  `undoManager.remove(index to profile)` 出“已删除 N 项|还原” → snackbar 消失后
+  才 `commit()` 真删库；还原按原位插回。被过滤隐藏的节点维持立即删除。
+  `GroupFragment.isUndoReady()` 兜底 select 模式。
+- **验证**：清理不可用/去重 → 还原后卡片与库完整；snackbar 消失后库已删。
+- **红线**：`undoManager.remove(visible)` 入参必须是 (原始index, profile)；
+  不得先删库再提示。
+
+### L. 设置页菜单高频点击 NPE 根治（补丁 `015-settings-menu-npe-guard.patch`）
+- **根因**：Group/Profile/Route 三个设置页 `val child by lazy { … as
+  MyPreferenceFragmentCompat }` 非空强转，而 fragment 提交双重异步（DB 协程 +
+  `commit()`）；主线程被测试回写/整页重载压住时手速快于 attach = 真机 fatal
+  （日志 4 次全此模式）。
+- **修复**：`child` 改空安全只读属性（`as?`），`onOptionsItemSelected` 改
+  `child?.onOptionsItemSelected(item) ?: super…`——未就绪时安全落空不崩溃。
+- **验证**：进设置页秒点菜单不崩；“取消测试→跳分组→新建”复现路径无 fatal。
+- **红线**：不得改回 `by lazy` 非空强转。
+
 ---
 
 ## 移植到新上游时的冲突热区（按历史经验排序）

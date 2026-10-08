@@ -1,0 +1,75 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt
+index 30be375..e81ad21 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt
+@@ -354,14 +354,19 @@ class GroupSettingsActivity(
+ 
+     }
+ 
+-    val child by lazy { supportFragmentManager.findFragmentById(R.id.settings) as MyPreferenceFragmentCompat }
++    // 015: fragment 提交是双重异步（DB 协程 + commit()），高频操作下手速快于
++    // fragment attach 时 findFragmentById 返回 null，旧的非空强转直接 NPE 崩溃
++    // （崩溃日志 GroupSettingsActivity.child_delegate$lambda）。未就绪时交给父类。
++    val child: MyPreferenceFragmentCompat?
++        get() = supportFragmentManager.findFragmentById(R.id.settings) as? MyPreferenceFragmentCompat
+ 
+     override fun onCreateOptionsMenu(menu: Menu): Boolean {
+         menuInflater.inflate(R.menu.profile_config_menu, menu)
+         return true
+     }
+ 
+-    override fun onOptionsItemSelected(item: MenuItem) = child.onOptionsItemSelected(item)
++    override fun onOptionsItemSelected(item: MenuItem): Boolean =
++        child?.onOptionsItemSelected(item) ?: super.onOptionsItemSelected(item)
+ 
+     override fun onBackPressed() {
+         if (needSave()) {
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/RouteSettingsActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/RouteSettingsActivity.kt
+index 8c07eba..65af9c0 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/RouteSettingsActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/RouteSettingsActivity.kt
+@@ -292,14 +292,17 @@ class RouteSettingsActivity(
+ 
+     }
+ 
+-    val child by lazy { supportFragmentManager.findFragmentById(R.id.settings) as MyPreferenceFragmentCompat }
++    // 015: 见 GroupSettingsActivity —— fragment 未 attach 时防 NPE。
++    val child: MyPreferenceFragmentCompat?
++        get() = supportFragmentManager.findFragmentById(R.id.settings) as? MyPreferenceFragmentCompat
+ 
+     override fun onCreateOptionsMenu(menu: Menu): Boolean {
+         menuInflater.inflate(R.menu.profile_config_menu, menu)
+         return true
+     }
+ 
+-    override fun onOptionsItemSelected(item: MenuItem) = child.onOptionsItemSelected(item)
++    override fun onOptionsItemSelected(item: MenuItem): Boolean =
++        child?.onOptionsItemSelected(item) ?: super.onOptionsItemSelected(item)
+ 
+     override fun onBackPressed() {
+         if (needSave()) {
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/profile/ProfileSettingsActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/profile/ProfileSettingsActivity.kt
+index 1a9137e..3e0d4b3 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/profile/ProfileSettingsActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/profile/ProfileSettingsActivity.kt
+@@ -151,7 +151,9 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
+ 
+     }
+ 
+-    val child by lazy { supportFragmentManager.findFragmentById(R.id.settings) as MyPreferenceFragmentCompat }
++    // 015: 见 GroupSettingsActivity —— fragment 未 attach 时防 NPE。
++    val child: MyPreferenceFragmentCompat?
++        get() = supportFragmentManager.findFragmentById(R.id.settings) as? MyPreferenceFragmentCompat
+ 
+     override fun onCreateOptionsMenu(menu: Menu): Boolean {
+         menuInflater.inflate(R.menu.profile_config_menu, menu)
+@@ -173,7 +175,8 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
+         return true
+     }
+ 
+-    override fun onOptionsItemSelected(item: MenuItem) = child.onOptionsItemSelected(item)
++    override fun onOptionsItemSelected(item: MenuItem): Boolean =
++        child?.onOptionsItemSelected(item) ?: super.onOptionsItemSelected(item)
+ 
+     override fun onBackPressed() {
+         if (DataStore.dirty) UnsavedChangesDialogFragment().apply { key() }

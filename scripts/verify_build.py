@@ -4,7 +4,7 @@
 
 用法: python3 verify_build.py <apk路径>
 校验:
-  1) 包名/签名形态（debug 可安装）
+  1) dex 内功能锚点 + libgojni 协议 mod 标记（release 包同样适用）
   2) dex 内 UI 保留符号（8 项功能规格的锚点）
   3) dex 内不得出现历史废案符号 + 已移除功能符号（☷ 手柄等）
   4) libgojni.so 协议 mod 标记（x365/viewTurbo/fastup/oppa-mod/mihomo 伪装）

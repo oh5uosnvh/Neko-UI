@@ -1,0 +1,170 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/bg/proto/TestInstance.kt b/app/src/main/java/io/nekohasekai/sagernet/bg/proto/TestInstance.kt
+index bc69071..02e5551 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/bg/proto/TestInstance.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/bg/proto/TestInstance.kt
+@@ -5,33 +5,75 @@ import io.nekohasekai.sagernet.bg.GuardedProcessPool
+ import io.nekohasekai.sagernet.database.ProxyEntity
+ import io.nekohasekai.sagernet.fmt.buildConfig
+ import io.nekohasekai.sagernet.ktx.Logs
+-import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+ import io.nekohasekai.sagernet.ktx.tryResume
+ import io.nekohasekai.sagernet.ktx.tryResumeWithException
++import kotlinx.coroutines.DelicateCoroutinesApi
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.GlobalScope
+ import kotlinx.coroutines.delay
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.suspendCancellableCoroutine
++import kotlinx.coroutines.withContext
+ import libcore.Libcore
+ import moe.matsuri.nb4a.net.LocalResolverImpl
+-import kotlin.coroutines.suspendCoroutine
++import java.util.concurrent.atomic.AtomicBoolean
++import kotlin.coroutines.CoroutineContext
+ 
+ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: Int) :
+     BoxInstance(profile) {
+ 
+-    suspend fun doTest(): Int {
+-        return suspendCoroutine { c ->
++    private val closed = AtomicBoolean(false)
++
++    // 013: 取消时最多关一次。实例已初始化 → close()，Go 侧进行中的 urlTest 立即
++    // 报错返回；尚未初始化 → box 还没建，等 use{} 正常收尾（窗口极小）。
++    private fun closeOnce() {
++        if (!closed.compareAndSet(false, true)) return
++        runCatching {
++            if (isInitialized()) {
++                close()
++            } else if (::processes.isInitialized) {
++                processes.close(GlobalScope + Dispatchers.IO)
++            }
++        }
++    }
++
++    /**
++     * 013 连接测试提速 + 取消即停：
++     * - context 为每轮测试专用的阻塞线程池（ConfigurationFragment.urlTest 创建）。
++     *   旧实现把 init/launch/Libcore.urlTest 整条链跑在 Dispatchers.Default 上：
++     *   每个在测实例钉死一个 Default 线程直到 HTTP 完成/超时，有效并发被 CPU 核数
++     *   封顶 —— 这就是"并发设置开再高，测速还是慢"的根因。
++     * - suspendCancellableCoroutine + invokeOnCancellation：取消瞬间关闭实例，
++     *   Go 侧 urlTest 立刻返回错误。旧实现取消后实例继续跑到 connectionTestTimeout，
++     *   僵尸实例霸占全部 Default 线程 —— 这就是"取消后重测 2~3 秒空档"的根因。
++     *   真实 HTTP 延迟测量路径（经代理 GET 测试 URL）零改动。
++     */
++    @OptIn(DelicateCoroutinesApi::class)
++    suspend fun doTest(context: CoroutineContext): Int {
++        return suspendCancellableCoroutine { c ->
++            c.invokeOnCancellation { closeOnce() }
+             processes = GuardedProcessPool {
+                 Logs.w(it)
+                 c.tryResumeWithException(it)
+             }
+-            runOnDefaultDispatcher {
++            // 外层跑 Default，阻塞段用 withContext 进专用池：池被提前关闭时
++            // withContext 抛 RejectedExecutionException，走 catch 干净失败，
++            // 不在 dispatch 阶段炸协程。
++            GlobalScope.launch(Dispatchers.Default) {
+                 use {
+                     try {
+-                        init()
+-                        launch()
++                        withContext(context) {
++                            init()
++                            launch()
++                        }
+                         if (processes.processCount > 0) {
+                             // wait for plugin start
+                             delay(500)
+                         }
+-                        c.tryResume(Libcore.urlTest(box, link, timeout))
++                        val latency = withContext(context) {
++                            Libcore.urlTest(box, link, timeout)
++                        }
++                        c.tryResume(latency)
+                     } catch (e: Exception) {
+                         c.tryResumeWithException(e)
+                     }
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/bg/proto/UrlTest.kt b/app/src/main/java/io/nekohasekai/sagernet/bg/proto/UrlTest.kt
+index 24fa559..1fd2818 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/bg/proto/UrlTest.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/bg/proto/UrlTest.kt
+@@ -2,14 +2,17 @@ package io.nekohasekai.sagernet.bg.proto
+ 
+ import io.nekohasekai.sagernet.database.DataStore
+ import io.nekohasekai.sagernet.database.ProxyEntity
++import kotlin.coroutines.CoroutineContext
+ 
+-class UrlTest {
++// 013: context = 每轮测试专用的阻塞线程池（ConfigurationFragment.urlTest 创建，
++// 测完/取消后关闭）。不再占用 Dispatchers.Default。
++class UrlTest(private val context: CoroutineContext) {
+ 
+     val link = DataStore.connectionTestURL
+     private val timeout = DataStore.connectionTestTimeout
+ 
+     suspend fun doTest(profile: ProxyEntity): Int {
+-        return TestInstance(profile, link, timeout).doTest()
++        return TestInstance(profile, link, timeout).doTest(context)
+     }
+ 
+ }
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+index aa6f5bd..87ec582 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+@@ -113,6 +113,7 @@ import kotlinx.coroutines.CompletableDeferred
+ import kotlinx.coroutines.DelicateCoroutinesApi
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.Job
++import kotlinx.coroutines.asCoroutineDispatcher
+ import kotlinx.coroutines.channels.Channel
+ import kotlinx.coroutines.isActive
+ import kotlinx.coroutines.joinAll
+@@ -136,6 +137,7 @@ import java.net.URLDecoder
+ import java.net.UnknownHostException
+ import java.util.concurrent.ConcurrentHashMap
+ import java.util.concurrent.ConcurrentLinkedQueue
++import java.util.concurrent.Executors
+ import java.util.concurrent.atomic.AtomicBoolean
+ import java.util.concurrent.atomic.AtomicInteger
+ import java.util.concurrent.atomic.AtomicLong
+@@ -1389,6 +1391,15 @@ class ConfigurationFragment @JvmOverloads constructor(
+         val dialog = test.builder.show()
+         val testJobs = mutableListOf<Job>()
+         val group = DataStore.currentGroup()
++        // 013: 单实例测试的 init/launch/Libcore.urlTest 全程占用一个线程；旧实现把
++        // 这条阻塞链跑在 Dispatchers.Default 上，有效并发被 CPU 核数封顶（并发设置
++        // 开再高也快不起来），且取消后的僵尸实例霸占全部 Default 线程直到超时
++        // （取消后重测 2~3 秒空档的根因）。改为专用阻塞池：测试实例为无入站轻量
++        // 配置，16 路（≈2×CPU 核数）内存安全；真实 HTTP 延迟测量路径零改动。
++        // 两条收尾路径（自然测完 / 用户取消）都会经 test.cancel 关闭池子。
++        val testPool = Executors.newFixedThreadPool(
++            DataStore.connectionTestConcurrent.coerceIn(1, 16)
++        ).asCoroutineDispatcher()
+ 
+         val mainJob = runOnDefaultDispatcher {
+             val profilesList = SagerDatabase.proxyDao.getByGroup(group.id)
+@@ -1396,7 +1407,7 @@ class ConfigurationFragment @JvmOverloads constructor(
+             val profiles = ConcurrentLinkedQueue(profilesList)
+             repeat(DataStore.connectionTestConcurrent) {
+                 testJobs.add(launch(Dispatchers.IO) {
+-                    val urlTest = UrlTest() // note: this is NOT in bg process
++                    val urlTest = UrlTest(testPool) // note: this is NOT in bg process
+                     while (isActive) {
+                         val profile = profiles.poll() ?: break
+                         profile.status = 0
+@@ -1428,8 +1439,11 @@ class ConfigurationFragment @JvmOverloads constructor(
+             test.dialogStatus.set(2)
+             dialog.dismiss()
+             // 012: 先放行下一次测试（空档期≈0）；取消与回写全部后台收尾。
+-            // 进行中的 urlTest 实例最多再跑自身超时（默认 3s）后自行关闭，不阻塞新测试。
++            // 013: 僵尸实例已由 TestInstance.invokeOnCancellation 即时关闭，
++            // 这里同步关闭专用测试池；Default 线程不再被占坑，postReload 的
++            // 后台 DiffUtil 不再被饿死。
+             DataStore.runningTest = false
++            runCatching { testPool.close() }
+             runOnDefaultDispatcher {
+                 mainJob.cancel()
+                 testJobs.forEach { it.cancel() }
