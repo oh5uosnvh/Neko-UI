@@ -400,7 +400,7 @@ jobs:
             buildSrc/src/main/kotlin/Helpers.kt
           grep -n 'checkReleaseBuilds' buildSrc/src/main/kotlin/Helpers.kt
 
-      - name: Build APK (release: R8 shrink + shrinkResources, signed)
+      - name: Build APK (release = R8 shrink + shrinkResources, signed)
         env:
           BUILD_PLUGIN: none
           GOSUMDB: off
