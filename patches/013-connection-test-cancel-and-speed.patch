@@ -1,14 +1,14 @@
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/bg/proto/TestInstance.kt b/app/src/main/java/io/nekohasekai/sagernet/bg/proto/TestInstance.kt
-index bc69071..02e5551 100644
+index bc69071..d63fdd2 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/bg/proto/TestInstance.kt
 +++ b/app/src/main/java/io/nekohasekai/sagernet/bg/proto/TestInstance.kt
-@@ -5,33 +5,75 @@ import io.nekohasekai.sagernet.bg.GuardedProcessPool
+@@ -5,35 +5,71 @@ import io.nekohasekai.sagernet.bg.GuardedProcessPool
  import io.nekohasekai.sagernet.database.ProxyEntity
  import io.nekohasekai.sagernet.fmt.buildConfig
  import io.nekohasekai.sagernet.ktx.Logs
 -import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
- import io.nekohasekai.sagernet.ktx.tryResume
- import io.nekohasekai.sagernet.ktx.tryResumeWithException
+-import io.nekohasekai.sagernet.ktx.tryResume
+-import io.nekohasekai.sagernet.ktx.tryResumeWithException
 +import kotlinx.coroutines.DelicateCoroutinesApi
 +import kotlinx.coroutines.Dispatchers
 +import kotlinx.coroutines.GlobalScope
@@ -29,17 +29,11 @@ index bc69071..02e5551 100644
 -        return suspendCoroutine { c ->
 +    private val closed = AtomicBoolean(false)
 +
-+    // 013: 取消时最多关一次。实例已初始化 → close()，Go 侧进行中的 urlTest 立即
-+    // 报错返回；尚未初始化 → box 还没建，等 use{} 正常收尾（窗口极小）。
++    // 013: 取消时最多关一次。close() 自带全套守卫（processes/box 未初始化自动跳过），
++    // 在测的 Go urlTest 会被 close 打断并立即报错返回。
 +    private fun closeOnce() {
 +        if (!closed.compareAndSet(false, true)) return
-+        runCatching {
-+            if (isInitialized()) {
-+                close()
-+            } else if (::processes.isInitialized) {
-+                processes.close(GlobalScope + Dispatchers.IO)
-+            }
-+        }
++        runCatching { close() }
 +    }
 +
 +    /**
@@ -52,6 +46,8 @@ index bc69071..02e5551 100644
 +     *   Go 侧 urlTest 立刻返回错误。旧实现取消后实例继续跑到 connectionTestTimeout，
 +     *   僵尸实例霸占全部 Default 线程 —— 这就是"取消后重测 2~3 秒空档"的根因。
 +     *   真实 HTTP 延迟测量路径（经代理 GET 测试 URL）零改动。
++     * - resume 用 resumeWith + 吃 IllegalStateException（协程已取消时静默丢弃结果），
++     *   不碰 CancellableContinuation 自带的内部 API tryResume。
 +     */
 +    @OptIn(DelicateCoroutinesApi::class)
 +    suspend fun doTest(context: CoroutineContext): Int {
@@ -59,7 +55,8 @@ index bc69071..02e5551 100644
 +            c.invokeOnCancellation { closeOnce() }
              processes = GuardedProcessPool {
                  Logs.w(it)
-                 c.tryResumeWithException(it)
+-                c.tryResumeWithException(it)
++                runCatching { c.resumeWith(Result.failure(it)) }
              }
 -            runOnDefaultDispatcher {
 +            // 外层跑 Default，阻塞段用 withContext 进专用池：池被提前关闭时
@@ -82,10 +79,13 @@ index bc69071..02e5551 100644
 +                        val latency = withContext(context) {
 +                            Libcore.urlTest(box, link, timeout)
 +                        }
-+                        c.tryResume(latency)
++                        c.resumeWith(Result.success(latency))
                      } catch (e: Exception) {
-                         c.tryResumeWithException(e)
+-                        c.tryResumeWithException(e)
++                        runCatching { c.resumeWith(Result.failure(e)) }
                      }
+                 }
+             }
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/bg/proto/UrlTest.kt b/app/src/main/java/io/nekohasekai/sagernet/bg/proto/UrlTest.kt
 index 24fa559..1fd2818 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/bg/proto/UrlTest.kt
