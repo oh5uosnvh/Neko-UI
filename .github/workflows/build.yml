@@ -385,8 +385,8 @@ jobs:
           done
           grep -q 'isAbuser' "$L" || { echo "::error::025 abuser flag missing"; exit 1; }
           D=app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
-          grep -q 'IpQualityLookup.lookup()' "$D" \
-            || { echo "::error::025 dialog not wired to lookup"; exit 1; }
+          grep -q 'IpQualityLookup.lookup(profileId)' "$D" \
+            || { echo "::error::025/028 dialog not wired to lookup"; exit 1; }
           echo "025 ip quality multisource present"
 
       - name: Setup Java
