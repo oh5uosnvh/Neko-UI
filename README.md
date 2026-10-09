@@ -1,6 +1,6 @@
 # Neko-UI
 
-NekoBoxF 的 UI 定制补丁与构建管线。基线 `A01`（tag @ f167ebc，fork 原版），27 个补丁按序应用即得成品。
+NekoBoxF 的 UI 定制补丁与构建管线。基线 `A01`（tag @ f167ebc，fork 原版），28 个补丁按序应用即得成品。
 
 **当前版本：[Neko 0.01](../../releases/tag/v0.01)** · APK 见 [Releases](../../releases)
 
@@ -48,13 +48,14 @@ NekoBoxF 的 UI 定制补丁与构建管线。基线 `A01`（tag @ f167ebc，for
 | 025 | 出站 IP 识别复刻 FlClash 六源对冲（ident.me/ip-api/ipquery/iplocate/ipapi.is/proxycheck），字段/等级/命中标记与官方一致（优/普通/风险、滥用记录等） |
 | 026 | VPN 连接即预查询出站 IP（点开秒出）、失败保留上次结果、国家地区跨源合并、栏宽收窄为内容宽并居中（去弹性空隙） |
 | 027 | 启动栏三抛：速度区固定冗余宽（框长恒定）、未连接延迟占位“… ms”（四位余量）、连接成功自动 ping、左右留白对称 |
+| 028 | IP 查询三修：先答先赢回归（select 按完成序，修 026 等全源导致的慢）、缓存绑定节点（切节点重连自动重查）、刷新立现“查询中”+失败回滚缓存 |
 
 ## 构建
 
 ```bash
 git clone --recurse-submodules https://github.com/oh5uosnvh/NekoBoxForAndroid.git upstream
 cd upstream && git checkout A01
-python3 ../scripts/apply_all.py                # 应用 27 补丁（--check 仅预检）
+python3 ../scripts/apply_all.py                # 应用 28 补丁（--check 仅预检）
 ./run init action gradle && ./gradlew app:assemblePreviewRelease   # release=R8 混淆+收缩，APK ≈16MB
 python3 ../scripts/verify_build.py <apk>       # 成品校验
 ```

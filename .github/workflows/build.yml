@@ -203,7 +203,7 @@ jobs:
           cmp libcore/protocol/xhttp/cipher.go ../mods/Neko-xhttp/libcore/protocol/xhttp/cipher.go
           echo "x365 + Blackstone mods applied:"; git -C . diff --stat -- libcore app | tail -3
 
-      - name: Apply mod patches (27)
+      - name: Apply mod patches (28)
         run: |
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
@@ -321,12 +321,18 @@ jobs:
             || { echo "::error::026 elastic spacer should be gone"; exit 1; }
           grep -q 'layout_width="wrap_content"' app/src/main/res/layout/layout_main.xml \
             || { echo "::error::026 bar width not wrapped to content"; exit 1; }
-          grep -q 'IpQualityLookup.prefetch' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
-            || { echo "::error::026 prefetch on connect missing"; exit 1; }
-          grep -q 'fun prefetch' app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt \
-            || { echo "::error::026 prefetch impl missing"; exit 1; }
-          grep -q 'anyCache' app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt \
-            || { echo "::error::026 cache fallback missing"; exit 1; }
+          grep -q 'IpQualityLookup.prefetch(DataStore.currentProfile)' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
+            || { echo "::error::026/028 prefetch on connect missing (profile-bound)"; exit 1; }
+          grep -q 'fun prefetch(forProfile: Long)' app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt \
+            || { echo "::error::026/028 profile-bound prefetch missing"; exit 1; }
+          grep -q 'select<Done>' app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt \
+            || { echo "::error::028 first-answer-wins select missing"; exit 1; }
+          grep -q 'COUNTRY_GRACE_MS' app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt \
+            || { echo "::error::028 country grace missing"; exit 1; }
+          grep -q 'IpQualityLookup.cacheFor(profileId)' app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt \
+            || { echo "::error::028 profile-bound cache fallback missing"; exit 1; }
+          grep -q 'setLoadingState()' app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt \
+            || { echo "::error::028 instant loading state missing"; exit 1; }
           [ "$(grep -c 'connectBar.showDelay(elapsed)' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt)" = "2" ] \
             || { echo "::error::027 auto-ping on connect missing (need manual+auto)"; exit 1; }
           grep -q 'bar_delay_tap">… ms' app/src/main/res/values-zh-rCN/strings.xml \

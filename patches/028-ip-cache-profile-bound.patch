@@ -1,0 +1,242 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt
+index bff5521..6aded04 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt
+@@ -4,6 +4,7 @@ import io.nekohasekai.sagernet.ktx.Logs
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.async
+ import kotlinx.coroutines.coroutineScope
++import kotlinx.coroutines.selects.select
+ import kotlinx.coroutines.withTimeoutOrNull
+ import okhttp3.OkHttpClient
+ import okhttp3.Request
+@@ -12,13 +13,15 @@ import java.io.IOException
+ import java.util.concurrent.TimeUnit
+ 
+ /**
+- * 025/026: 出站 IP 质量查询 —— 复刻 FlClash v0.8.99 多源对冲语义
+- * （六源并发，非推断结果先到先得，推断结果仅兜底，总超时 10s）。
++ * 025/028: 出站 IP 质量查询 —— 复刻 FlClash v0.8.99 多源对冲语义。
+  *
+- * 026 增强：
+- * - 预查询缓存：VPN 连接瞬间由 MainActivity 触发 prefetch()，点开 ⓘ 直接出结果；
+- * - 信息合并：胜者缺国家地区时从其他成功源补齐（ident.me 等无 country 的源不再显示"—"）；
+- * - 失败不冲缓存：全部源失败时保留上次成功结果（dialog 侧配合）。
++ * 028 关键修复：
++ * - **先答先赢回归**（026 曾为合并国家改成等全部源完成，最慢 8s 拖死整体）：
++ *   select/onAwait 按完成顺序消费，第一个非推断结果立即胜出；胜者缺国家地区时
++ *   仅宽限 1.5s 等其他源补国家，补不到就先用，绝不拖慢主结果。
++ * - **缓存绑定节点身份**（profileId）：切换节点/VPN 重连 → 缓存自动失效 → 重查，
++ *   不再“无动于衷”。
++ * - 预查询：VPN 连接瞬间由 MainActivity 触发（点开 ⓘ 秒出）；失败不冲缓存。
+  * 查询经 VPN 隧道（应用自身流量走 TUN），测的是节点出口 IP。
+  */
+ object IpQualityLookup {
+@@ -53,29 +56,34 @@ object IpQualityLookup {
+             }
+     }
+ 
+-    data class CacheEntry(val quality: IpQuality, val atMs: Long)
++    data class CacheEntry(val quality: IpQuality, val profileId: Long, val atMs: Long)
+ 
+     @Volatile
+     private var cache: CacheEntry? = null
+ 
+-    /** 最近一次成功结果（无论多久之前）——失败时兜底显示。 */
+-    fun anyCache(): CacheEntry? = cache
++    private const val CACHE_FRESH_MS = 60_000L      // 同节点 1 分钟内不重复查
++    private const val TOTAL_TIMEOUT_MS = 10_000L    // 六源对冲总超时
++    private const val COUNTRY_GRACE_MS = 1_500L     // 胜者缺国家时的宽限期
+ 
+-    /** 新鲜缓存（maxAgeMs 内）——prefetch/打开弹窗直接展示。 */
+-    fun freshCache(maxAgeMs: Long = 10 * 60_000L): CacheEntry? =
+-        cache?.takeIf { System.currentTimeMillis() - it.atMs < maxAgeMs }
++    /** 指定节点的缓存（节点不匹配 = 视为无缓存）。 */
++    fun cacheFor(profileId: Long): CacheEntry? =
++        cache?.takeIf { it.profileId == profileId }
+ 
+-    /** 成功后写缓存。 */
+-    suspend fun lookup(): IpQuality {
++    /** 新鲜缓存（同节点 + maxAgeMs 内）——预查询跳过判断用。 */
++    fun freshCache(profileId: Long, maxAgeMs: Long = CACHE_FRESH_MS): CacheEntry? =
++        cacheFor(profileId)?.takeIf { System.currentTimeMillis() - it.atMs < maxAgeMs }
++
++    /** 成功后写缓存（绑定节点）。 */
++    suspend fun lookup(forProfile: Long): IpQuality {
+         val q = doLookup()
+-        cache = CacheEntry(q, System.currentTimeMillis())
++        cache = CacheEntry(q, forProfile, System.currentTimeMillis())
+         return q
+     }
+ 
+-    /** 026: 预查询 —— VPN 连接时后台跑一次；已有新鲜缓存则跳过。 */
+-    suspend fun prefetch() {
+-        if (freshCache() == null) {
+-            runCatching { lookup() }.onFailure { Logs.w("ip prefetch: ${it.message}") }
++    /** 026/028: 预查询 —— 节点匹配且有新鲜缓存则跳过，否则后台重查。 */
++    suspend fun prefetch(forProfile: Long) {
++        if (freshCache(forProfile) == null) {
++            runCatching { lookup(forProfile) }.onFailure { Logs.w("ip prefetch: ${it.message}") }
+         }
+     }
+ 
+@@ -263,32 +271,72 @@ object IpQualityLookup {
+         ) ?: throw SourceFailure("noType")
+     }
+ 
+-    // ---- 对冲调度：六源并发收集全部成功答案，按 FlClash 规则择优 ----
++    private data class Done(val idx: Int, val quality: IpQuality?)
++
++    /**
++     * 028: 六源并发 + select/onAwait 按完成顺序消费：
++     * - 第一个“非推断”结果立即胜出（先答先赢，不等慢源）；
++     * - 胜者缺国家地区 → 宽限 1.5s 等其他非推断源补国家，补不到就照常返回；
++     * - 推断结果仅作全败兜底；总超时 10s。
++     */
+     private suspend fun doLookup(): IpQuality = coroutineScope {
++        val started = System.currentTimeMillis()
+         val fetchers = listOf(
+             ::fromIdentMe, ::fromIpApiCom, ::fromIpQuery,
+             ::fromIpLocate, ::fromIpApiIs, ::fromProxyCheck,
+         )
+-        val started = System.currentTimeMillis()
+-        val deferreds = fetchers.map { fetcher ->
++        val jobs = fetchers.mapIndexed { idx, fetcher ->
+             async(Dispatchers.IO) {
+                 val t0 = System.currentTimeMillis()
+-                runCatching { fetcher() }
++                val q = runCatching { fetcher() }
+                     .onFailure { Logs.w("ip source failed: ${it.message}") }
+-                    .getOrNull()?.copy(elapsedMs = System.currentTimeMillis() - t0)
++                    .getOrNull()
++                Done(idx, q?.copy(elapsedMs = System.currentTimeMillis() - t0))
++            }
++        }
++        val pending = jobs.toMutableList()
++        var fallback: IpQuality? = null
++        var winner: IpQuality? = null
++
++        while (pending.isNotEmpty() && winner == null) {
++            val done = withTimeoutOrNull(TOTAL_TIMEOUT_MS - (System.currentTimeMillis() - started)) {
++                select<Done> {
++                    pending.forEach { d -> d.onAwait { it } }
++                }
++            } ?: break
++            pending.removeAll { it === jobs[done.idx] }
++            val q = done.quality ?: continue
++            if (q.inferred) {
++                fallback = fallback ?: q
++                continue
++            }
++            if (q.country != null) {
++                winner = q
++                break
++            }
++            // 胜者缺国家：宽限窗口内等其他非推断源补齐
++            winner = q
++            val graceEnd = System.currentTimeMillis() + COUNTRY_GRACE_MS
++            while (pending.isNotEmpty() && winner?.country == null) {
++                val done2 = withTimeoutOrNull(graceEnd - System.currentTimeMillis()) {
++                    select<Done> {
++                        pending.forEach { d -> d.onAwait { it } }
++                    }
++                } ?: break
++                pending.removeAll { it === jobs[done2.idx] }
++                val q2 = done2.quality ?: continue
++                if (q2.inferred) {
++                    fallback = fallback ?: q2
++                    continue
++                }
++                if (q2.country != null && winner != null) {
++                    winner = winner.copy(country = q2.country)
++                }
+             }
+         }
+-        val answers = withTimeoutOrNull(10000L) {
+-            deferreds.map { it.await() }.filterNotNull()
+-        } ?: emptyList()
+-        if (answers.isEmpty()) throw IOException("all ip sources failed")
+ 
+-        // 择优：非推断 > 推断；同池内取最快；国家地区从任何成功答案补齐
+-        val solid = answers.filter { !it.inferred }
+-        val pool = solid.ifEmpty { answers }
+-        val best = pool.minByOrNull { it.elapsedMs } ?: answers.first()
+-        val mergedCountry = best.country
+-            ?: answers.mapNotNull { it.country }.firstOrNull { it.isNotBlank() }
+-        best.copy(country = mergedCountry, elapsedMs = System.currentTimeMillis() - started)
++        (winner?.copy(country = winner.country ?: fallback?.country))
++            ?: fallback
++            ?: throw IOException("all ip sources failed")
+     }
+ }
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+index 5795976..7d392da 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+@@ -709,10 +709,11 @@ class MainActivity : ThemedActivity(),
+         refreshConfigurationProfileState()
+ 
+         binding.connectBar.changeState(state, animate)
+-        // 026: VPN 连接瞬间后台预查询出站 IP（点开 ⓘ 秒出；有新鲜缓存自动跳过）
++        // 026/028: VPN 连接瞬间后台预查询出站 IP（绑定当前节点；
++        // 切换节点重连 → 缓存失效自动重查，点开 ⓘ 秒出）
+         if (state == BaseService.State.Connected) {
+             runOnDefaultDispatcher {
+-                runCatching { IpQualityLookup.prefetch() }
++                runCatching { IpQualityLookup.prefetch(DataStore.currentProfile) }
+             }
+             // 027: 连接成功自动 ping 一次主连接，延迟区直接出数值（不靠点击）
+             runOnDefaultDispatcher {
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
+index 5435e6c..63d962a 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
+@@ -9,6 +9,7 @@ import androidx.fragment.app.DialogFragment
+ import com.google.android.material.dialog.MaterialAlertDialogBuilder
+ import io.nekohasekai.sagernet.R
+ import io.nekohasekai.sagernet.SagerNet
++import io.nekohasekai.sagernet.database.DataStore
+ import io.nekohasekai.sagernet.ktx.Logs
+ import io.nekohasekai.sagernet.ktx.onMainDispatcher
+ import io.nekohasekai.sagernet.ktx.readableMessage
+@@ -158,20 +159,22 @@ class OutboundIpDialogFragment : DialogFragment() {
+     }
+ 
+     /**
+-     * 026: force=false（打开）→ 有缓存秒显、无缓存现查；
+-     * force=true（点刷新）→ 强制重查，失败时保留已显示内容（不冲掉成功结果）。
++     * 028: force=false（打开）→ 同节点缓存秒显（跨节点/无缓存 → 立即“查询中”现查）；
++     * force=true（点刷新）→ 立即显示查询中，失败时回滚同节点缓存（不冲掉成功结果）。
+      */
+     private fun fetch(force: Boolean) {
+         if (loading) return
+-        val cache = IpQualityLookup.anyCache()
++        val profileId = DataStore.currentProfile
++        val cache = IpQualityLookup.cacheFor(profileId)
+         if (!force && cache != null) {
+             render(cache.quality)
+             return
+         }
++        // 028: 点刷新立刻进入查询中状态（人性化反馈，不再顶着旧信息干等）
+         loading = true
+-        if (cache == null) setLoadingState() // 有缓存时保持原样，失败不冲
++        setLoadingState()
+         runOnDefaultDispatcher {
+-            runCatching { IpQualityLookup.lookup() }
++            runCatching { IpQualityLookup.lookup(profileId) }
+                 .onSuccess { q ->
+                     onMainDispatcher {
+                         if (isAdded) render(q)
+@@ -183,9 +186,9 @@ class OutboundIpDialogFragment : DialogFragment() {
+                     onMainDispatcher {
+                         loading = false
+                         if (!isAdded) return@onMainDispatcher
+-                        // 失败：有缓存保持缓存内容；零缓存才显示错误
+-                        val c = IpQualityLookup.anyCache()
+-                        if (c == null) renderError(e.readableMessage)
++                        // 失败：回滚同节点缓存；无缓存才显示错误
++                        val c = IpQualityLookup.cacheFor(profileId)
++                        if (c != null) render(c.quality) else renderError(e.readableMessage)
+                     }
+                 }
+         }
