@@ -88,7 +88,7 @@ index 9118c15..a88371d 100644
              adapter?.let {
                  ProfileManager.removeListener(it)
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
-index 91adab7..31ec2b7 100644
+index 91adab7..fefe2ae 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
 +++ b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
 @@ -100,10 +100,7 @@ class MainActivity : ThemedActivity(),
@@ -229,7 +229,7 @@ index 91adab7..31ec2b7 100644
  
 +    /** 017: ConnectBar 启动按钮入口（VPN 授权 + 启动服务）。 */
 +    fun launchConnect() {
-+        connect.launch()
++        connect.launch(null)
 +    }
 +
      // may NOT called when app is in background
