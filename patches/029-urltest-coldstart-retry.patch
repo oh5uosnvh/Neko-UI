@@ -1,0 +1,54 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+index 7d392da..45bf4c8 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+@@ -57,6 +57,7 @@ import io.nekohasekai.sagernet.ktx.readableMessage
+ import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+ import io.nekohasekai.sagernet.ui.MessageStore
+ import io.nekohasekai.sagernet.ktx.Logs
++import kotlinx.coroutines.delay
+ import moe.matsuri.nb4a.utils.Util
+ 
+ class MainActivity : ThemedActivity(),
+@@ -255,11 +256,27 @@ class MainActivity : ThemedActivity(),
+         }
+     }
+ 
++    /**
++     * 029: 主连接 urlTest —— 冷启动兼容重试。
++     * x365 等魔改协议首连要叠 DNS+TCP+TLS+传输流+魔改握手，libneko speedtest
++     * 第一次请求失败即返回（无重试），默认 3s 预算下冷启动首测必败。
++     * 这里首试失败延迟 700ms 重试一次（首次失败本身即完成传输预热，与官方
++     * RTT 标准取第二次请求的语义一致），两次都失败才报错。
++     */
+     fun urlTest(): Int {
+         if (!DataStore.serviceState.connected || connection.service == null) {
+             error("not started")
+         }
+-        return connection.service!!.urlTest()
++        return try {
++            connection.service!!.urlTest()
++        } catch (first: Exception) {
++            Logs.w("urlTest cold-start retry: ${first.message}")
++            Thread.sleep(700)
++            if (!DataStore.serviceState.connected || connection.service == null) {
++                throw first
++            }
++            connection.service!!.urlTest()
++        }
+     }
+ 
+     suspend fun importSubscription(uri: Uri) {
+@@ -715,9 +732,11 @@ class MainActivity : ThemedActivity(),
+             runOnDefaultDispatcher {
+                 runCatching { IpQualityLookup.prefetch(DataStore.currentProfile) }
+             }
+-            // 027: 连接成功自动 ping 一次主连接，延迟区直接出数值（不靠点击）
++            // 027/029: 连接成功自动 ping 一次主连接（延迟区直接出数值，不靠点击）。
++            // 先给 500ms 稳定期再测（x365 魔改协议冷启动握手慢，配合 urlTest 内部重试）。
+             runOnDefaultDispatcher {
+                 runCatching {
++                    delay(500)
+                     val elapsed = urlTest()
+                     onMainDispatcher { binding.connectBar.showDelay(elapsed) }
+                 }.onFailure {

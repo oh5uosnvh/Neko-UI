@@ -203,7 +203,7 @@ jobs:
           cmp libcore/protocol/xhttp/cipher.go ../mods/Neko-xhttp/libcore/protocol/xhttp/cipher.go
           echo "x365 + Blackstone mods applied:"; git -C . diff --stat -- libcore app | tail -3
 
-      - name: Apply mod patches (28)
+      - name: Apply mod patches (29)
         run: |
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
@@ -329,6 +329,10 @@ jobs:
             || { echo "::error::028 first-answer-wins select missing"; exit 1; }
           grep -q 'COUNTRY_GRACE_MS' app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt \
             || { echo "::error::028 country grace missing"; exit 1; }
+          grep -q 'urlTest cold-start retry' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
+            || { echo "::error::029 cold-start retry missing"; exit 1; }
+          grep -q 'delay(500)' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
+            || { echo "::error::029 auto-ping settle delay missing"; exit 1; }
           grep -q 'IpQualityLookup.cacheFor(profileId)' app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt \
             || { echo "::error::028 profile-bound cache fallback missing"; exit 1; }
           grep -q 'setLoadingState()' app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt \
