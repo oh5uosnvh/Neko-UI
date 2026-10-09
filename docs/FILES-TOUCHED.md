@@ -1,6 +1,6 @@
 # 文件 → 补丁 → 功能映射（A01 → 最终修订）
 
-## 已改动文件（补丁覆盖，共 17 个 + 版本文件）
+## 已改动文件（补丁 001–029 覆盖）
 
 | 文件 | 补丁 | 功能 |
 |---|---|---|
@@ -40,6 +40,9 @@
 | `layout_connect_bar.xml`、`bg_touch_rounded.xml` | 023 | 三处触摸底色统一圆角矩形；延迟区固定宽；间距/留白微调 |
 | `widget/ServiceIconView.kt` | 024 | 官方 AVD 动画引擎纯图标版（斜线/形变动画队列）；删除进度环遗留；四区均匀分布 |
 | `ui/IpQualityLookup.kt` | 025 | FlClash 0.8.99 六源对冲查询（ident.me/ip-api/ipquery/iplocate/ipapi.is/proxycheck），字段/等级/命中标记全对齐 |
+| `ui/IpQualityLookup.kt` | 026/028 | 连接即预查询（`prefetch(forProfile)`，026 发起、028 绑定 profileId）；缓存按节点隔离（`cacheFor(profileId)`）；select 回归完成序=先答先赢；`COUNTRY_GRACE_MS` 国家跨源宽限 |
+| `ui/MainActivity.kt` | 026/027/029 | 连接成功自动 ping（`connectBar.showDelay(elapsed)` 手动+自动 2 处）+ urlTest 冷启动 700ms 重试 + 自动 ping 前 500ms 稳定期 |
+| `widget/ConnectBar.kt`、`layout_connect_bar.xml`、`layout_main.xml` | 026/027 | 去弹性空隙（`layout_weight` 移除）、栏宽收窄为内容宽并居中；速度区固定 `88dp`；未连接延迟占位「… ms」 |
 | `nb4a.properties` | 不打包 | 发版时更新 `PRE_VERSION_NAME`（sbNN） |
 
 ## 基线自带（A01 已有、补丁不触碰——升级上游随基线走）
@@ -94,6 +97,6 @@ MainActivity(001: 缓存/预热/抽屉预热/openGroupAt/内边距)
 ConfigurationFragment(004: 长按→openGroupAt; onHiddenChanged 同步; 动态加载; syncOrderFromDb)
 GroupFragment(003: scrollToGroup 被 openGroupAt 调用; 拖动/删除同步)
      ↑ 联动
-TopBarController(010: ☴ 行数量后缀, 独立) | 布局 007 独立 | 008 独立 | 005/006 独立 | 009(CI) 独立 | 002 其余页面 独立
+TopBarController(010: ☴ 行数量后缀, 独立) | IpQualityLookup(025/026/028: 出站 IP, MainActivity↔OutboundIpDialogFragment 共用缓存) | 布局 007 独立 | 008 独立 | 005/006 独立 | 009(CI) 独立 | 002 其余页面 独立
 基线自带: TopBarController（规格1-4 主体）、GroupFragment.setupFilterBar（规格4）
 ```

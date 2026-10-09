@@ -56,30 +56,37 @@ NekoBoxF 的 UI 定制补丁与构建管线。基线 `A01`（tag @ f167ebc，for
 ```bash
 git clone --recurse-submodules https://github.com/oh5uosnvh/NekoBoxForAndroid.git upstream
 cd upstream && git checkout A01
-python3 ../scripts/apply_all.py                # 应用 29 补丁（--check 仅预检）
-./run init action gradle && ./gradlew app:assemblePreviewRelease   # release=R8 混淆+收缩，APK ≈16MB
-python3 ../scripts/verify_build.py <apk>       # 成品校验
+python3 ../scripts/apply_all.py                # 应用 29 补丁（--check 仅预检；自动发现 patches/NNN-*.patch）
+bash ../scripts/assert_source.sh .             # 011–029 源码锚点校验（CI 同款）
+./run init action gradle && ./gradlew app:assemblePreviewRelease   # release=R8；双 ABI（arm64-v8a + armeabi-v7a）各一 APK
+python3 ../scripts/verify_build.py <apk>       # 成品校验（dex 锚点 + libgojni 标记）
 ```
 
 云端：Actions → **Build from patches** → Run（`upstream_ref=A01`）。
-CI 产出 **release 签名包**（稳定 keystore 存于私有 Nekobox-MG `keystore/`，
-覆盖安装友好；debug 构建的 runner 随机调试签名已废弃）。
+CI 产出 **release 签名双架构包**（稳定 keystore 存于私有 Nekobox-MG `keystore/`，
+覆盖安装友好；debug 构建的 runner 随机调试签名已废弃）：
+`NekoBoxF-mod-rN-arm64-v8a.apk` + `NekoBoxF-mod-rN-armeabi-v7a.apk` + SHA256 清单。
 
 ## 校验
 
 ```bash
-python3 scripts/verify_build.py <apk>
+bash scripts/assert_apk.sh <apk>               # 全套成品断言（CI 同款）
+python3 scripts/verify_build.py <apk>          # 仅成品校验
+bash scripts/assert_source.sh <上游树>          # 011–029 源码锚点（CI 同款）
 ```
 
 - dex 必需符号 9 项（含 `armFallback`/`applyGroupCounts`）
 - 废案符号零残留（prefetchJob/sortButton/groupSort 等历史方案）
 - libgojni 协议 mod 标记：x365 / viewTurbo / fastup / oppa-mod / mihomo 伪装
+  （双架构各校验一遍）
 
-## 发布
+## 发布（人工实测后手动执行，CI 永不自动发布）
 
-1. CI 全绿 → 下载 artifact `NekoBoxF-patched-arm64`；
-2. `verify_build.py` PASS 后改名 `Neko-<版本>-arm64-v8a.apk`；
-3. Releases → New release → tag `v<版本>` → 上传 APK + 更新本文件版本号与版本历史。
+1. CI 全绿 → 下载 artifact `NekoBoxF-patched-arm64` / `NekoBoxF-patched-armv7`
+   （+ `NekoBoxF-patched-SHA256SUMS` 校验清单）；
+2. 双 ABI 真机实测 + `assert_apk.sh` PASS；
+3. 实测通过后 Releases → New release → 上传两个 APK + SHA256SUMS → 更新版本历史。
+   版本号沿用 CI 构建号 rN（`NekoBoxF-mod-rN-<abi>.apk`）。
 
 ## 文档
 
@@ -95,3 +102,4 @@ python3 scripts/verify_build.py <apk>
 | 版本 | 日期 | 说明 |
 |---|---|---|
 | 0.01 | 2026-10-06 | 首个发布：8 项规格全量；拖动排序回归官方手感（松手落库+广播）；☴ 行名称·数量；20/20 兜底装载 |
+| r41 | 待发布（人工实测后发） | 双架构构建（arm64-v8a + armeabi-v7a）；管线整理：断言脚本化、gradle 缓存、AAR ABI 自检、SHA256 清单 |

@@ -338,6 +338,40 @@
 - **红线**：源列表与 _pickType/_declaredType/_asn 逻辑必须与 FlClash v0.8.99
   ip_quality.dart 一致；等级色 risky=红/good=绿/normal=默认。
 
+### U. 连接即预查询出站 IP + 栏宽收敛（补丁 `026-connect-bar-fit4.patch`）
+- **根因**：025 只在点开 ⓘ 弹窗时才查询（首开必等）；栏宽含弹性空隙（`layout_weight`），
+  视觉过宽不居中。
+- **修复**：VPN 连接成功即 `IpQualityLookup.prefetch(DataStore.currentProfile)`
+  （点开弹窗秒出）；失败保留上次结果；国家地区跨源合并（ident.me 命中也能出国家）；
+  栏宽收窄为内容宽并居中（移除弹性空隙）。
+- **红线**：prefetch 必须携带当前节点（028 升级为 profileId 绑定）；弹性空隙不得回归
+  （`layout_weight="1"` 禁止出现在 layout_connect_bar.xml）。
+
+### V. 启动栏三抛（补丁 `027-connect-bar-fit5.patch`）
+- **根因**：速度区宽度随网速字符抖动；未连接时延迟区空白无引导；连接成功不自动测延迟。
+- **修复**：速度区固定 `88dp` 冗余宽（框长恒定）；未连接延迟占位「… ms」（四位余量）；
+  连接成功自动 ping 一次（`connectBar.showDelay(elapsed)` 手动+自动共 2 处）；
+  左右留白对称（ⓘ 去内边距/飞机去 margin/栏内边距 10dp 对称）。
+- **红线**：88dp 速度框不得改窄；「… ms」占位不得回退成「点击测试」；
+  自动 ping 的 500ms 稳定期不得删除（配合 029）。
+
+### W. IP 查询三修（补丁 `028-ip-cache-profile-bound.patch`）
+- **根因**：026 后六源 select 按发起序等待（等齐最慢源，全源都变慢）；
+  缓存不绑节点（切节点重连读到旧节点 IP）；刷新期间弹窗空白无反馈。
+- **修复**：select 回归按完成序（`select<Done>` 先答先赢）；缓存绑定节点 profileId
+  （`lookup(profileId)` / `cacheFor(profileId)`，切节点重连自动重查）；
+  打开弹窗先显示「查询中」（`setLoadingState()`），失败回滚同节点缓存；
+  `COUNTRY_GRACE_MS` 国家跨源合并宽限期。
+- **红线**：`lookup(profileId)` 签名不得回退为无参（025/028 的 CI 断言绑定此签名）；
+  先答先赢语义不得改回按发起序。
+
+### X. urlTest 冷启动重试（补丁 `029-urltest-coldstart-retry.patch`）
+- **根因**：x365 魔改协议冷启动首连（DNS+TLS+传输流+魔改握手）超 3s 预算必败
+  ——libneko speedtest 无重试，首次测延迟必显示失败。
+- **修复**：urlTest 冷启动失败 700ms 后自动重试一次（锚点 `urlTest cold-start retry`）；
+  连接成功的自动 ping 前置 500ms 稳定期（锚点 `delay(500)`）。
+- **红线**：重试仅一次（防雪崩）；3s 预算 / 700ms 退避 / 500ms 稳定期不得随手调整。
+
 ---
 
 ## 移植到新上游时的冲突热区（按历史经验排序）
