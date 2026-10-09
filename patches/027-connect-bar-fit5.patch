@@ -1,0 +1,104 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+index c970380..5795976 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+@@ -714,6 +714,15 @@ class MainActivity : ThemedActivity(),
+             runOnDefaultDispatcher {
+                 runCatching { IpQualityLookup.prefetch() }
+             }
++            // 027: 连接成功自动 ping 一次主连接，延迟区直接出数值（不靠点击）
++            runOnDefaultDispatcher {
++                runCatching {
++                    val elapsed = urlTest()
++                    onMainDispatcher { binding.connectBar.showDelay(elapsed) }
++                }.onFailure {
++                    onMainDispatcher { binding.connectBar.showDelayError() }
++                }
++            }
+         }
+         if (msg != null) snackbar(getString(R.string.vpn_error, msg)).show()
+     }
+diff --git a/app/src/main/res/layout/layout_connect_bar.xml b/app/src/main/res/layout/layout_connect_bar.xml
+index b91be16..804940d 100644
+--- a/app/src/main/res/layout/layout_connect_bar.xml
++++ b/app/src/main/res/layout/layout_connect_bar.xml
+@@ -14,28 +14,28 @@
+         android:layout_height="match_parent"
+         android:gravity="center_vertical"
+         android:orientation="horizontal"
+-        android:paddingStart="8dp"
+-        android:paddingEnd="8dp"
++        android:paddingStart="10dp"
++        android:paddingEnd="10dp"
+         android:paddingTop="8dp"
+         android:paddingBottom="8dp">
+ 
+         <!-- ⓘ 出站 IP 查询（竖直居中，占满两行） -->
+         <androidx.appcompat.widget.AppCompatImageView
+             android:id="@+id/bar_ip_info"
+-            android:layout_width="wrap_content"
+-            android:layout_height="match_parent"
+-            android:adjustViewBounds="true"
++            android:layout_width="36dp"
++            android:layout_height="36dp"
++            android:layout_gravity="center_vertical"
+             android:scaleType="fitCenter"
+             android:background="@drawable/bg_touch_rounded"
+             android:contentDescription="@string/outbound_ip"
+-            android:padding="8dp"
+             app:srcCompat="@drawable/ic_outbound_ip"
+             app:tint="@color/white" />
+ 
+-        <!-- [2] 上传/下载：上下各一行（内容宽，富余交给中缝弹性区） -->
++        <!-- [2] 上传/下载：固定冗余宽度（容纳 ▲ 999 MB/s 级别文案，
++             网速变化时框宽恒定不抖动） -->
+         <LinearLayout
+             android:id="@+id/bar_speed_zone"
+-            android:layout_width="wrap_content"
++            android:layout_width="88dp"
+             android:layout_height="wrap_content"
+             android:layout_marginStart="6dp"
+             android:orientation="vertical">
+@@ -64,7 +64,7 @@
+         <!-- [3] 实时延迟：值在上、标签在下；固定宽度 —— 文案切换时区域宽度不变 -->
+         <LinearLayout
+             android:id="@+id/bar_delay_zone"
+-            android:layout_width="72dp"
++            android:layout_width="76dp"
+             android:layout_height="match_parent"
+             android:layout_marginEnd="4dp"
+             android:background="@drawable/bg_touch_rounded"
+@@ -100,7 +100,6 @@
+             android:id="@+id/bar_fab"
+             android:layout_width="36dp"
+             android:layout_height="36dp"
+-            android:layout_marginStart="2dp"
+             android:background="@drawable/bg_touch_rounded"
+             android:contentDescription="@string/connect"
+             android:scaleType="fitCenter"
+diff --git a/app/src/main/res/values-zh-rCN/strings.xml b/app/src/main/res/values-zh-rCN/strings.xml
+index 30dbc82..288fc72 100644
+--- a/app/src/main/res/values-zh-rCN/strings.xml
++++ b/app/src/main/res/values-zh-rCN/strings.xml
+@@ -616,7 +616,7 @@
+     <string name="sort_ascending">升序</string>
+     <string name="sort_descending">降序</string>
+     <string name="bar_delay_label">实时延迟</string>
+-    <string name="bar_delay_tap">点击测试</string>
++    <string name="bar_delay_tap">… ms</string>
+     <string name="bar_delay_testing">测试中…</string>
+     <string name="bar_delay_value">%d ms</string>
+     <string name="bar_delay_failed">测试失败</string>
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index 3020fc1..3b142ea 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -722,7 +722,7 @@
+     <string name="sort_ascending">Ascending</string>
+     <string name="sort_descending">Descending</string>
+     <string name="bar_delay_label">Delay</string>
+-    <string name="bar_delay_tap">Tap to test</string>
++    <string name="bar_delay_tap">… ms</string>
+     <string name="bar_delay_testing">Testing…</string>
+     <string name="bar_delay_value">%d ms</string>
+     <string name="bar_delay_failed">Test failed</string>

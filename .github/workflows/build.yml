@@ -203,7 +203,7 @@ jobs:
           cmp libcore/protocol/xhttp/cipher.go ../mods/Neko-xhttp/libcore/protocol/xhttp/cipher.go
           echo "x365 + Blackstone mods applied:"; git -C . diff --stat -- libcore app | tail -3
 
-      - name: Apply mod patches (26)
+      - name: Apply mod patches (27)
         run: |
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
@@ -327,6 +327,14 @@ jobs:
             || { echo "::error::026 prefetch impl missing"; exit 1; }
           grep -q 'anyCache' app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt \
             || { echo "::error::026 cache fallback missing"; exit 1; }
+          [ "$(grep -c 'connectBar.showDelay(elapsed)' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt)" = "2" ] \
+            || { echo "::error::027 auto-ping on connect missing (need manual+auto)"; exit 1; }
+          grep -q 'bar_delay_tap">… ms' app/src/main/res/values-zh-rCN/strings.xml \
+            || { echo "::error::027 delay idle placeholder wrong"; exit 1; }
+          grep -q 'android:layout_width="88dp"' app/src/main/res/layout/layout_connect_bar.xml \
+            || { echo "::error::027 speed zone fixed width missing"; exit 1; }
+          ! grep -q '点击测试' app/src/main/res/values-zh-rCN/strings.xml \
+            || { echo "::error::027 old tap-to-test text still present"; exit 1; }
           ! test -f app/src/main/java/io/nekohasekai/sagernet/widget/ServiceButton.kt \
             || { echo "::error::021 ServiceButton should be gone"; exit 1; }
           echo "017+019+021 bottom connect bar present"
