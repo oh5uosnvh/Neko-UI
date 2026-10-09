@@ -16,6 +16,7 @@
 import argparse
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -23,37 +24,20 @@ import tempfile
 HERE = pathlib.Path(__file__).resolve().parent
 PATCH_DIR = HERE.parent / "patches"
 
-ORDERED = [
-    "001-sidebar-cache-prewarm.patch",
-    "002-page-scroll-reset.patch",
-    "003-groups-page-drag.patch",
-    "004-config-page.patch",
-    "005-group-settings-autoselect.patch",
-    "006-insets-fix.patch",
-    "007-tab-strip-official-ui.patch",
-    "008-group-item-longpress-only.patch",
-    "009-ci-mod-pins-gosumdb.patch",
-    "010-group-list-count.patch",
-    "011-group-update-progress-stuck.patch",
-    "012-connection-test-live-results.patch",
-    "013-connection-test-cancel-and-speed.patch",
-    "014-delete-unavailable-undo.patch",
-    "015-settings-menu-npe-guard.patch",
-    "016-preference-edit-unify.patch",
-    "017-bottom-connect-bar.patch",
-    "018-group-tab-menu-undo.patch",
-    "019-connect-bar-polish.patch",
-    "020-group-undo-fix.patch",
-    "021-connect-bar-fit.patch",
-    "022-group-undo-position.patch",
-    "023-connect-bar-fit3.patch",
-    "024-service-icon-anim.patch",
-    "025-ip-quality-multisource.patch",
-    "026-connect-bar-fit4.patch",
-    "027-connect-bar-fit5.patch",
-    "028-ip-cache-profile-bound.patch",
-    "029-urltest-coldstart-retry.patch",
-]
+def discover_patches() -> list:
+    """自动发现 patches/ 下 NNN-*.patch（文件名升序 = 序号序）。
+
+    新增补丁只需放入 patches/ 并按 NNN-<slug>.patch 命名，无需改本文件。
+    """
+    names = sorted(p.name for p in PATCH_DIR.glob("*.patch")
+                   if re.match(r"^\d{3}-", p.name))
+    if not names:
+        print(f"错误：{PATCH_DIR} 下未发现 NNN-*.patch")
+        sys.exit(2)
+    return names
+
+
+ORDERED = discover_patches()
 
 
 def git(args, cwd=None, env=None):

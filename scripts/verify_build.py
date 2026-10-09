@@ -7,7 +7,8 @@
   1) dex 内功能锚点 + libgojni 协议 mod 标记（release 包同样适用）
   2) dex 内 UI 保留符号（8 项功能规格的锚点）
   3) dex 内不得出现历史废案符号 + 已移除功能符号（☷ 手柄等）
-  4) libgojni.so 协议 mod 标记（x365/viewTurbo/fastup/oppa-mod/mihomo 伪装）
+  4) 全部 libgojni.so 协议 mod 标记（x365/viewTurbo/fastup/oppa-mod/mihomo 伪装）
+     ——双架构 split 包各含一个 ABI 的 so，逐个校验（未来 universal 包全覆盖）
 """
 import sys
 import zipfile
@@ -48,18 +49,19 @@ def main() -> int:
         print(f"[{'BAD' if hit else 'OK '}] 废案符号 {m.decode()}")
         ok &= not hit
 
-    so = b""
-    for n in z.namelist():
-        if n.endswith("libgojni.so"):
-            so = z.read(n)
-            break
-    if not so:
+    so_entries = [n for n in z.namelist() if n.endswith("libgojni.so")]
+    if not so_entries:
         print("[MISS] libgojni.so 不存在")
         return 1
-    for m in REQUIRED_SO:
-        hit = m in so
-        print(f"[{'OK ' if hit else 'MISS'}] libgojni 标记 {m.decode()}")
-        ok &= hit
+    # split 架构下每个 APK 各含一个 ABI 的 libgojni；逐个 so 校验协议 mod 标记。
+    abis = sorted({n.split("/")[1] for n in so_entries if n.startswith("lib/")})
+    print(f"[*] ABI: {', '.join(abis) if abis else '(未知路径)'} —— libgojni ×{len(so_entries)}")
+    for n in so_entries:
+        so = z.read(n)
+        for m in REQUIRED_SO:
+            hit = m in so
+            print(f"[{'OK ' if hit else 'MISS'}] libgojni 标记 {m.decode()}  ({n})")
+            ok &= hit
 
     print("\n结论:", "PASS — 无瑕疵成品" if ok else "FAIL — 见上方 BAD/MISS 项")
     return 0 if ok else 1
