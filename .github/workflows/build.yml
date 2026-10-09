@@ -1,6 +1,6 @@
 name: Build from patches
 
-# NekoBoxF = upstream NekoBoxForAndroid  +  Neko-UI 10 UI patches
+# NekoBoxF = upstream NekoBoxForAndroid  +  Neko-UI 29 UI patches
 #            +  Nekobox-MG protocol mods (x365 / xhttp / shanlian / vt / fastup / oppa)
 #
 # The protocol mods are NOT baked into the upstream checkout: this workflow
@@ -208,190 +208,9 @@ jobs:
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
 
-      - name: Assert 011 group-update progress fix is in place
+      - name: Assert 011-029 patch anchors (scripts/assert_source.sh)
         run: |
-          set -euo pipefail
-          cd upstream
-          F=app/src/main/java/io/nekohasekai/sagernet/group/GroupUpdater.kt
-          grep -q 'GroupManager.postUpdate(proxyGroup.id)' "$F" \
-            || { echo "::error::011 fix missing (progress bar sticky bug)"; exit 1; }
-          ! grep -q 'GroupManager.postUpdate(proxyGroup)$' "$F" \
-            || { echo "::error::011 not applied (old same-instance broadcast)"; exit 1; }
-          echo "011 group-update progress fix present"
-
-      - name: Assert 012 connection-test fixes are in place
-        run: |
-          set -euo pipefail
-          cd upstream
-          F=app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
-          grep -q 'fun scheduleFlush()' "$F" \
-            || { echo "::error::012 live flush missing"; exit 1; }
-          [ "$(grep -c 'test.flushPending()' "$F")" = "2" ] \
-            || { echo "::error::012 cancel flush wiring wrong"; exit 1; }
-          ! grep -q 'test.results.forEach' "$F" \
-            || { echo "::error::012 not applied (old sequential write-back)"; exit 1; }
-          echo "012 connection-test fixes present"
-
-      - name: Assert 013 connection-test speed/cancel fix is in place
-        run: |
-          set -euo pipefail
-          cd upstream
-          T=app/src/main/java/io/nekohasekai/sagernet/bg/proto/TestInstance.kt
-          grep -q 'suspendCancellableCoroutine' "$T" \
-            || { echo "::error::013 cancellable test missing"; exit 1; }
-          grep -q 'invokeOnCancellation' "$T" \
-            || { echo "::error::013 close-on-cancel missing"; exit 1; }
-          grep -q 'doTest(context: CoroutineContext)' "$T" \
-            || { echo "::error::013 dedicated dispatcher missing"; exit 1; }
-          F=app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
-          grep -q 'newFixedThreadPool' "$F" \
-            || { echo "::error::013 test pool missing"; exit 1; }
-          grep -q 'UrlTest(testPool)' "$F" \
-            || { echo "::error::013 pool not wired into UrlTest"; exit 1; }
-          echo "013 connection-test speed/cancel fixes present"
-
-      - name: Assert 014 delete-unavailable undo is in place
-        run: |
-          set -euo pipefail
-          cd upstream
-          F=app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
-          [ "$(grep -c 'undoManager.remove(visible)' "$F")" = "2" ] \
-            || { echo "::error::014 undo channel not wired (need 2 call sites)"; exit 1; }
-          grep -q 'fun isUndoReady()' "$F" \
-            || { echo "::error::014 isUndoReady missing"; exit 1; }
-          echo "014 delete-unavailable undo present"
-
-      - name: Assert 015 settings menu NPE guard is in place
-        run: |
-          set -euo pipefail
-          cd upstream
-          for f in app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt \
-                   app/src/main/java/io/nekohasekai/sagernet/ui/profile/ProfileSettingsActivity.kt \
-                   app/src/main/java/io/nekohasekai/sagernet/ui/RouteSettingsActivity.kt; do
-            grep -q 'as? MyPreferenceFragmentCompat' "$f" \
-              || { echo "::error::015 null-safe child missing in $f"; exit 1; }
-            ! grep -q 'val child by lazy' "$f" \
-              || { echo "::error::015 old unsafe lazy cast still present in $f"; exit 1; }
-          done
-          echo "015 settings menu NPE guards present"
-
-      - name: Assert 016 preference editor unify is in place
-        run: |
-          set -euo pipefail
-          cd upstream
-          P=app/src/main/java/io/nekohasekai/sagernet/ui/profile/ProfileSettingsActivity.kt
-          ! grep -q 'PasswordDialogFragment.newInstance' "$P" \
-            || { echo "::error::016 not applied (password dialog branch still present)"; exit 1; }
-          test ! -f app/src/main/java/io/nekohasekai/sagernet/ui/profile/PasswordDialogFragment.kt \
-            || { echo "::error::016 dead PasswordDialogFragment still exists"; exit 1; }
-          echo "016 preference editor unify present"
-
-      - name: Assert 017 bottom connect bar is in place
-        run: |
-          set -euo pipefail
-          cd upstream
-          M=app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
-          test -f app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt \
-            || { echo "::error::017 ConnectBar missing"; exit 1; }
-          test -f app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt \
-            || { echo "::error::017 OutboundIpDialogFragment missing"; exit 1; }
-          grep -q 'connect_bar' app/src/main/res/layout/layout_main.xml \
-            || { echo "::error::017 layout not rewired"; exit 1; }
-          ! grep -q 'io.nekohasekai.sagernet.widget.StatsBar' app/src/main/res/layout/layout_main.xml \
-            || { echo "::error::017 old StatsBar still in layout"; exit 1; }
-          ! grep -q 'binding\.fab\|binding\.stats' "$M" \
-            || { echo "::error::017 MainActivity still binds fab/stats"; exit 1; }
-          ! grep -q 'showBottomBar' app/src/main/java/io/nekohasekai/sagernet/Constants.kt \
-            || { echo "::error::017 showBottomBar pref not removed"; exit 1; }
-          grep -q 'connectBar.onTestConnection' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
-            || { echo "::error::019 delay zone not wired (would stick on testing)"; exit 1; }
-          grep -q 'syncConnectBar' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
-            || { echo "::error::021 config-only visibility missing"; exit 1; }
-          grep -q 'bg_touch_rounded' app/src/main/res/layout/layout_connect_bar.xml \
-            || { echo "::error::023 unified rounded touch bg missing"; exit 1; }
-          ! grep -q '延迟 %d ms' app/src/main/res/values-zh-rCN/strings.xml \
-            || { echo "::error::023 delay prefix not removed"; exit 1; }
-          test -f app/src/main/java/io/nekohasekai/sagernet/widget/ServiceIconView.kt \
-            || { echo "::error::024 ServiceIconView missing"; exit 1; }
-          ! grep -q 'bar_fab_progress' app/src/main/res/layout/layout_connect_bar.xml \
-            || { echo "::error::024 progress ring should be gone"; exit 1; }
-          grep -q 'serviceIcon.changeState(state, currentState, animate)' app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt \
-            || { echo "::error::024 animated engine not wired"; exit 1; }
-          ! grep -q 'layout_weight="1"' app/src/main/res/layout/layout_connect_bar.xml \
-            || { echo "::error::026 elastic spacer should be gone"; exit 1; }
-          grep -q 'layout_width="wrap_content"' app/src/main/res/layout/layout_main.xml \
-            || { echo "::error::026 bar width not wrapped to content"; exit 1; }
-          grep -q 'IpQualityLookup.prefetch(DataStore.currentProfile)' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
-            || { echo "::error::026/028 prefetch on connect missing (profile-bound)"; exit 1; }
-          grep -q 'fun prefetch(forProfile: Long)' app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt \
-            || { echo "::error::026/028 profile-bound prefetch missing"; exit 1; }
-          grep -q 'select<Done>' app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt \
-            || { echo "::error::028 first-answer-wins select missing"; exit 1; }
-          grep -q 'COUNTRY_GRACE_MS' app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt \
-            || { echo "::error::028 country grace missing"; exit 1; }
-          grep -q 'urlTest cold-start retry' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
-            || { echo "::error::029 cold-start retry missing"; exit 1; }
-          grep -q 'delay(500)' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
-            || { echo "::error::029 auto-ping settle delay missing"; exit 1; }
-          grep -q 'IpQualityLookup.cacheFor(profileId)' app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt \
-            || { echo "::error::028 profile-bound cache fallback missing"; exit 1; }
-          grep -q 'setLoadingState()' app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt \
-            || { echo "::error::028 instant loading state missing"; exit 1; }
-          [ "$(grep -c 'connectBar.showDelay(elapsed)' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt)" = "2" ] \
-            || { echo "::error::027 auto-ping on connect missing (need manual+auto)"; exit 1; }
-          grep -q 'bar_delay_tap">… ms' app/src/main/res/values-zh-rCN/strings.xml \
-            || { echo "::error::027 delay idle placeholder wrong"; exit 1; }
-          grep -q 'android:layout_width="88dp"' app/src/main/res/layout/layout_connect_bar.xml \
-            || { echo "::error::027 speed zone fixed width missing"; exit 1; }
-          ! grep -q '点击测试' app/src/main/res/values-zh-rCN/strings.xml \
-            || { echo "::error::027 old tap-to-test text still present"; exit 1; }
-          ! test -f app/src/main/java/io/nekohasekai/sagernet/widget/ServiceButton.kt \
-            || { echo "::error::021 ServiceButton should be gone"; exit 1; }
-          echo "017+019+021 bottom connect bar present"
-
-      - name: Assert 018 group tab menu + undo delete is in place
-        run: |
-          set -euo pipefail
-          cd upstream
-          F=app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
-          grep -q 'deleteGroupWithUndo' "$F" \
-            || { echo "::error::018 group undo delete missing"; exit 1; }
-          grep -q 'R.string.jump_to_group' "$F" \
-            || { echo "::error::018 tab long-press menu missing"; exit 1; }
-          grep -q 'group_deleted_undo' "$F" \
-            || { echo "::error::018 undo snackbar string missing"; exit 1; }
-          echo "018 group tab menu + undo present"
-
-      - name: Assert 019/020 polish and undo fix are in place
-        run: |
-          set -euo pipefail
-          cd upstream
-          F=app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
-          grep -q 'restoreGroupAt' "$F" \
-            || { echo "::error::020/022 undo pager sync missing"; exit 1; }
-          grep -q 'fun restoreGroupAt' "$F" \
-            || { echo "::error::022 in-position restore missing"; exit 1; }
-          D=app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
-          grep -q 'country' "$D" || { echo "::error::019 country field missing"; exit 1; }
-          grep -q 'bindCopy' "$D" || { echo "::error::019 copy-on-tap missing"; exit 1; }
-          grep -q 'row_country\|ip_country_value' app/src/main/res/layout/layout_outbound_ip_dialog.xml \
-            || { echo "::error::019 country row missing"; exit 1; }
-          echo "019/020 polish + undo fix present"
-
-      - name: Assert 025 ip quality multisource is in place
-        run: |
-          set -euo pipefail
-          cd upstream
-          L=app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt
-          test -f "$L" || { echo "::error::025 IpQualityLookup missing"; exit 1; }
-          for src in ident.me ip-api.com ipquery.io iplocate.io ipapi.is proxycheck.io; do
-            grep -q "$src" "$L" || { echo "::error::025 source $src missing"; exit 1; }
-          done
-          grep -q 'isAbuser' "$L" || { echo "::error::025 abuser flag missing"; exit 1; }
-          D=app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
-          grep -q 'IpQualityLookup.lookup(profileId)' "$D" \
-            || { echo "::error::025/028 dialog not wired to lookup"; exit 1; }
-          echo "025 ip quality multisource present"
+          bash "$GITHUB_WORKSPACE/scripts/assert_source.sh" upstream
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -499,6 +318,20 @@ jobs:
           go test ./protocol/x365 -run 'TestPrepareX365Transport|TestEncodeMatchesLiveCapture' -count=1 -v
           go test ./protocol/xhttp -run 'TestBlackstoneRotatedMagicAndKey' -count=1 -v
 
+      - name: Check libcore.aar ABI coverage
+        run: |
+          set -euo pipefail
+          cd upstream
+          AAR=app/libs/libcore.aar
+          test -s "$AAR" || { echo "::error::$AAR missing (libcore build/cache)"; exit 1; }
+          echo "--- jni/ ABIs in libcore.aar ---"
+          unzip -l "$AAR" | grep -o 'jni/[^/]*/' | sort -u || true
+          for abi in arm64-v8a armeabi-v7a; do
+            unzip -l "$AAR" | grep -q "jni/$abi/libgojni.so" \
+              || { echo "::error::libcore.aar 缺少 jni/$abi/libgojni.so（gomobile 目标不全）"; exit 1; }
+          done
+          echo "libcore.aar: arm64-v8a + armeabi-v7a 双 so 齐全"
+
       - name: Restore stable signing keystore (from private Nekobox-MG)
         run: |
           set -euo pipefail
@@ -528,17 +361,32 @@ jobs:
           echo "geoip=$GEOIP geosite=$GEOSITE"
           grep -n "VERSION_GEOIP=\|VERSION_GEOSITE=" buildScript/lib/assets.sh
 
-      - name: Relax release lint gate
+      - name: Patch build config (release lint gate + dual ABI)
         run: |
           set -euo pipefail
+          cd upstream
           # checkAllWarnings+warningsAsErrors 是 debug 期全量 lint 策略；release 构建只
           # 保留 lintVital 的 fatal 检查关不动的部分。CI 不让 lint 噪音挡出包。
-          cd upstream
           sed -i 's/checkReleaseBuilds = true/checkReleaseBuilds = false/' \
             buildSrc/src/main/kotlin/Helpers.kt
-          grep -n 'checkReleaseBuilds' buildSrc/src/main/kotlin/Helpers.kt
+          # 双架构：A01 把 splits 钉死在 arm64-v8a；放开 armeabi-v7a，
+          # 一次 gradle 构建同时产出两个 ABI 的 split APK。
+          sed -i 's/include("arm64-v8a")/include("arm64-v8a", "armeabi-v7a")/' \
+            buildSrc/src/main/kotlin/Helpers.kt
+          grep -n 'checkReleaseBuilds\|include(' buildSrc/src/main/kotlin/Helpers.kt
+          grep -q 'include("arm64-v8a", "armeabi-v7a")' buildSrc/src/main/kotlin/Helpers.kt \
+            || { echo "::error::dual-ABI split patch failed"; exit 1; }
 
-      - name: Build APK (release = R8 shrink + shrinkResources, signed)
+      - name: Gradle dependency cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('upstream/buildSrc/src/main/kotlin/*.kt', 'upstream/app/build.gradle.kts', 'upstream/build.gradle.kts', 'upstream/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Build APKs (release = R8 shrink + shrinkResources, signed, dual ABI)
         env:
           BUILD_PLUGIN: none
           GOSUMDB: off
@@ -549,44 +397,73 @@ jobs:
           ./run init action gradle
           set -a; . ../mods/keystore/keystore.properties; set +a
           ./gradlew app:assemblePreviewRelease
-          APK=$(find app/build/outputs/apk -name '*arm64-v8a*.apk' | head -1)
-          echo "APK_PATH=$APK"
-          echo "APK_DIR=$(realpath $(dirname $APK))" >> $GITHUB_ENV
+          OUT=app/build/outputs/apk
+          N64=$(find "$OUT" -name '*arm64-v8a*.apk' | wc -l)
+          N32=$(find "$OUT" -name '*armeabi-v7a*.apk' | wc -l)
+          [ "$N64" = "1" ] || { echo "::error::arm64-v8a APK 数量=$N64（应为 1）"; exit 1; }
+          [ "$N32" = "1" ] || { echo "::error::armeabi-v7a APK 数量=$N32（应为 1）"; exit 1; }
+          APK_DIR="$(realpath "$OUT")"
+          APK_ARM64="$APK_DIR/$(cd "$OUT" && find . -name '*arm64-v8a*.apk' | sed 's|^\./||')"
+          APK_ARM32="$APK_DIR/$(cd "$OUT" && find . -name '*armeabi-v7a*.apk' | sed 's|^\./||')"
+          echo "APK_DIR=$APK_DIR"     >> "$GITHUB_ENV"
+          echo "APK_ARM64=$APK_ARM64" >> "$GITHUB_ENV"
+          echo "APK_ARM32=$APK_ARM32" >> "$GITHUB_ENV"
+          ls -la "$APK_DIR"
 
-      - name: Verify mods are in the binary
+      - name: Verify both APKs (libgojni markers + dex anchors)
         run: |
-          set -euo pipefail
-          cd upstream
-          APK=$(find app/build/outputs/apk -name '*arm64-v8a*.apk' | head -1)
-          unzip -o -q "$APK" 'lib/arm64-v8a/libgojni.so' -d /tmp/apkchk
-          SO=/tmp/apkchk/lib/arm64-v8a/libgojni.so
-          check() {
-            n=$(strings -a "$SO" | grep -c "$2" || true)
-            echo "  $1: $n"
-            [ "$n" -ge "$3" ] || { echo "::error::$1 (\"$2\") missing"; exit 1; }
-          }
-          check x365      x365          1
-          check efan-UA   Chrome/120.0.0.0 1
-          check Blackstone do\ not\ hack\ this\ protocol\ please 1
-          check viewTurbo viewTurbo     1
-          check fastup    fastup        1
-          check oppa      oppa-mod/oppa 1
-          check mihomo    mihomo/1.19.25 1
-          python3 "$GITHUB_WORKSPACE/scripts/verify_build.py" "$APK"
+          bash "$GITHUB_WORKSPACE/scripts/assert_apk.sh" "$APK_ARM64"
+          bash "$GITHUB_WORKSPACE/scripts/assert_apk.sh" "$APK_ARM32"
 
-      - name: Rename APK
+      - name: Rename APKs + SHA256 manifest
         run: |
           set -euo pipefail
           cd "$APK_DIR"
-          APK=$(ls *.apk | head -1)
-          NEW="NekoBoxF-mod-r${{ github.run_number }}-arm64-v8a.apk"
-          mv "$APK" "$NEW"
-          echo "APK_FINAL=$APK_DIR/$NEW" >> "$GITHUB_ENV"
+          F64="NekoBoxF-mod-r${{ github.run_number }}-arm64-v8a.apk"
+          F32="NekoBoxF-mod-r${{ github.run_number }}-armeabi-v7a.apk"
+          mv "$APK_ARM64" "$F64"
+          mv "$APK_ARM32" "$F32"
+          SUMS="SHA256SUMS-r${{ github.run_number }}.txt"
+          sha256sum "$F64" "$F32" > "$SUMS"
+          cat "$SUMS"
+          echo "FINAL_64=$APK_DIR/$F64" >> "$GITHUB_ENV"
+          echo "FINAL_32=$APK_DIR/$F32" >> "$GITHUB_ENV"
+          echo "SUMS=$APK_DIR/$SUMS"    >> "$GITHUB_ENV"
 
-      - name: Upload APK Artifact
+      - name: Upload arm64-v8a artifact
         uses: actions/upload-artifact@v4
         with:
           name: NekoBoxF-patched-arm64
-          path: ${{ env.APK_FINAL }}
+          path: ${{ env.FINAL_64 }}
           if-no-files-found: error
           retention-days: 30
+
+      - name: Upload armeabi-v7a artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NekoBoxF-patched-armv7
+          path: ${{ env.FINAL_32 }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload SHA256SUMS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NekoBoxF-patched-SHA256SUMS
+          path: ${{ env.SUMS }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Build summary
+        run: |
+          {
+            echo "## NekoBoxF r${{ github.run_number }}（双架构）"
+            echo ""
+            echo '| 文件 | SHA256（前 16 位） |'
+            echo '|---|---|'
+            while read -r h f; do
+              printf '| `%s` | `%s…` |\n' "${f#*mod-}" "${h:0:16}"
+            done < "$SUMS"
+            echo ""
+            echo '完整 SHA256 见 artifact `NekoBoxF-patched-SHA256SUMS`。'
+          } >> "$GITHUB_STEP_SUMMARY"
