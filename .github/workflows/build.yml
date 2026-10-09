@@ -203,7 +203,7 @@ jobs:
           cmp libcore/protocol/xhttp/cipher.go ../mods/Neko-xhttp/libcore/protocol/xhttp/cipher.go
           echo "x365 + Blackstone mods applied:"; git -C . diff --stat -- libcore app | tail -3
 
-      - name: Apply mod patches (22)
+      - name: Apply mod patches (23)
         run: |
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
@@ -307,6 +307,10 @@ jobs:
             || { echo "::error::019 delay zone not wired (would stick on testing)"; exit 1; }
           grep -q 'syncConnectBar' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
             || { echo "::error::021 config-only visibility missing"; exit 1; }
+          grep -q 'bg_touch_rounded' app/src/main/res/layout/layout_connect_bar.xml \
+            || { echo "::error::023 unified rounded touch bg missing"; exit 1; }
+          ! grep -q '延迟 %d ms' app/src/main/res/values-zh-rCN/strings.xml \
+            || { echo "::error::023 delay prefix not removed"; exit 1; }
           ! test -f app/src/main/java/io/nekohasekai/sagernet/widget/ServiceButton.kt \
             || { echo "::error::021 ServiceButton should be gone"; exit 1; }
           echo "017+019+021 bottom connect bar present"

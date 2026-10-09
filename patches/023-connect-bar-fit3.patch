@@ -1,0 +1,102 @@
+diff --git a/app/src/main/res/drawable/bg_touch_rounded.xml b/app/src/main/res/drawable/bg_touch_rounded.xml
+new file mode 100644
+index 0000000..2a1e0c0
+--- /dev/null
++++ b/app/src/main/res/drawable/bg_touch_rounded.xml
+@@ -0,0 +1,11 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- 023: 启动栏统一触摸底色 —— 圆角矩形 ripple（按各信息块占位自适应） -->
++<ripple xmlns:android="http://schemas.android.com/apk/res/android"
++    android:color="?android:attr/colorControlHighlight">
++    <item>
++        <shape android:shape="rectangle">
++            <corners android:radius="12dp" />
++            <solid android:color="@android:color/transparent" />
++        </shape>
++    </item>
++</ripple>
+diff --git a/app/src/main/res/layout/layout_connect_bar.xml b/app/src/main/res/layout/layout_connect_bar.xml
+index 686ea03..86c1bf4 100644
+--- a/app/src/main/res/layout/layout_connect_bar.xml
++++ b/app/src/main/res/layout/layout_connect_bar.xml
+@@ -14,8 +14,8 @@
+         android:layout_height="match_parent"
+         android:gravity="center_vertical"
+         android:orientation="horizontal"
+-        android:paddingStart="14dp"
+-        android:paddingEnd="10dp"
++        android:paddingStart="10dp"
++        android:paddingEnd="8dp"
+         android:paddingTop="8dp"
+         android:paddingBottom="8dp">
+ 
+@@ -26,7 +26,7 @@
+             android:layout_height="match_parent"
+             android:adjustViewBounds="true"
+             android:scaleType="fitCenter"
+-            android:background="?attr/selectableItemBackgroundBorderless"
++            android:background="@drawable/bg_touch_rounded"
+             android:contentDescription="@string/outbound_ip"
+             android:padding="8dp"
+             app:srcCompat="@drawable/ic_outbound_ip"
+@@ -37,7 +37,7 @@
+             android:id="@+id/bar_speed_zone"
+             android:layout_width="0dp"
+             android:layout_height="wrap_content"
+-            android:layout_marginStart="10dp"
++            android:layout_marginStart="8dp"
+             android:layout_weight="1"
+             android:orientation="vertical">
+ 
+@@ -66,10 +66,10 @@
+              点击测试/测试中…/延迟 xx ms 之间切换时区域宽度不变，整条栏不再左右晃 -->
+         <LinearLayout
+             android:id="@+id/bar_delay_zone"
+-            android:layout_width="96dp"
++            android:layout_width="88dp"
+             android:layout_height="match_parent"
+-            android:layout_marginEnd="6dp"
+-            android:background="?android:attr/selectableItemBackground"
++            android:layout_marginEnd="4dp"
++            android:background="@drawable/bg_touch_rounded"
+             android:gravity="center_vertical"
+             android:orientation="vertical"
+             android:paddingStart="10dp"
+@@ -107,7 +107,8 @@
+                 android:id="@+id/bar_fab"
+                 android:layout_width="36dp"
+                 android:layout_height="36dp"
+-                android:background="?attr/selectableItemBackgroundBorderless"
++                android:layout_gravity="center"
++                android:background="@drawable/bg_touch_rounded"
+                 android:contentDescription="@string/connect"
+                 android:scaleType="fitCenter"
+                 app:srcCompat="@drawable/ic_service_idle" />
+diff --git a/app/src/main/res/layout/layout_main.xml b/app/src/main/res/layout/layout_main.xml
+index eb78d17..92eb167 100644
+--- a/app/src/main/res/layout/layout_main.xml
++++ b/app/src/main/res/layout/layout_main.xml
+@@ -26,8 +26,8 @@
+             android:layout_width="match_parent"
+             android:layout_height="64dp"
+             android:layout_gravity="bottom"
+-            android:layout_marginStart="16dp"
+-            android:layout_marginEnd="16dp"
++            android:layout_marginStart="12dp"
++            android:layout_marginEnd="12dp"
+             android:layout_marginBottom="4dp"
+             android:elevation="6dp"
+             app:cardBackgroundColor="?attr/colorPrimary"
+diff --git a/app/src/main/res/values-zh-rCN/strings.xml b/app/src/main/res/values-zh-rCN/strings.xml
+index cef781c..aedc11d 100644
+--- a/app/src/main/res/values-zh-rCN/strings.xml
++++ b/app/src/main/res/values-zh-rCN/strings.xml
+@@ -618,7 +618,7 @@
+     <string name="bar_delay_label">实时延迟</string>
+     <string name="bar_delay_tap">点击测试</string>
+     <string name="bar_delay_testing">测试中…</string>
+-    <string name="bar_delay_value">延迟 %d ms</string>
++    <string name="bar_delay_value">%d ms</string>
+     <string name="bar_delay_failed">测试失败</string>
+     <string name="outbound_ip">出站 IP</string>
+     <string name="ip_info_basic">基础信息</string>
