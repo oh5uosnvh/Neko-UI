@@ -1,0 +1,559 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt
+new file mode 100644
+index 0000000..87119ee
+--- /dev/null
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt
+@@ -0,0 +1,268 @@
++package io.nekohasekai.sagernet.ui
++
++import io.nekohasekai.sagernet.ktx.Logs
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.async
++import kotlinx.coroutines.coroutineScope
++import kotlinx.coroutines.withTimeoutOrNull
++import okhttp3.OkHttpClient
++import okhttp3.Request
++import org.json.JSONObject
++import java.io.IOException
++import java.util.concurrent.TimeUnit
++
++/**
++ * 025: 出站 IP 质量查询 —— 逐行复刻 FlClash v0.8.99 lib/common/ip_quality.dart
++ * 的多源对冲逻辑（六源，先答先赢，非推断结果优先，推断结果仅兜底）：
++ *
++ *   wave1: ident.me / ip-api.com / ipquery.io
++ *   wave2: iplocate.io
++ *   wave3: ipapi.is
++ *   wave4: proxycheck.io
++ *
++ * 类型规则 _pickType：hosting→机房；mobile→移动网络；declared(isp/商业/教育/
++ * 政府/银行→商业；hosting→机房)；两者皆无 → 住宅（inferred）。
++ * 等级规则 IpQuality.level：Tor/滥用 → 风险；住宅/移动/商业 → 优；机房 → 普通。
++ * 查询经 VPN 隧道（应用自身流量走 TUN），测的是节点出口 IP。
++ */
++object IpQualityLookup {
++
++    data class IpQuality(
++        val ip: String,
++        val source: String,
++        val type: String, // residential / mobile / business / hosting
++        val organization: String?,
++        val asn: Int?,
++        val isProxy: Boolean,
++        val isVpn: Boolean,
++        val isTor: Boolean,
++        val isAbuser: Boolean,
++        val country: String?,
++        val inferred: Boolean,
++    ) {
++        val level: String
++            get() = when {
++                isTor || isAbuser -> "risky"
++                type == "hosting" -> "normal"
++                else -> "good"
++            }
++
++        val flags: List<String>
++            get() = buildList {
++                if (isTor) add("tor")
++                if (isAbuser) add("abuser")
++                if (isVpn) add("vpn")
++                if (isProxy) add("proxy")
++            }
++    }
++
++    private class SourceFailure(val kind: String) : Exception(kind)
++
++    private val client by lazy {
++        OkHttpClient.Builder()
++            .connectTimeout(8, TimeUnit.SECONDS)
++            .readTimeout(8, TimeUnit.SECONDS)
++            .callTimeout(8, TimeUnit.SECONDS)
++            .build()
++    }
++
++    private fun getJson(url: String): JSONObject {
++        val request = Request.Builder().url(url).build()
++        client.newCall(request).execute().use { response ->
++            if (response.code == 429) throw SourceFailure("rateLimited")
++            if (response.code != 200) throw SourceFailure("failed")
++            return JSONObject(response.body?.string().orEmpty())
++        }
++    }
++
++    // ---- FlClash helpers ----
++    private fun obj(value: Any?): JSONObject =
++        if (value is JSONObject) value else JSONObject()
++
++    private fun flag(value: Any?): Boolean = value == true
++
++    private fun text(value: Any?): String? =
++        (value as? String)?.takeIf { it.isNotEmpty() }
++
++    private fun asnOf(value: Any?): Int? = when (value) {
++        is Int -> value.takeIf { it != 0 }
++        is String -> Regex("\\d+").find(value)?.value?.toIntOrNull()?.takeIf { it != 0 }
++        else -> null
++    }
++
++    private fun declaredType(value: Any?): String? = when (value) {
++        "isp" -> "residential"
++        "business", "education", "government", "banking" -> "business"
++        "hosting" -> "hosting"
++        else -> null
++    }
++
++    private fun pickType(hosting: Boolean, mobile: Boolean = false, declared: String? = null): String? =
++        when {
++            hosting || declared == "hosting" -> "hosting"
++            mobile -> "mobile"
++            else -> declared
++        }
++
++    private fun quality(
++        ip: String, source: String, type: String?, inferred: Boolean = false,
++        organization: String? = null, asn: Int? = null, country: String? = null,
++        isProxy: Boolean = false, isVpn: Boolean = false,
++        isTor: Boolean = false, isAbuser: Boolean = false,
++    ): IpQuality? {
++        if (type == null) return null
++        return IpQuality(ip, source, type, organization, asn, isProxy, isVpn, isTor, isAbuser, country, inferred)
++    }
++
++    // ---- 六源解析（与 FlClash _fromXxx 一一对应） ----
++    private fun fromIdentMe(): IpQuality {
++        val json = getJson("https://ident.me/json")
++        val ip = json.optString("ip")
++        val type = declaredType(json.optString("type"))
++        return quality(
++            ip, "ident.me", type,
++            inferred = type == null,
++            organization = text(json.optString("aso")),
++            asn = asnOf(json.opt("asn")),
++        ) ?: throw SourceFailure("noType")
++    }
++
++    private fun fromIpApiCom(): IpQuality {
++        val json = getJson(
++            "http://ip-api.com/json/?fields=status,message,query,country,isp,org,as,mobile,proxy,hosting&lang=zh-CN"
++        )
++        if (json.optString("status") != "success") throw SourceFailure("failed")
++        val type = pickType(hosting = flag(json.opt("hosting")), mobile = flag(json.opt("mobile")))
++        return quality(
++            json.optString("query"), "ip-api.com", type,
++            inferred = type == null,
++            organization = text(json.optString("org")) ?: text(json.optString("isp")),
++            asn = asnOf(json.optString("as")),
++            country = text(json.optString("country")),
++            isProxy = flag(json.opt("proxy")),
++        ) ?: throw SourceFailure("noType")
++    }
++
++    private fun fromIpQuery(): IpQuality {
++        val json = getJson("https://api.ipquery.io/?format=json")
++        val risk = obj(json.opt("risk"))
++        val isp = obj(json.opt("isp"))
++        val type = pickType(
++            hosting = flag(risk.opt("is_datacenter")),
++            mobile = flag(risk.opt("is_mobile")),
++        )
++        return quality(
++            json.optString("ip"), "ipquery.io", type,
++            inferred = type == null,
++            organization = text(isp.opt("org")) ?: text(isp.opt("isp")),
++            asn = asnOf(isp.opt("asn")),
++            country = text(obj(json.opt("location")).opt("country")),
++            isProxy = flag(risk.opt("is_proxy")),
++            isVpn = flag(risk.opt("is_vpn")),
++            isTor = flag(risk.opt("is_tor")),
++        ) ?: throw SourceFailure("noType")
++    }
++
++    private fun fromIpLocate(): IpQuality {
++        val json = getJson("https://iplocate.io/api/lookup/")
++        val privacy = obj(json.opt("privacy"))
++        val company = obj(json.opt("company"))
++        val asn = obj(json.opt("asn"))
++        val type = pickType(
++            hosting = flag(privacy.opt("is_hosting")),
++            declared = declaredType(company.opt("type")) ?: declaredType(asn.opt("type")),
++        )
++        return quality(
++            json.optString("ip"), "iplocate.io", type,
++            inferred = type == null,
++            organization = text(company.opt("name")) ?: text(asn.opt("name")),
++            asn = asnOf(asn.opt("asn")),
++            country = text(json.optString("country")),
++            isProxy = flag(privacy.opt("is_proxy")),
++            isVpn = flag(privacy.opt("is_vpn")),
++            isTor = flag(privacy.opt("is_tor")),
++            isAbuser = flag(privacy.opt("is_abuser")),
++        ) ?: throw SourceFailure("noType")
++    }
++
++    private fun fromIpApiIs(): IpQuality {
++        val json = getJson("https://api.ipapi.is/")
++        val company = obj(json.opt("company"))
++        val asn = obj(json.opt("asn"))
++        val type = pickType(
++            hosting = flag(json.opt("is_datacenter")),
++            mobile = flag(json.opt("is_mobile")),
++            declared = declaredType(company.opt("type")) ?: declaredType(asn.opt("type")),
++        )
++        return quality(
++            json.optString("ip"), "ipapi.is", type,
++            inferred = type == null,
++            organization = text(company.opt("name")) ?: text(asn.opt("org")),
++            asn = asnOf(asn.opt("asn")),
++            country = text(obj(json.opt("location")).opt("country")),
++            isProxy = flag(json.opt("is_proxy")),
++            isVpn = flag(json.opt("is_vpn")),
++            isTor = flag(json.opt("is_tor")),
++            isAbuser = flag(json.opt("is_abuser")),
++        ) ?: throw SourceFailure("noType")
++    }
++
++    private fun fromProxyCheck(): IpQuality {
++        val json = getJson("https://proxycheck.io/v3/?risk=1&vpn=1&asn=1")
++        val status = json.optString("status")
++        if (status == "denied") throw SourceFailure("rateLimited")
++        if (status != "ok" && status != "warning") throw SourceFailure("failed")
++        // 结果键是查询的 IP —— 自身查询时取除 status 外的第一个键
++        val ipKey = json.keys().asSequence().firstOrNull { it != "status" } ?: throw SourceFailure("noType")
++        val result = obj(json.opt(ipKey))
++        val network = obj(result.opt("network"))
++        val detections = obj(result.opt("detections"))
++        val networkType = network.optString("type")
++        val type = pickType(
++            hosting = flag(detections.opt("hosting")) || networkType == "Hosting",
++            mobile = networkType == "Wireless",
++            declared = when (networkType) {
++                "Residential" -> "residential"
++                "Business" -> "business"
++                else -> null
++            },
++        )
++        return quality(
++            ipKey, "proxycheck.io", type,
++            inferred = type == null,
++            organization = text(network.opt("organisation")),
++            asn = asnOf(network.opt("asn")),
++            country = text(obj(result.opt("location")).opt("country")),
++            isProxy = flag(detections.opt("proxy")),
++            isVpn = flag(detections.opt("vpn")),
++            isTor = flag(detections.opt("tor")),
++        ) ?: throw SourceFailure("noType")
++    }
++
++    // ---- 对冲调度：六源并发，非推断结果先到先得，推断结果兜底 ----
++    suspend fun lookup(): IpQuality = coroutineScope {
++        val fetchers = listOf(
++            ::fromIdentMe, ::fromIpApiCom, ::fromIpQuery,
++            ::fromIpLocate, ::fromIpApiIs, ::fromProxyCheck,
++        )
++        val deferreds = fetchers.map { fetcher ->
++            async(Dispatchers.IO) {
++                runCatching { fetcher() }
++                    .onFailure { Logs.w("ip source failed: ${it.message}") }
++                    .getOrNull()
++            }
++        }
++        var fallback: IpQuality? = null
++        // 官方总超时 8s：超时后若只有推断结果则用之，否则全败
++        val winner = withTimeoutOrNull(8000L) {
++            for (d in deferreds) {
++                val r = d.await()
++                if (r == null) continue
++                if (!r.inferred) return@withTimeoutOrNull r
++                fallback = fallback ?: r
++            }
++            null
++        }
++        winner ?: fallback ?: throw IOException("all ip sources failed")
++    }
++}
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
+index f52583a..796dddb 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
+@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.ui
+ 
+ import android.app.Dialog
+ import android.os.Bundle
++import android.view.View
+ import android.widget.TextView
+ import androidx.core.content.ContextCompat
+ import androidx.fragment.app.DialogFragment
+@@ -12,34 +13,23 @@ import io.nekohasekai.sagernet.ktx.Logs
+ import io.nekohasekai.sagernet.ktx.onMainDispatcher
+ import io.nekohasekai.sagernet.ktx.readableMessage
+ import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+-import okhttp3.OkHttpClient
+-import okhttp3.Request
+-import org.json.JSONObject
+-import java.io.IOException
+ 
+ /**
+- * 017: 出站 IP 查询弹窗 —— 复刻 FlClash 0.8.99 出站 IP 面板。
+- *
+- * 数据源与字段映射对齐 FlClash（lib/common/ip_quality.dart @ v0.8.99）：
+- * - 主源 ip-api.com（免费版仅 HTTP）：
+- *   http://ip-api.com/json/?fields=status,message,query,isp,org,as,mobile,proxy,hosting
+- * - 等级: hosting → 普通；住宅/移动 → 优质（与 FlClash IpQuality.level 同规则）
+- * - 类型: hosting→机房 / mobile→移动 / 其余→住宅
+- * - 命中标记: proxy→代理，否则 无
+- * - 网络: 组织(org ?: isp) / ASN(as 前缀) / 采用来源(ip-api.com)
+- *
+- * 查询经 VPN 隧道（应用自身流量走 TUN），未连接时显示本机出口 IP —— 与 FlClash 行为一致。
+- * 底部按钮：刷新（不关闭）/ 确定。
++ * 017: 出站 IP 查询弹窗 —— 复刻 FlClash v0.8.99 出站 IP 面板。
++ * 025: 数据源切换为 IpQualityLookup 六源对冲（与 FlClash 字段/等级/命中标记
++ * 语义完全对齐）：
++ * - 等级: 优（住宅/移动/商业）/ 普通（机房）/ 风险（Tor/滥用），颜色同 FlClash
++ * - 类型: 机房 / 移动网络 / 住宅 / 商业
++ * - 命中标记: Tor / 滥用记录 / VPN / 代理（可多个，顿号连接），无则“无”
++ * - 网络: 组织 / ASN / 采用来源（实际命中的源）
++ * 019: IP 地址 / 组织 / ASN 三行点击复制（仅这三行）。
+  */
+ class OutboundIpDialogFragment : DialogFragment() {
+ 
+     companion object {
+         const val DIALOG_TAG = "outbound_ip_dialog"
+-        private const val QUERY_URL =
+-            "http://ip-api.com/json/?fields=status,message,query,country,isp,org,as,mobile,proxy,hosting&lang=zh-CN"
+     }
+ 
+-    private val client by lazy { OkHttpClient() }
+     private var loading = false
+ 
+     private lateinit var ipValue: TextView
+@@ -49,6 +39,7 @@ class OutboundIpDialogFragment : DialogFragment() {
+     private lateinit var flagsValue: TextView
+     private lateinit var orgValue: TextView
+     private lateinit var asnValue: TextView
++    private lateinit var sourceValue: TextView
+ 
+     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+         val view = layoutInflater.inflate(R.layout.layout_outbound_ip_dialog, null)
+@@ -59,6 +50,12 @@ class OutboundIpDialogFragment : DialogFragment() {
+         flagsValue = view.findViewById(R.id.ip_flags_value)
+         orgValue = view.findViewById(R.id.ip_org_value)
+         asnValue = view.findViewById(R.id.ip_asn_value)
++        sourceValue = view.findViewById(R.id.ip_source_value)
++
++        // 019: 仅 IP 地址 / 组织 / ASN 三行点击复制
++        bindCopy(view.findViewById(R.id.row_ip), ipValue)
++        bindCopy(view.findViewById(R.id.row_org), orgValue)
++        bindCopy(view.findViewById(R.id.row_asn), asnValue)
+ 
+         val dialog = MaterialAlertDialogBuilder(requireContext())
+             .setTitle(R.string.outbound_ip)
+@@ -67,11 +64,6 @@ class OutboundIpDialogFragment : DialogFragment() {
+             .setPositiveButton(android.R.string.ok, null)
+             .create()
+ 
+-        // 019: 仅 IP 地址 / 组织 / ASN 三行点击复制
+-        bindCopy(view.findViewById(R.id.row_ip), ipValue)
+-        bindCopy(view.findViewById(R.id.row_org), orgValue)
+-        bindCopy(view.findViewById(R.id.row_asn), asnValue)
+-
+         dialog.setOnShowListener {
+             // 刷新不关闭；确定正常关闭
+             dialog.getButton(Dialog.BUTTON_NEUTRAL).setOnClickListener { fetch() }
+@@ -82,7 +74,7 @@ class OutboundIpDialogFragment : DialogFragment() {
+         return dialog
+     }
+ 
+-    private fun bindCopy(row: android.view.View?, valueView: TextView) {
++    private fun bindCopy(row: View?, valueView: TextView) {
+         row ?: return
+         row.setOnClickListener {
+             val text = valueView.text?.toString().orEmpty()
+@@ -96,6 +88,15 @@ class OutboundIpDialogFragment : DialogFragment() {
+         }
+     }
+ 
++    private fun defaultSecondaryColor(): Int {
++        val ta = requireContext().theme.obtainStyledAttributes(
++            intArrayOf(android.R.attr.textColorSecondary)
++        )
++        val color = ta.getColor(0, 0)
++        ta.recycle()
++        return color
++    }
++
+     private fun setLoadingState() {
+         ipValue.setText(R.string.ip_loading)
+         countryValue.setText(R.string.ip_loading)
+@@ -104,18 +105,10 @@ class OutboundIpDialogFragment : DialogFragment() {
+         flagsValue.setText(R.string.ip_loading)
+         orgValue.setText(R.string.ip_loading)
+         asnValue.setText(R.string.ip_loading)
++        sourceValue.text = "—"
+         levelValue.setTextColor(defaultSecondaryColor())
+     }
+ 
+-    private fun defaultSecondaryColor(): Int {
+-        val ta = requireContext().theme.obtainStyledAttributes(
+-            intArrayOf(android.R.attr.textColorSecondary)
+-        )
+-        val color = ta.getColor(0, 0)
+-        ta.recycle()
+-        return color
+-    }
+-
+     private fun fetch() {
+         if (loading) return
+         loading = true
+@@ -124,44 +117,46 @@ class OutboundIpDialogFragment : DialogFragment() {
+             var ok = false
+             var err: String? = null
+             try {
+-                val request = Request.Builder().url(QUERY_URL).build()
+-                client.newCall(request).execute().use { response ->
+-                    val body = response.body?.string().orEmpty()
+-                    val json = JSONObject(body)
+-                    if (json.optString("status") != "success") {
+-                        throw IOException(
+-                            json.optString("message").ifBlank { "status=" + json.optString("status") }
+-                        )
+-                    }
+-                    val query = json.optString("query")
+-                    val country = json.optString("country")
+-                    val org = json.optString("org").ifBlank { json.optString("isp") }
+-                    val asn = json.optString("as").substringBefore(' ').trim()
+-                    val proxy = json.optBoolean("proxy")
+-                    val hosting = json.optBoolean("hosting")
+-                    val mobile = json.optBoolean("mobile")
+-
+-                    val typeRes = when {
+-                        hosting -> R.string.ip_type_hosting
+-                        mobile -> R.string.ip_type_mobile
+-                        else -> R.string.ip_type_residential
+-                    }
+-                    // FlClash 规则：hosting → 普通；住宅/移动 → 优质；代理风险 → 风险
+-                    val levelRes = if (hosting) R.string.ip_level_normal else R.string.ip_level_good
+-                    val flagsRes = if (proxy) R.string.ip_flag_proxy else R.string.ip_none
+-
+-                    onMainDispatcher {
+-                        if (!isAdded) return@onMainDispatcher
+-                        ipValue.text = query
+-                        countryValue.text = country.ifBlank { "—" }
+-                        levelValue.setText(levelRes)
+-                        levelValue.setTextColor(defaultSecondaryColor())
+-                        typeValue.setText(typeRes)
+-                        flagsValue.setText(flagsRes)
+-                        orgValue.text = org.ifBlank { "—" }
+-                        asnValue.text = asn.ifBlank { "—" }
+-                        ok = true
+-                    }
++                val q = IpQualityLookup.lookup()
++                val levelRes = when (q.level) {
++                    "risky" -> R.string.ip_level_risky
++                    "good" -> R.string.ip_level_good
++                    else -> R.string.ip_level_normal
++                }
++                val levelColor = when (q.level) {
++                    "risky" -> ContextCompat.getColor(requireContext(), R.color.material_red_500)
++                    "good" -> ContextCompat.getColor(requireContext(), R.color.material_green_500)
++                    else -> defaultSecondaryColor()
++                }
++                val typeRes = when (q.type) {
++                    "hosting" -> R.string.ip_type_hosting
++                    "mobile" -> R.string.ip_type_mobile
++                    "business" -> R.string.ip_type_business
++                    else -> R.string.ip_type_residential
++                }
++                val labelOf = mapOf(
++                    "tor" to getString(R.string.ip_flag_tor),
++                    "abuser" to getString(R.string.ip_flag_abuser),
++                    "vpn" to getString(R.string.ip_flag_vpn),
++                    "proxy" to getString(R.string.ip_flag_proxy),
++                )
++                val flagsText = if (q.flags.isEmpty()) {
++                    getString(R.string.ip_none)
++                } else {
++                    q.flags.mapNotNull { labelOf[it] }.joinToString("、")
++                }
++                onMainDispatcher {
++                    if (!isAdded) return@onMainDispatcher
++                    ipValue.text = q.ip
++                    countryValue.text = q.country?.takeIf { it.isNotBlank() } ?: "—"
++                    levelValue.setText(levelRes)
++                    levelValue.setTextColor(levelColor)
++                    typeValue.setText(typeRes)
++                    flagsValue.text = flagsText
++                    orgValue.text = q.organization?.takeIf { it.isNotBlank() } ?: "—"
++                    asnValue.text = q.asn?.let { "AS$it" } ?: "—"
++                    sourceValue.text = q.source
++                    ok = true
+                 }
+             } catch (e: Exception) {
+                 Logs.w(e)
+@@ -176,10 +171,11 @@ class OutboundIpDialogFragment : DialogFragment() {
+                     levelValue.setTextColor(
+                         ContextCompat.getColor(requireContext(), R.color.material_red_500)
+                     )
+-                    typeValue.text = "—"
++                    typeValue.setText(R.string.ip_query_failed)
+                     flagsValue.setText(R.string.ip_none)
+                     orgValue.text = "—"
+                     asnValue.text = "—"
++                    sourceValue.text = "—"
+                 }
+             }
+             loading = false
+diff --git a/app/src/main/res/values-zh-rCN/strings.xml b/app/src/main/res/values-zh-rCN/strings.xml
+index aedc11d..30dbc82 100644
+--- a/app/src/main/res/values-zh-rCN/strings.xml
++++ b/app/src/main/res/values-zh-rCN/strings.xml
+@@ -631,16 +631,21 @@
+     <string name="ip_asn">ASN</string>
+     <string name="ip_source">采用来源</string>
+     <string name="ip_source_ipapicom">ip-api.com</string>
+-    <string name="ip_level_good">优质</string>
++    <string name="ip_level_good">优</string>
+     <string name="ip_level_normal">普通</string>
+     <string name="ip_type_residential">住宅</string>
+-    <string name="ip_type_mobile">移动</string>
++    <string name="ip_type_mobile">移动网络</string>
+     <string name="ip_type_hosting">机房</string>
+     <string name="ip_flag_proxy">代理</string>
+     <string name="ip_none">无</string>
+     <string name="ip_loading">查询中…</string>
+-    <string name="ip_query_failed">查询失败</string>
++    <string name="ip_query_failed">类型查询失败</string>
+     <string name="ip_action_refresh">刷新</string>
+     <string name="group_deleted_undo">已删除分组 %s</string>
+     <string name="ip_country">国家地区</string>
++    <string name="ip_level_risky">风险</string>
++    <string name="ip_type_business">商业</string>
++    <string name="ip_flag_tor">Tor</string>
++    <string name="ip_flag_vpn">VPN</string>
++    <string name="ip_flag_abuser">滥用记录</string>
+ </resources>
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index e30ee33..3020fc1 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -740,13 +740,18 @@
+     <string name="ip_level_good">Good</string>
+     <string name="ip_level_normal">Normal</string>
+     <string name="ip_type_residential">Residential</string>
+-    <string name="ip_type_mobile">Mobile</string>
++    <string name="ip_type_mobile">Mobile network</string>
+     <string name="ip_type_hosting">Hosting</string>
+     <string name="ip_flag_proxy">Proxy</string>
+     <string name="ip_none">None</string>
+     <string name="ip_loading">Looking up…</string>
+-    <string name="ip_query_failed">Lookup failed</string>
++    <string name="ip_query_failed">Type lookup failed</string>
+     <string name="ip_action_refresh">Refresh</string>
+     <string name="group_deleted_undo">Group %s deleted</string>
+     <string name="ip_country">Country / Region</string>
++    <string name="ip_level_risky">Risky</string>
++    <string name="ip_type_business">Business</string>
++    <string name="ip_flag_tor">Tor</string>
++    <string name="ip_flag_vpn">VPN</string>
++    <string name="ip_flag_abuser">Abuse record</string>
+ </resources>

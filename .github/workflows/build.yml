@@ -203,7 +203,7 @@ jobs:
           cmp libcore/protocol/xhttp/cipher.go ../mods/Neko-xhttp/libcore/protocol/xhttp/cipher.go
           echo "x365 + Blackstone mods applied:"; git -C . diff --stat -- libcore app | tail -3
 
-      - name: Apply mod patches (23)
+      - name: Apply mod patches (25)
         run: |
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
@@ -311,6 +311,12 @@ jobs:
             || { echo "::error::023 unified rounded touch bg missing"; exit 1; }
           ! grep -q '延迟 %d ms' app/src/main/res/values-zh-rCN/strings.xml \
             || { echo "::error::023 delay prefix not removed"; exit 1; }
+          test -f app/src/main/java/io/nekohasekai/sagernet/widget/ServiceIconView.kt \
+            || { echo "::error::024 ServiceIconView missing"; exit 1; }
+          ! grep -q 'bar_fab_progress' app/src/main/res/layout/layout_connect_bar.xml \
+            || { echo "::error::024 progress ring should be gone"; exit 1; }
+          grep -q 'serviceIcon.changeState(state, currentState, animate)' app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt \
+            || { echo "::error::024 animated engine not wired"; exit 1; }
           ! test -f app/src/main/java/io/nekohasekai/sagernet/widget/ServiceButton.kt \
             || { echo "::error::021 ServiceButton should be gone"; exit 1; }
           echo "017+019+021 bottom connect bar present"
@@ -343,6 +349,21 @@ jobs:
           grep -q 'row_country\|ip_country_value' app/src/main/res/layout/layout_outbound_ip_dialog.xml \
             || { echo "::error::019 country row missing"; exit 1; }
           echo "019/020 polish + undo fix present"
+
+      - name: Assert 025 ip quality multisource is in place
+        run: |
+          set -euo pipefail
+          cd upstream
+          L=app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt
+          test -f "$L" || { echo "::error::025 IpQualityLookup missing"; exit 1; }
+          for src in ident.me ip-api.com ipquery.io iplocate.io ipapi.is proxycheck.io; do
+            grep -q "$src" "$L" || { echo "::error::025 source $src missing"; exit 1; }
+          done
+          grep -q 'isAbuser' "$L" || { echo "::error::025 abuser flag missing"; exit 1; }
+          D=app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
+          grep -q 'IpQualityLookup.lookup()' "$D" \
+            || { echo "::error::025 dialog not wired to lookup"; exit 1; }
+          echo "025 ip quality multisource present"
 
       - name: Setup Java
         uses: actions/setup-java@v4

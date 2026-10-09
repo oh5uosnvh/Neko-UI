@@ -1,0 +1,254 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+index 441007b..72ffd6e 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+@@ -708,7 +708,7 @@ class MainActivity : ThemedActivity(),
+         DataStore.serviceState = state
+         refreshConfigurationProfileState()
+ 
+-        binding.connectBar.changeState(state)
++        binding.connectBar.changeState(state, animate)
+         if (msg != null) snackbar(getString(R.string.vpn_error, msg)).show()
+     }
+ 
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt b/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
+index 63e23c9..22619cb 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
+@@ -3,7 +3,6 @@ package io.nekohasekai.sagernet.widget
+ import android.content.Context
+ import android.text.format.Formatter
+ import android.util.AttributeSet
+-import android.view.View
+ import android.view.ViewGroup
+ import android.widget.TextView
+ import androidx.appcompat.widget.AppCompatImageView
+@@ -11,7 +10,6 @@ import androidx.core.view.ViewCompat
+ import androidx.core.view.WindowInsetsCompat
+ import androidx.fragment.app.FragmentActivity
+ import com.google.android.material.card.MaterialCardView
+-import com.google.android.material.progressindicator.CircularProgressIndicator
+ import io.nekohasekai.sagernet.R
+ import io.nekohasekai.sagernet.SagerNet
+ import io.nekohasekai.sagernet.aidl.TrafficData
+@@ -48,8 +46,7 @@ class ConnectBar @JvmOverloads constructor(
+     private val rxText: TextView
+     private val delayZone: ViewGroup
+     private val delayValue: TextView
+-    private val serviceIcon: AppCompatImageView
+-    private val serviceProgress: CircularProgressIndicator
++    private val serviceIcon: ServiceIconView
+ 
+     private var currentState = BaseService.State.Idle
+ 
+@@ -78,7 +75,6 @@ class ConnectBar @JvmOverloads constructor(
+         delayZone = findViewById(R.id.bar_delay_zone)
+         delayValue = findViewById(R.id.bar_delay_value)
+         serviceIcon = findViewById(R.id.bar_fab)
+-        serviceProgress = findViewById(R.id.bar_fab_progress)
+ 
+         // 021: 拦截空白区触摸，防止点击穿透到下层节点卡片
+         isClickable = true
+@@ -135,22 +131,10 @@ class ConnectBar @JvmOverloads constructor(
+         super.onDetachedFromWindow()
+     }
+ 
+-    fun changeState(state: BaseService.State) {
+-        val res = when (state) {
+-            BaseService.State.Connecting -> R.drawable.ic_service_connecting
+-            BaseService.State.Connected -> R.drawable.ic_service_connected
+-            BaseService.State.Stopping -> R.drawable.ic_service_stopping
+-            else -> R.drawable.ic_service_idle
+-        }
+-        serviceIcon.setImageResource(res)
+-        serviceProgress.visibility =
+-            if (state == BaseService.State.Connecting || state == BaseService.State.Stopping) {
+-                View.VISIBLE
+-            } else {
+-                View.INVISIBLE
+-            }
+-        serviceIcon.contentDescription =
+-            context.getText(if (state.canStop) R.string.stop else R.string.connect)
++    fun changeState(state: BaseService.State, animate: Boolean = true) {
++        // 024: 官方动画引擎（AVD 队列：斜线/飞机形变动效），无进度环。
++        // 初始状态用 animate=false（静态首帧），与官方 ServiceButton 调用语义一致。
++        serviceIcon.changeState(state, currentState, animate)
+         currentState = state
+         if (state != BaseService.State.Connected) {
+             delayValue.setText(R.string.bar_delay_tap)
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/widget/ServiceIconView.kt b/app/src/main/java/io/nekohasekai/sagernet/widget/ServiceIconView.kt
+new file mode 100644
+index 0000000..eabfb9f
+--- /dev/null
++++ b/app/src/main/java/io/nekohasekai/sagernet/widget/ServiceIconView.kt
+@@ -0,0 +1,86 @@
++package io.nekohasekai.sagernet.widget
++
++import android.content.Context
++import android.graphics.drawable.Drawable
++import android.util.AttributeSet
++import androidx.appcompat.widget.AppCompatImageView
++import androidx.vectordrawable.graphics.drawable.Animatable2Compat
++import androidx.vectordrawable.graphics.drawable.AnimatedVectorDrawableCompat
++import io.nekohasekai.sagernet.R
++import io.nekohasekai.sagernet.bg.BaseService
++import java.util.ArrayDeque
++
++/**
++ * 024: 官方 ServiceButton 动画引擎的纯图标版 —— 保留 AVD 动画队列
++ * （斜线划出/飞机形变，连接↔停止切换动画），去掉 FAB 自绘底色与
++ * 进度环（源码遗留的“转圈”显示问题）。底色交给外层统一触摸背景。
++ */
++class ServiceIconView @JvmOverloads constructor(
++    context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0,
++) : AppCompatImageView(context, attrs, defStyleAttr) {
++
++    private val callback = object : Animatable2Compat.AnimationCallback() {
++        override fun onAnimationEnd(drawable: Drawable) {
++            super.onAnimationEnd(drawable)
++            var next = animationQueue.peek() ?: return
++            if (next.icon.current == drawable) {
++                animationQueue.pop()
++                next = animationQueue.peek() ?: return
++            }
++            next.start()
++        }
++    }
++
++    private inner class AnimatedState(@Suppress("SameParameterValue") resId: Int) {
++        val icon: AnimatedVectorDrawableCompat =
++            AnimatedVectorDrawableCompat.create(context, resId)!!.apply {
++                registerAnimationCallback(this@ServiceIconView.callback)
++            }
++
++        fun start() {
++            setImageDrawable(icon)
++            icon.start()
++        }
++
++        fun stop() = icon.stop()
++    }
++
++    private val iconStopped by lazy { AnimatedState(R.drawable.ic_service_stopped) }
++    private val iconConnecting by lazy { AnimatedState(R.drawable.ic_service_connecting) }
++    private val iconConnected by lazy { AnimatedState(R.drawable.ic_service_connected) }
++    private val iconStopping by lazy { AnimatedState(R.drawable.ic_service_stopping) }
++    private val animationQueue = ArrayDeque<AnimatedState>()
++
++    fun changeState(state: BaseService.State, previousState: BaseService.State, animate: Boolean) {
++        when (state) {
++            BaseService.State.Connecting -> changeState(iconConnecting, animate)
++            BaseService.State.Connected -> changeState(iconConnected, animate)
++            BaseService.State.Stopping -> {
++                changeState(iconStopping, animate && previousState == BaseService.State.Connected)
++            }
++
++            else -> changeState(iconStopped, animate)
++        }
++        val description = context.getText(if (state.canStop) R.string.stop else R.string.connect)
++        contentDescription = description
++    }
++
++    private fun changeState(icon: AnimatedState, animate: Boolean) {
++        fun counters(a: AnimatedState, b: AnimatedState): Boolean =
++            a == iconStopped && b == iconConnecting ||
++                    a == iconConnecting && b == iconStopped ||
++                    a == iconConnected && b == iconStopping ||
++                    a == iconStopping && b == iconConnected
++        if (animate) {
++            if (animationQueue.size < 2 || !counters(animationQueue.last, icon)) {
++                animationQueue.add(icon)
++                if (animationQueue.size == 1) icon.start()
++            } else animationQueue.removeLast()
++        } else {
++            animationQueue.peekFirst()?.stop()
++            animationQueue.clear()
++            icon.start() // force ensureAnimatorSet to be called so that stop() will work
++            icon.stop()
++        }
++    }
++}
+diff --git a/app/src/main/res/layout/layout_connect_bar.xml b/app/src/main/res/layout/layout_connect_bar.xml
+index 86c1bf4..c7c5960 100644
+--- a/app/src/main/res/layout/layout_connect_bar.xml
++++ b/app/src/main/res/layout/layout_connect_bar.xml
+@@ -32,13 +32,12 @@
+             app:srcCompat="@drawable/ic_outbound_ip"
+             app:tint="@color/white" />
+ 
+-        <!-- 上传/下载：上下各一行 -->
++        <!-- [2] 上传/下载：上下各一行（内容宽，富余交给中缝弹性区） -->
+         <LinearLayout
+             android:id="@+id/bar_speed_zone"
+-            android:layout_width="0dp"
++            android:layout_width="wrap_content"
+             android:layout_height="wrap_content"
+-            android:layout_marginStart="8dp"
+-            android:layout_weight="1"
++            android:layout_marginStart="6dp"
+             android:orientation="vertical">
+ 
+             <TextView
+@@ -62,8 +61,13 @@
+                 tools:text="▼ 0 B/s" />
+         </LinearLayout>
+ 
+-        <!-- 实时延迟：值在上、标签在下；固定宽度 —— 文案在
+-             点击测试/测试中…/延迟 xx ms 之间切换时区域宽度不变，整条栏不再左右晃 -->
++        <!-- 中缝弹性区：吸收富余宽度，四个信息块均匀分布 -->
++        <View
++            android:layout_width="0dp"
++            android:layout_height="1dp"
++            android:layout_weight="1" />
++
++        <!-- [3] 实时延迟：值在上、标签在下；固定宽度 —— 文案切换时区域宽度不变 -->
+         <LinearLayout
+             android:id="@+id/bar_delay_zone"
+             android:layout_width="88dp"
+@@ -96,35 +100,17 @@
+                 android:textSize="11sp" />
+         </LinearLayout>
+ 
+-        <!-- 启动/关闭按钮 + 连接进度环 -->
+-        <FrameLayout
+-            android:layout_width="wrap_content"
+-            android:layout_height="wrap_content">
+-
+-            <!-- 021: 普通 ImageView 替代 FAB —— FAB 自绘底色/阴影与栏底色有
+-                 色差；静态状态图标 + 连接中进度环，底色与栏完全统一 -->
+-            <androidx.appcompat.widget.AppCompatImageView
+-                android:id="@+id/bar_fab"
+-                android:layout_width="36dp"
+-                android:layout_height="36dp"
+-                android:layout_gravity="center"
+-                android:background="@drawable/bg_touch_rounded"
+-                android:contentDescription="@string/connect"
+-                android:scaleType="fitCenter"
+-                app:srcCompat="@drawable/ic_service_idle" />
+-
+-            <com.google.android.material.progressindicator.CircularProgressIndicator
+-                android:id="@+id/bar_fab_progress"
+-                android:layout_width="40dp"
+-                android:layout_height="40dp"
+-                android:layout_gravity="center"
+-                android:indeterminate="true"
+-                android:max="1"
+-                android:visibility="invisible"
+-                app:indicatorColor="?primaryOrTextSecondary"
+-                app:trackCornerRadius="@dimen/mtrl_progress_track_thickness"
+-                app:trackThickness="3dp" />
+-        </FrameLayout>
++        <!-- [4] 启动/关闭：官方 AVD 动画引擎（斜线划出/飞机形变），无自绘底色。
++             进度环已移除（源码遗留“转圈”显示问题） -->
++        <io.nekohasekai.sagernet.widget.ServiceIconView
++            android:id="@+id/bar_fab"
++            android:layout_width="36dp"
++            android:layout_height="36dp"
++            android:layout_marginStart="2dp"
++            android:background="@drawable/bg_touch_rounded"
++            android:contentDescription="@string/connect"
++            android:scaleType="fitCenter"
++            app:srcCompat="@drawable/ic_service_idle" />
+ 
+     </LinearLayout>
+ </merge>
