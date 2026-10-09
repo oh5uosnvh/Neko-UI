@@ -459,6 +459,26 @@ jobs:
           test -s upstream/release.keystore
           echo "keystore restored: $(sha256sum upstream/release.keystore | cut -c1-16)…"
 
+      - name: Refresh geo assets version (404 self-heal)
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          set -euo pipefail
+          # A01 的 assets.sh 把 geoip/geosite 钉死在旧版本号（当年为躲 API 限流），
+          # 旧 release 一失效下载就 404。这里动态取最新 release 号替换——带 token
+          # 防 runner 限流。geo 滚动更新后无需再手动修版本。
+          cd upstream
+          GEOIP=$(curl -fsSL -H "Authorization: token ${GH_PAT}" \
+            "https://api.github.com/repos/SagerNet/sing-geoip/releases/latest" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["tag_name"])')
+          GEOSITE=$(curl -fsSL -H "Authorization: token ${GH_PAT}" \
+            "https://api.github.com/repos/SagerNet/sing-geosite/releases/latest" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["tag_name"])')
+          sed -i "s/^VERSION_GEOIP=.*/VERSION_GEOIP=$GEOIP/" buildScript/lib/assets.sh
+          sed -i "s/^VERSION_GEOSITE=.*/VERSION_GEOSITE=$GEOSITE/" buildScript/lib/assets.sh
+          echo "geoip=$GEOIP geosite=$GEOSITE"
+          grep -n "VERSION_GEOIP=\|VERSION_GEOSITE=" buildScript/lib/assets.sh
+
       - name: Relax release lint gate
         run: |
           set -euo pipefail
