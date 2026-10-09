@@ -203,7 +203,7 @@ jobs:
           cmp libcore/protocol/xhttp/cipher.go ../mods/Neko-xhttp/libcore/protocol/xhttp/cipher.go
           echo "x365 + Blackstone mods applied:"; git -C . diff --stat -- libcore app | tail -3
 
-      - name: Apply mod patches (25)
+      - name: Apply mod patches (26)
         run: |
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
@@ -317,6 +317,16 @@ jobs:
             || { echo "::error::024 progress ring should be gone"; exit 1; }
           grep -q 'serviceIcon.changeState(state, currentState, animate)' app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt \
             || { echo "::error::024 animated engine not wired"; exit 1; }
+          ! grep -q 'layout_weight="1"' app/src/main/res/layout/layout_connect_bar.xml \
+            || { echo "::error::026 elastic spacer should be gone"; exit 1; }
+          grep -q 'layout_width="wrap_content"' app/src/main/res/layout/layout_main.xml \
+            || { echo "::error::026 bar width not wrapped to content"; exit 1; }
+          grep -q 'IpQualityLookup.prefetch' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
+            || { echo "::error::026 prefetch on connect missing"; exit 1; }
+          grep -q 'fun prefetch' app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt \
+            || { echo "::error::026 prefetch impl missing"; exit 1; }
+          grep -q 'anyCache' app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt \
+            || { echo "::error::026 cache fallback missing"; exit 1; }
           ! test -f app/src/main/java/io/nekohasekai/sagernet/widget/ServiceButton.kt \
             || { echo "::error::021 ServiceButton should be gone"; exit 1; }
           echo "017+019+021 bottom connect bar present"

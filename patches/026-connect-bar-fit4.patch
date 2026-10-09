@@ -1,0 +1,409 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt
+index 87119ee..bff5521 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt
+@@ -12,17 +12,13 @@ import java.io.IOException
+ import java.util.concurrent.TimeUnit
+ 
+ /**
+- * 025: 出站 IP 质量查询 —— 逐行复刻 FlClash v0.8.99 lib/common/ip_quality.dart
+- * 的多源对冲逻辑（六源，先答先赢，非推断结果优先，推断结果仅兜底）：
++ * 025/026: 出站 IP 质量查询 —— 复刻 FlClash v0.8.99 多源对冲语义
++ * （六源并发，非推断结果先到先得，推断结果仅兜底，总超时 10s）。
+  *
+- *   wave1: ident.me / ip-api.com / ipquery.io
+- *   wave2: iplocate.io
+- *   wave3: ipapi.is
+- *   wave4: proxycheck.io
+- *
+- * 类型规则 _pickType：hosting→机房；mobile→移动网络；declared(isp/商业/教育/
+- * 政府/银行→商业；hosting→机房)；两者皆无 → 住宅（inferred）。
+- * 等级规则 IpQuality.level：Tor/滥用 → 风险；住宅/移动/商业 → 优；机房 → 普通。
++ * 026 增强：
++ * - 预查询缓存：VPN 连接瞬间由 MainActivity 触发 prefetch()，点开 ⓘ 直接出结果；
++ * - 信息合并：胜者缺国家地区时从其他成功源补齐（ident.me 等无 country 的源不再显示"—"）；
++ * - 失败不冲缓存：全部源失败时保留上次成功结果（dialog 侧配合）。
+  * 查询经 VPN 隧道（应用自身流量走 TUN），测的是节点出口 IP。
+  */
+ object IpQualityLookup {
+@@ -39,6 +35,7 @@ object IpQualityLookup {
+         val isAbuser: Boolean,
+         val country: String?,
+         val inferred: Boolean,
++        val elapsedMs: Long = 0,
+     ) {
+         val level: String
+             get() = when {
+@@ -56,6 +53,32 @@ object IpQualityLookup {
+             }
+     }
+ 
++    data class CacheEntry(val quality: IpQuality, val atMs: Long)
++
++    @Volatile
++    private var cache: CacheEntry? = null
++
++    /** 最近一次成功结果（无论多久之前）——失败时兜底显示。 */
++    fun anyCache(): CacheEntry? = cache
++
++    /** 新鲜缓存（maxAgeMs 内）——prefetch/打开弹窗直接展示。 */
++    fun freshCache(maxAgeMs: Long = 10 * 60_000L): CacheEntry? =
++        cache?.takeIf { System.currentTimeMillis() - it.atMs < maxAgeMs }
++
++    /** 成功后写缓存。 */
++    suspend fun lookup(): IpQuality {
++        val q = doLookup()
++        cache = CacheEntry(q, System.currentTimeMillis())
++        return q
++    }
++
++    /** 026: 预查询 —— VPN 连接时后台跑一次；已有新鲜缓存则跳过。 */
++    suspend fun prefetch() {
++        if (freshCache() == null) {
++            runCatching { lookup() }.onFailure { Logs.w("ip prefetch: ${it.message}") }
++        }
++    }
++
+     private class SourceFailure(val kind: String) : Exception(kind)
+ 
+     private val client by lazy {
+@@ -108,19 +131,21 @@ object IpQualityLookup {
+         ip: String, source: String, type: String?, inferred: Boolean = false,
+         organization: String? = null, asn: Int? = null, country: String? = null,
+         isProxy: Boolean = false, isVpn: Boolean = false,
+-        isTor: Boolean = false, isAbuser: Boolean = false,
++        isTor: Boolean = false, isAbuser: Boolean = false, elapsedMs: Long = 0,
+     ): IpQuality? {
+         if (type == null) return null
+-        return IpQuality(ip, source, type, organization, asn, isProxy, isVpn, isTor, isAbuser, country, inferred)
++        return IpQuality(
++            ip, source, type, organization, asn, isProxy, isVpn, isTor, isAbuser,
++            country, inferred, elapsedMs
++        )
+     }
+ 
+     // ---- 六源解析（与 FlClash _fromXxx 一一对应） ----
+     private fun fromIdentMe(): IpQuality {
+         val json = getJson("https://ident.me/json")
+-        val ip = json.optString("ip")
+         val type = declaredType(json.optString("type"))
+         return quality(
+-            ip, "ident.me", type,
++            json.optString("ip"), "ident.me", type,
+             inferred = type == null,
+             organization = text(json.optString("aso")),
+             asn = asnOf(json.opt("asn")),
+@@ -212,7 +237,6 @@ object IpQualityLookup {
+         val status = json.optString("status")
+         if (status == "denied") throw SourceFailure("rateLimited")
+         if (status != "ok" && status != "warning") throw SourceFailure("failed")
+-        // 结果键是查询的 IP —— 自身查询时取除 status 外的第一个键
+         val ipKey = json.keys().asSequence().firstOrNull { it != "status" } ?: throw SourceFailure("noType")
+         val result = obj(json.opt(ipKey))
+         val network = obj(result.opt("network"))
+@@ -239,30 +263,32 @@ object IpQualityLookup {
+         ) ?: throw SourceFailure("noType")
+     }
+ 
+-    // ---- 对冲调度：六源并发，非推断结果先到先得，推断结果兜底 ----
+-    suspend fun lookup(): IpQuality = coroutineScope {
++    // ---- 对冲调度：六源并发收集全部成功答案，按 FlClash 规则择优 ----
++    private suspend fun doLookup(): IpQuality = coroutineScope {
+         val fetchers = listOf(
+             ::fromIdentMe, ::fromIpApiCom, ::fromIpQuery,
+             ::fromIpLocate, ::fromIpApiIs, ::fromProxyCheck,
+         )
++        val started = System.currentTimeMillis()
+         val deferreds = fetchers.map { fetcher ->
+             async(Dispatchers.IO) {
++                val t0 = System.currentTimeMillis()
+                 runCatching { fetcher() }
+                     .onFailure { Logs.w("ip source failed: ${it.message}") }
+-                    .getOrNull()
++                    .getOrNull()?.copy(elapsedMs = System.currentTimeMillis() - t0)
+             }
+         }
+-        var fallback: IpQuality? = null
+-        // 官方总超时 8s：超时后若只有推断结果则用之，否则全败
+-        val winner = withTimeoutOrNull(8000L) {
+-            for (d in deferreds) {
+-                val r = d.await()
+-                if (r == null) continue
+-                if (!r.inferred) return@withTimeoutOrNull r
+-                fallback = fallback ?: r
+-            }
+-            null
+-        }
+-        winner ?: fallback ?: throw IOException("all ip sources failed")
++        val answers = withTimeoutOrNull(10000L) {
++            deferreds.map { it.await() }.filterNotNull()
++        } ?: emptyList()
++        if (answers.isEmpty()) throw IOException("all ip sources failed")
++
++        // 择优：非推断 > 推断；同池内取最快；国家地区从任何成功答案补齐
++        val solid = answers.filter { !it.inferred }
++        val pool = solid.ifEmpty { answers }
++        val best = pool.minByOrNull { it.elapsedMs } ?: answers.first()
++        val mergedCountry = best.country
++            ?: answers.mapNotNull { it.country }.firstOrNull { it.isNotBlank() }
++        best.copy(country = mergedCountry, elapsedMs = System.currentTimeMillis() - started)
+     }
+ }
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+index 72ffd6e..c970380 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+@@ -709,6 +709,12 @@ class MainActivity : ThemedActivity(),
+         refreshConfigurationProfileState()
+ 
+         binding.connectBar.changeState(state, animate)
++        // 026: VPN 连接瞬间后台预查询出站 IP（点开 ⓘ 秒出；有新鲜缓存自动跳过）
++        if (state == BaseService.State.Connected) {
++            runOnDefaultDispatcher {
++                runCatching { IpQualityLookup.prefetch() }
++            }
++        }
+         if (msg != null) snackbar(getString(R.string.vpn_error, msg)).show()
+     }
+ 
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
+index 796dddb..5435e6c 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
+@@ -16,13 +16,8 @@ import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+ 
+ /**
+  * 017: 出站 IP 查询弹窗 —— 复刻 FlClash v0.8.99 出站 IP 面板。
+- * 025: 数据源切换为 IpQualityLookup 六源对冲（与 FlClash 字段/等级/命中标记
+- * 语义完全对齐）：
+- * - 等级: 优（住宅/移动/商业）/ 普通（机房）/ 风险（Tor/滥用），颜色同 FlClash
+- * - 类型: 机房 / 移动网络 / 住宅 / 商业
+- * - 命中标记: Tor / 滥用记录 / VPN / 代理（可多个，顿号连接），无则“无”
+- * - 网络: 组织 / ASN / 采用来源（实际命中的源）
+- * 019: IP 地址 / 组织 / ASN 三行点击复制（仅这三行）。
++ * 026: 打开即读缓存（VPN 连接时已预查询，秒出）；刷新强制重查；
++ * 失败保留已有信息（不再把成功结果冲成全红错误），零缓存才显示错误。
+  */
+ class OutboundIpDialogFragment : DialogFragment() {
+ 
+@@ -65,12 +60,12 @@ class OutboundIpDialogFragment : DialogFragment() {
+             .create()
+ 
+         dialog.setOnShowListener {
+-            // 刷新不关闭；确定正常关闭
+-            dialog.getButton(Dialog.BUTTON_NEUTRAL).setOnClickListener { fetch() }
++            // 刷新不关闭（强制重查）；确定正常关闭
++            dialog.getButton(Dialog.BUTTON_NEUTRAL).setOnClickListener { fetch(force = true) }
+             dialog.getButton(Dialog.BUTTON_POSITIVE).setOnClickListener { dismiss() }
+         }
+ 
+-        fetch()
++        fetch(force = false)
+         return dialog
+     }
+ 
+@@ -109,76 +104,90 @@ class OutboundIpDialogFragment : DialogFragment() {
+         levelValue.setTextColor(defaultSecondaryColor())
+     }
+ 
+-    private fun fetch() {
++    private fun render(q: IpQualityLookup.IpQuality) {
++        val levelRes = when (q.level) {
++            "risky" -> R.string.ip_level_risky
++            "good" -> R.string.ip_level_good
++            else -> R.string.ip_level_normal
++        }
++        val levelColor = when (q.level) {
++            "risky" -> ContextCompat.getColor(requireContext(), R.color.material_red_500)
++            "good" -> ContextCompat.getColor(requireContext(), R.color.material_green_500)
++            else -> defaultSecondaryColor()
++        }
++        val typeRes = when (q.type) {
++            "hosting" -> R.string.ip_type_hosting
++            "mobile" -> R.string.ip_type_mobile
++            "business" -> R.string.ip_type_business
++            else -> R.string.ip_type_residential
++        }
++        val labelOf = mapOf(
++            "tor" to getString(R.string.ip_flag_tor),
++            "abuser" to getString(R.string.ip_flag_abuser),
++            "vpn" to getString(R.string.ip_flag_vpn),
++            "proxy" to getString(R.string.ip_flag_proxy),
++        )
++        val flagsText = if (q.flags.isEmpty()) {
++            getString(R.string.ip_none)
++        } else {
++            q.flags.mapNotNull { labelOf[it] }.joinToString("、")
++        }
++        ipValue.text = q.ip
++        countryValue.text = q.country?.takeIf { it.isNotBlank() } ?: "—"
++        levelValue.setText(levelRes)
++        levelValue.setTextColor(levelColor)
++        typeValue.setText(typeRes)
++        flagsValue.text = flagsText
++        orgValue.text = q.organization?.takeIf { it.isNotBlank() } ?: "—"
++        asnValue.text = q.asn?.let { "AS$it" } ?: "—"
++        sourceValue.text = q.source
++    }
++
++    private fun renderError(err: String?) {
++        ipValue.setText(R.string.ip_query_failed)
++        countryValue.text = "—"
++        levelValue.text = err ?: ""
++        levelValue.setTextColor(
++            ContextCompat.getColor(requireContext(), R.color.material_red_500)
++        )
++        typeValue.setText(R.string.ip_query_failed)
++        flagsValue.setText(R.string.ip_none)
++        orgValue.text = "—"
++        asnValue.text = "—"
++        sourceValue.text = "—"
++    }
++
++    /**
++     * 026: force=false（打开）→ 有缓存秒显、无缓存现查；
++     * force=true（点刷新）→ 强制重查，失败时保留已显示内容（不冲掉成功结果）。
++     */
++    private fun fetch(force: Boolean) {
+         if (loading) return
++        val cache = IpQualityLookup.anyCache()
++        if (!force && cache != null) {
++            render(cache.quality)
++            return
++        }
+         loading = true
+-        setLoadingState()
++        if (cache == null) setLoadingState() // 有缓存时保持原样，失败不冲
+         runOnDefaultDispatcher {
+-            var ok = false
+-            var err: String? = null
+-            try {
+-                val q = IpQualityLookup.lookup()
+-                val levelRes = when (q.level) {
+-                    "risky" -> R.string.ip_level_risky
+-                    "good" -> R.string.ip_level_good
+-                    else -> R.string.ip_level_normal
+-                }
+-                val levelColor = when (q.level) {
+-                    "risky" -> ContextCompat.getColor(requireContext(), R.color.material_red_500)
+-                    "good" -> ContextCompat.getColor(requireContext(), R.color.material_green_500)
+-                    else -> defaultSecondaryColor()
+-                }
+-                val typeRes = when (q.type) {
+-                    "hosting" -> R.string.ip_type_hosting
+-                    "mobile" -> R.string.ip_type_mobile
+-                    "business" -> R.string.ip_type_business
+-                    else -> R.string.ip_type_residential
+-                }
+-                val labelOf = mapOf(
+-                    "tor" to getString(R.string.ip_flag_tor),
+-                    "abuser" to getString(R.string.ip_flag_abuser),
+-                    "vpn" to getString(R.string.ip_flag_vpn),
+-                    "proxy" to getString(R.string.ip_flag_proxy),
+-                )
+-                val flagsText = if (q.flags.isEmpty()) {
+-                    getString(R.string.ip_none)
+-                } else {
+-                    q.flags.mapNotNull { labelOf[it] }.joinToString("、")
+-                }
+-                onMainDispatcher {
+-                    if (!isAdded) return@onMainDispatcher
+-                    ipValue.text = q.ip
+-                    countryValue.text = q.country?.takeIf { it.isNotBlank() } ?: "—"
+-                    levelValue.setText(levelRes)
+-                    levelValue.setTextColor(levelColor)
+-                    typeValue.setText(typeRes)
+-                    flagsValue.text = flagsText
+-                    orgValue.text = q.organization?.takeIf { it.isNotBlank() } ?: "—"
+-                    asnValue.text = q.asn?.let { "AS$it" } ?: "—"
+-                    sourceValue.text = q.source
+-                    ok = true
++            runCatching { IpQualityLookup.lookup() }
++                .onSuccess { q ->
++                    onMainDispatcher {
++                        if (isAdded) render(q)
++                        loading = false
++                    }
+                 }
+-            } catch (e: Exception) {
+-                Logs.w(e)
+-                err = e.readableMessage
+-            }
+-            if (!ok) {
+-                onMainDispatcher {
+-                    if (!isAdded) return@onMainDispatcher
+-                    ipValue.setText(R.string.ip_query_failed)
+-                    countryValue.text = "—"
+-                    levelValue.text = err ?: ""
+-                    levelValue.setTextColor(
+-                        ContextCompat.getColor(requireContext(), R.color.material_red_500)
+-                    )
+-                    typeValue.setText(R.string.ip_query_failed)
+-                    flagsValue.setText(R.string.ip_none)
+-                    orgValue.text = "—"
+-                    asnValue.text = "—"
+-                    sourceValue.text = "—"
++                .onFailure { e ->
++                    Logs.w(e)
++                    onMainDispatcher {
++                        loading = false
++                        if (!isAdded) return@onMainDispatcher
++                        // 失败：有缓存保持缓存内容；零缓存才显示错误
++                        val c = IpQualityLookup.anyCache()
++                        if (c == null) renderError(e.readableMessage)
++                    }
+                 }
+-            }
+-            loading = false
+         }
+     }
+ }
+diff --git a/app/src/main/res/layout/layout_connect_bar.xml b/app/src/main/res/layout/layout_connect_bar.xml
+index c7c5960..b91be16 100644
+--- a/app/src/main/res/layout/layout_connect_bar.xml
++++ b/app/src/main/res/layout/layout_connect_bar.xml
+@@ -14,7 +14,7 @@
+         android:layout_height="match_parent"
+         android:gravity="center_vertical"
+         android:orientation="horizontal"
+-        android:paddingStart="10dp"
++        android:paddingStart="8dp"
+         android:paddingEnd="8dp"
+         android:paddingTop="8dp"
+         android:paddingBottom="8dp">
+@@ -61,16 +61,10 @@
+                 tools:text="▼ 0 B/s" />
+         </LinearLayout>
+ 
+-        <!-- 中缝弹性区：吸收富余宽度，四个信息块均匀分布 -->
+-        <View
+-            android:layout_width="0dp"
+-            android:layout_height="1dp"
+-            android:layout_weight="1" />
+-
+         <!-- [3] 实时延迟：值在上、标签在下；固定宽度 —— 文案切换时区域宽度不变 -->
+         <LinearLayout
+             android:id="@+id/bar_delay_zone"
+-            android:layout_width="88dp"
++            android:layout_width="72dp"
+             android:layout_height="match_parent"
+             android:layout_marginEnd="4dp"
+             android:background="@drawable/bg_touch_rounded"
+diff --git a/app/src/main/res/layout/layout_main.xml b/app/src/main/res/layout/layout_main.xml
+index 92eb167..e5d6f7b 100644
+--- a/app/src/main/res/layout/layout_main.xml
++++ b/app/src/main/res/layout/layout_main.xml
+@@ -23,11 +23,9 @@
+              替换为底部常驻长条启动栏：ⓘ出站IP | 上传/下载 | 实时延迟 | 启动按钮 -->
+         <io.nekohasekai.sagernet.widget.ConnectBar
+             android:id="@+id/connect_bar"
+-            android:layout_width="match_parent"
++            android:layout_width="wrap_content"
+             android:layout_height="64dp"
+-            android:layout_gravity="bottom"
+-            android:layout_marginStart="12dp"
+-            android:layout_marginEnd="12dp"
++            android:layout_gravity="bottom|center_horizontal"
+             android:layout_marginBottom="4dp"
+             android:elevation="6dp"
+             app:cardBackgroundColor="?attr/colorPrimary"

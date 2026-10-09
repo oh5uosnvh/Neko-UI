@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Neko-UI 补丁应用器（25 补丁）。在**上游源码树根目录**运行。
+"""Neko-UI 补丁应用器（26 补丁）。在**上游源码树根目录**运行。
 
 用法:
   python3 apply_all.py --check          # 只预检（临时 index 累积干跑，不改工作区）
@@ -49,6 +49,7 @@ ORDERED = [
     "023-connect-bar-fit3.patch",
     "024-service-icon-anim.patch",
     "025-ip-quality-multisource.patch",
+    "026-connect-bar-fit4.patch",
 ]
 
 
