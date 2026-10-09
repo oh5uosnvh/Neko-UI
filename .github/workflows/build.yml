@@ -203,7 +203,7 @@ jobs:
           cmp libcore/protocol/xhttp/cipher.go ../mods/Neko-xhttp/libcore/protocol/xhttp/cipher.go
           echo "x365 + Blackstone mods applied:"; git -C . diff --stat -- libcore app | tail -3
 
-      - name: Apply mod patches (15)
+      - name: Apply mod patches (18)
         run: |
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
@@ -274,6 +274,49 @@ jobs:
               || { echo "::error::015 old unsafe lazy cast still present in $f"; exit 1; }
           done
           echo "015 settings menu NPE guards present"
+
+      - name: Assert 016 preference editor unify is in place
+        run: |
+          set -euo pipefail
+          cd upstream
+          P=app/src/main/java/io/nekohasekai/sagernet/ui/profile/ProfileSettingsActivity.kt
+          ! grep -q 'PasswordDialogFragment.newInstance' "$P" \
+            || { echo "::error::016 not applied (password dialog branch still present)"; exit 1; }
+          test ! -f app/src/main/java/io/nekohasekai/sagernet/ui/profile/PasswordDialogFragment.kt \
+            || { echo "::error::016 dead PasswordDialogFragment still exists"; exit 1; }
+          echo "016 preference editor unify present"
+
+      - name: Assert 017 bottom connect bar is in place
+        run: |
+          set -euo pipefail
+          cd upstream
+          M=app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+          test -f app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt \
+            || { echo "::error::017 ConnectBar missing"; exit 1; }
+          test -f app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt \
+            || { echo "::error::017 OutboundIpDialogFragment missing"; exit 1; }
+          grep -q 'connect_bar' app/src/main/res/layout/layout_main.xml \
+            || { echo "::error::017 layout not rewired"; exit 1; }
+          ! grep -q 'io.nekohasekai.sagernet.widget.StatsBar' app/src/main/res/layout/layout_main.xml \
+            || { echo "::error::017 old StatsBar still in layout"; exit 1; }
+          ! grep -q 'binding\.fab\|binding\.stats' "$M" \
+            || { echo "::error::017 MainActivity still binds fab/stats"; exit 1; }
+          ! grep -q 'showBottomBar' app/src/main/java/io/nekohasekai/sagernet/Constants.kt \
+            || { echo "::error::017 showBottomBar pref not removed"; exit 1; }
+          echo "017 bottom connect bar present"
+
+      - name: Assert 018 group tab menu + undo delete is in place
+        run: |
+          set -euo pipefail
+          cd upstream
+          F=app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+          grep -q 'deleteGroupWithUndo' "$F" \
+            || { echo "::error::018 group undo delete missing"; exit 1; }
+          grep -q 'R.string.jump_to_group' "$F" \
+            || { echo "::error::018 tab long-press menu missing"; exit 1; }
+          grep -q 'group_deleted_undo' "$F" \
+            || { echo "::error::018 undo snackbar string missing"; exit 1; }
+          echo "018 group tab menu + undo present"
 
       - name: Setup Java
         uses: actions/setup-java@v4

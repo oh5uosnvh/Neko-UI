@@ -1,0 +1,1672 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/Constants.kt b/app/src/main/java/io/nekohasekai/sagernet/Constants.kt
+index 1b2e834..a53f14a 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/Constants.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/Constants.kt
+@@ -73,7 +73,6 @@ object Key {
+ 
+     const val ACQUIRE_WAKE_LOCK = "acquireWakeLock"
+     const val HIDE_FROM_RECENT_APPS = "hideFromRecentApps"
+-    const val SHOW_BOTTOM_BAR = "showBottomBar"
+     const val CONFIRM_PROFILE_DELETE = "confirmProfileDelete"
+     const val GROUP_LAYOUT_MODE = "groupLayoutMode"
+     const val PROFILE_CARD_STYLE = "profileCardStyle"
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/database/DataStore.kt b/app/src/main/java/io/nekohasekai/sagernet/database/DataStore.kt
+index ce1d57b..e27d3a0 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/database/DataStore.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/database/DataStore.kt
+@@ -90,7 +90,6 @@ object DataStore : OnPreferenceDataStoreChangeListener {
+ 
+     var appTLSVersion by configurationStore.string(Key.APP_TLS_VERSION)
+     var enableClashAPI by configurationStore.boolean(Key.ENABLE_CLASH_API)
+-    var showBottomBar by configurationStore.boolean(Key.SHOW_BOTTOM_BAR)
+     var confirmProfileDelete by configurationStore.boolean(Key.CONFIRM_PROFILE_DELETE) { true }
+     var groupLayoutMode by configurationStore.stringToInt(Key.GROUP_LAYOUT_MODE) { 0 }
+     var profileCardStyle by configurationStore.stringToInt(Key.PROFILE_CARD_STYLE) { 0 }
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+index 9118c15..a88371d 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+@@ -29,6 +29,9 @@ import androidx.appcompat.widget.PopupMenu
+ import androidx.appcompat.widget.SearchView
+ import androidx.appcompat.widget.Toolbar
+ import androidx.core.graphics.ColorUtils
++import androidx.core.view.ViewCompat
++import androidx.core.view.WindowInsetsCompat
++import androidx.core.view.updatePadding
+ import androidx.core.net.toUri
+ import androidx.core.view.isGone
+ import androidx.core.view.isVisible
+@@ -2063,39 +2066,21 @@ class ConfigurationFragment @JvmOverloads constructor(
+             if (!select) {
+                 undoManager = UndoSnackbarManager(activity as MainActivity, adapter!!)
+                 setupItemTouchHelper()
+-                setupBottomBarScrollDriver()
+             }
+-        }
+-
+-        private fun setupBottomBarScrollDriver() {
+-            val mainActivity = activity as? MainActivity ?: return
+-            configurationListView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+-                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+-                    if (dy != 0) mainActivity.driveBottomBar(dy)
+-                }
+-            })
+-
+-            val touchSlop = ViewConfiguration.get(requireContext()).scaledTouchSlop
+-            var lastRawY = 0f
+-            configurationListView.setOnTouchListener { recyclerView, event ->
+-                when (event.actionMasked) {
+-                    MotionEvent.ACTION_DOWN -> lastRawY = event.rawY
+-                    MotionEvent.ACTION_MOVE -> {
+-                        val cannotScroll = !recyclerView.canScrollVertically(-1) &&
+-                                !recyclerView.canScrollVertically(1)
+-                        if (cannotScroll) {
+-                            val fingerDy = event.rawY - lastRawY
+-                            if (abs(fingerDy) >= touchSlop) {
+-                                mainActivity.driveBottomBar(-fingerDy.toInt())
+-                                lastRawY = event.rawY
+-                            }
+-                        }
+-                    }
+-                }
+-                false
++            // 017: 底部常驻启动栏 —— 预留 栏高64dp + 卡片间距4dp + 栏边距4dp 的滚动余量，
++            // 滚动到底时末卡片与栏之间恰好一个卡片间距；导航栏 inset 叠加在余量之下。
++            configurationListView.clipToPadding = false
++            ViewCompat.setOnApplyWindowInsetsListener(configurationListView) { v, insets ->
++                v.updatePadding(
++                    bottom = dp2px(72) + insets.getInsets(
++                        WindowInsetsCompat.Type.navigationBars()
++                    ).bottom
++                )
++                insets
+             }
+         }
+ 
++
+         override fun onDestroy() {
+             adapter?.let {
+                 ProfileManager.removeListener(it)
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+index 91adab7..31ec2b7 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+@@ -100,10 +100,7 @@ class MainActivity : ThemedActivity(),
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+         MessageStore.setCurrentActivity(this)
+-        val animateInitialControls = savedInstanceState == null
+-
+         binding = LayoutMainBinding.inflate(layoutInflater)
+-        binding.fab.initProgress(binding.fabProgress)
+         if (themeResId !in intArrayOf(
+                 R.style.Theme_SagerNet_Black
+             )
+@@ -133,25 +130,17 @@ class MainActivity : ThemedActivity(),
+             }
+         }
+ 
+-        binding.fab.setOnClickListener {
+-            if (DataStore.serviceState.canStop) SagerNet.stopService() else connect.launch(
+-                null
+-            )
+-        }
+-        binding.stats.setOnClickListener { if (DataStore.serviceState.connected) binding.stats.testConnection() }
++        // 017: 启动/停止由底部长条启动栏按钮承担（ConnectBar 内部处理）；
++        // 连接测试入口移到栏内「实时延迟」区。旧 fab/stats 点击绑定移除。
+ 
+         setContentView(binding.root)
+         if (currentMainFragment == null) {
+             currentMainFragment =
+                 supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
+         }
+-        if (!animateInitialControls) {
+-            syncMainControls(showWhenConnected = false, animate = false)
+-        }
+         changeState(
+             BaseService.State.Idle,
+             animate = false,
+-            animateControls = animateInitialControls,
+         )
+         connection.connect(this, this)
+         DataStore.configurationStore.registerChangeListener(this)
+@@ -215,11 +204,6 @@ class MainActivity : ThemedActivity(),
+             ?: supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
+         if (restoredFragment != null && restoredFragment !== currentMainFragment) {
+             currentMainFragment = restoredFragment
+-            syncMainControls(
+-                fragment = restoredFragment,
+-                showWhenConnected = DataStore.serviceState == BaseService.State.Connected,
+-                animate = false,
+-            )
+         }
+     }
+ 
+@@ -472,7 +456,6 @@ class MainActivity : ThemedActivity(),
+             transaction.commitAllowingStateLoss()
+ 
+             currentMainFragment = fragment
+-            syncMainControls(fragment, showWhenConnected = false, animate = false)
+         }
+ 
+         binding.drawerLayout.closeDrawers()
+@@ -676,34 +659,6 @@ class MainActivity : ThemedActivity(),
+         }, WARM_FRAME_MS)
+     }
+ 
+-    private fun syncMainControls(
+-        fragment: Any? = currentMainFragment
+-            ?: supportFragmentManager.findFragmentById(R.id.fragment_holder),
+-        showWhenConnected: Boolean,
+-        animate: Boolean,
+-    ) {
+-        val showControls = fragment is ConfigurationFragment || DataStore.showBottomBar
+-        binding.stats.useExternalScrollDriver = fragment is ConfigurationFragment
+-        binding.stats.syncMainControls(
+-            showControls,
+-            DataStore.serviceState,
+-            showWhenConnected,
+-            animate,
+-        )
+-        binding.fab.animate().cancel()
+-        if (showControls) {
+-            binding.fab.show()
+-        } else {
+-            binding.fab.hideProgress()
+-            binding.fabProgress.hide()
+-            binding.fabProgress.visibility = View.INVISIBLE
+-            if (animate && binding.fab.isLaidOut) {
+-                binding.fab.hide()
+-            } else {
+-                binding.fab.visibility = View.INVISIBLE
+-            }
+-        }
+-    }
+ 
+     private fun refreshConfigurationProfileState() {
+         val fragment = currentMainFragment
+@@ -711,9 +666,6 @@ class MainActivity : ThemedActivity(),
+         (fragment as? ConfigurationFragment)?.refreshProfileState()
+     }
+ 
+-    fun driveBottomBar(scrollDy: Int) {
+-        binding.stats.onListScrolled(scrollDy)
+-    }
+ 
+     fun displayFragmentWithId(@IdRes id: Int): Boolean {
+         if (id == R.id.nav_faq) {
+@@ -736,25 +688,17 @@ class MainActivity : ThemedActivity(),
+         state: BaseService.State,
+         msg: String? = null,
+         animate: Boolean = false,
+-        animateControls: Boolean = animate,
+     ) {
+         DataStore.serviceState = state
+         refreshConfigurationProfileState()
+ 
+-        binding.fab.changeState(state, DataStore.serviceState, animate)
+-        binding.stats.changeState(state)
+-        syncMainControls(
+-            showWhenConnected = state == BaseService.State.Connected,
+-            animate = animateControls,
+-        )
++        binding.connectBar.changeState(state)
+         if (msg != null) snackbar(getString(R.string.vpn_error, msg)).show()
+     }
+ 
+     override fun snackbarInternal(text: CharSequence): Snackbar {
+         return Snackbar.make(binding.coordinator, text, Snackbar.LENGTH_LONG).apply {
+-            if (binding.fab.isShown) {
+-                anchorView = binding.fab
+-            }
++            anchorView = binding.connectBar
+             // TODO
+         }
+     }
+@@ -782,10 +726,15 @@ class MainActivity : ThemedActivity(),
+         if (it) snackbar(R.string.vpn_permission_denied).show()
+     }
+ 
++    /** 017: ConnectBar 启动按钮入口（VPN 授权 + 启动服务）。 */
++    fun launchConnect() {
++        connect.launch()
++    }
++
+     // may NOT called when app is in background
+     // ONLY do UI update here, write DB in bg process
+     override fun cbSpeedUpdate(stats: SpeedDisplayData) {
+-        binding.stats.updateSpeed(stats.txRateProxy, stats.rxRateProxy)
++        binding.connectBar.updateSpeed(stats.txRateProxy, stats.rxRateProxy)
+     }
+ 
+     override suspend fun cbTrafficUpdate(data: TrafficDataBatch) {
+@@ -806,10 +755,6 @@ class MainActivity : ThemedActivity(),
+     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
+         when (key) {
+             Key.SERVICE_MODE -> onBinderDied()
+-            Key.SHOW_BOTTOM_BAR -> syncMainControls(
+-                showWhenConnected = DataStore.showBottomBar,
+-                animate = true,
+-            )
+             Key.PROXY_APPS, Key.BYPASS_MODE, Key.INDIVIDUAL -> {
+                 if (DataStore.serviceState.canStop) {
+                     snackbar(getString(R.string.need_reload)).setAction(R.string.apply) {
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
+new file mode 100644
+index 0000000..93a085c
+--- /dev/null
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
+@@ -0,0 +1,162 @@
++package io.nekohasekai.sagernet.ui
++
++import android.app.Dialog
++import android.os.Bundle
++import android.widget.TextView
++import androidx.core.content.ContextCompat
++import androidx.fragment.app.DialogFragment
++import com.google.android.material.dialog.MaterialAlertDialogBuilder
++import io.nekohasekai.sagernet.R
++import io.nekohasekai.sagernet.ktx.Logs
++import io.nekohasekai.sagernet.ktx.onMainDispatcher
++import io.nekohasekai.sagernet.ktx.readableMessage
++import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
++import okhttp3.OkHttpClient
++import okhttp3.Request
++import org.json.JSONObject
++import java.io.IOException
++
++/**
++ * 017: 出站 IP 查询弹窗 —— 复刻 FlClash 0.8.99 出站 IP 面板。
++ *
++ * 数据源与字段映射对齐 FlClash（lib/common/ip_quality.dart @ v0.8.99）：
++ * - 主源 ip-api.com（免费版仅 HTTP）：
++ *   http://ip-api.com/json/?fields=status,message,query,isp,org,as,mobile,proxy,hosting
++ * - 等级: hosting → 普通；住宅/移动 → 优质（与 FlClash IpQuality.level 同规则）
++ * - 类型: hosting→机房 / mobile→移动 / 其余→住宅
++ * - 命中标记: proxy→代理，否则 无
++ * - 网络: 组织(org ?: isp) / ASN(as 前缀) / 采用来源(ip-api.com)
++ *
++ * 查询经 VPN 隧道（应用自身流量走 TUN），未连接时显示本机出口 IP —— 与 FlClash 行为一致。
++ * 底部按钮：刷新（不关闭）/ 确定。
++ */
++class OutboundIpDialogFragment : DialogFragment() {
++
++    companion object {
++        const val DIALOG_TAG = "outbound_ip_dialog"
++        private const val QUERY_URL =
++            "http://ip-api.com/json/?fields=status,message,query,isp,org,as,mobile,proxy,hosting&lang=zh-CN"
++    }
++
++    private val client by lazy { OkHttpClient() }
++    private var loading = false
++
++    private lateinit var ipValue: TextView
++    private lateinit var levelValue: TextView
++    private lateinit var typeValue: TextView
++    private lateinit var flagsValue: TextView
++    private lateinit var orgValue: TextView
++    private lateinit var asnValue: TextView
++
++    override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
++        val view = layoutInflater.inflate(R.layout.layout_outbound_ip_dialog, null)
++        ipValue = view.findViewById(R.id.ip_value)
++        levelValue = view.findViewById(R.id.ip_level_value)
++        typeValue = view.findViewById(R.id.ip_type_value)
++        flagsValue = view.findViewById(R.id.ip_flags_value)
++        orgValue = view.findViewById(R.id.ip_org_value)
++        asnValue = view.findViewById(R.id.ip_asn_value)
++
++        val dialog = MaterialAlertDialogBuilder(requireContext())
++            .setTitle(R.string.outbound_ip)
++            .setView(view)
++            .setNeutralButton(R.string.ip_action_refresh, null)
++            .setPositiveButton(android.R.string.ok, null)
++            .create()
++
++        dialog.setOnShowListener {
++            // 刷新不关闭；确定正常关闭
++            dialog.getButton(Dialog.BUTTON_NEUTRAL).setOnClickListener { fetch() }
++            dialog.getButton(Dialog.BUTTON_POSITIVE).setOnClickListener { dismiss() }
++        }
++
++        fetch()
++        return dialog
++    }
++
++    private fun setLoadingState() {
++        ipValue.setText(R.string.ip_loading)
++        levelValue.setText(R.string.ip_loading)
++        typeValue.setText(R.string.ip_loading)
++        flagsValue.setText(R.string.ip_loading)
++        orgValue.setText(R.string.ip_loading)
++        asnValue.setText(R.string.ip_loading)
++        levelValue.setTextColor(defaultSecondaryColor())
++    }
++
++    private fun defaultSecondaryColor(): Int {
++        val ta = requireContext().theme.obtainStyledAttributes(
++            intArrayOf(android.R.attr.textColorSecondary)
++        )
++        val color = ta.getColor(0, 0)
++        ta.recycle()
++        return color
++    }
++
++    private fun fetch() {
++        if (loading) return
++        loading = true
++        setLoadingState()
++        runOnDefaultDispatcher {
++            var ok = false
++            var err: String? = null
++            try {
++                val request = Request.Builder().url(QUERY_URL).build()
++                client.newCall(request).execute().use { response ->
++                    val body = response.body?.string().orEmpty()
++                    val json = JSONObject(body)
++                    if (json.optString("status") != "success") {
++                        throw IOException(
++                            json.optString("message").ifBlank { "status=" + json.optString("status") }
++                        )
++                    }
++                    val query = json.optString("query")
++                    val org = json.optString("org").ifBlank { json.optString("isp") }
++                    val asn = json.optString("as").substringBefore(' ').trim()
++                    val proxy = json.optBoolean("proxy")
++                    val hosting = json.optBoolean("hosting")
++                    val mobile = json.optBoolean("mobile")
++
++                    val typeRes = when {
++                        hosting -> R.string.ip_type_hosting
++                        mobile -> R.string.ip_type_mobile
++                        else -> R.string.ip_type_residential
++                    }
++                    // FlClash 规则：hosting → 普通；住宅/移动 → 优质；代理风险 → 风险
++                    val levelRes = if (hosting) R.string.ip_level_normal else R.string.ip_level_good
++                    val flagsRes = if (proxy) R.string.ip_flag_proxy else R.string.ip_none
++
++                    onMainDispatcher {
++                        if (!isAdded) return@onMainDispatcher
++                        ipValue.text = query
++                        levelValue.setText(levelRes)
++                        levelValue.setTextColor(defaultSecondaryColor())
++                        typeValue.setText(typeRes)
++                        flagsValue.setText(flagsRes)
++                        orgValue.text = org.ifBlank { "—" }
++                        asnValue.text = asn.ifBlank { "—" }
++                        ok = true
++                    }
++                }
++            } catch (e: Exception) {
++                Logs.w(e)
++                err = e.readableMessage
++            }
++            if (!ok) {
++                onMainDispatcher {
++                    if (!isAdded) return@onMainDispatcher
++                    ipValue.setText(R.string.ip_query_failed)
++                    levelValue.text = err ?: ""
++                    levelValue.setTextColor(
++                        ContextCompat.getColor(requireContext(), R.color.material_red_500)
++                    )
++                    typeValue.text = "—"
++                    flagsValue.setText(R.string.ip_none)
++                    orgValue.text = "—"
++                    asnValue.text = "—"
++                }
++            }
++            loading = false
++        }
++    }
++}
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt b/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
+new file mode 100644
+index 0000000..707a2aa
+--- /dev/null
++++ b/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
+@@ -0,0 +1,157 @@
++package io.nekohasekai.sagernet.widget
++
++import android.content.Context
++import android.util.AttributeSet
++import android.view.ViewGroup
++import android.widget.TextView
++import androidx.core.view.ViewCompat
++import androidx.core.view.WindowInsetsCompat
++import androidx.fragment.app.FragmentActivity
++import android.text.format.Formatter
++import com.google.android.material.card.MaterialCardView
++import io.nekohasekai.sagernet.R
++import io.nekohasekai.sagernet.SagerNet
++import io.nekohasekai.sagernet.aidl.TrafficData
++import io.nekohasekai.sagernet.bg.BaseService
++import io.nekohasekai.sagernet.database.DataStore
++import io.nekohasekai.sagernet.database.ProfileManager
++import io.nekohasekai.sagernet.database.ProxyEntity
++import io.nekohasekai.sagernet.ktx.dp2px
++import io.nekohasekai.sagernet.ui.MainActivity
++import io.nekohasekai.sagernet.ui.OutboundIpDialogFragment
++
++/**
++ * 017: 底部长条启动栏 —— 替代官方 FAB + StatsBar（实时数据托板）。
++ *
++ * 布局（横向）：ⓘ 出站IP查询 | 上传/下载(上下两行) | 实时延迟(标签+值两行，点按测试) | 启动按钮
++ * - 栏高 64dp ≈ 节点卡片两行；左右 2dp 与卡片对齐；底边距 4dp（滚动到底时与末卡片
++ *   间距 = 卡片间距）。
++ * - 常驻显示，不再随滚动隐藏（官方 hideOnScroll 逻辑一并移除）。
++ * - 启动按钮沿用 ServiceButton（状态动画 + 进度环），点击 start/stop 与原 FAB 相同。
++ * - 延迟值来源：① 点按延迟区 → 主连接 urlTest（原 StatsBar 点击语义）；
++ *   ② ProfileManager 实时广播 → 当前选中节点的测试结果（012 实时回写链路）。
++ */
++class ConnectBar @JvmOverloads constructor(
++    context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0,
++) : MaterialCardView(context, attrs, defStyleAttr) {
++
++    companion object {
++        private const val BASE_BOTTOM_MARGIN_DP = 4
++    }
++
++    private val ipInfo: androidx.appcompat.widget.AppCompatImageView
++    private val txText: TextView
++    private val rxText: TextView
++    private val delayZone: ViewGroup
++    private val delayValue: TextView
++    private val serviceButton: ServiceButton
++    private val serviceProgress: com.google.android.material.progressindicator.CircularProgressIndicator
++
++    private var currentState = BaseService.State.Idle
++
++    /** 连接测试回调（由 MainActivity 注入：主连接 urlTest）。 */
++    var onTestConnection: (() -> Unit)? = null
++
++    private val profileListener = object : ProfileManager.Listener {
++        override suspend fun onAdd(profile: ProxyEntity) = Unit
++        override suspend fun onUpdated(data: List<TrafficData>) = Unit
++        override suspend fun onUpdated(profile: ProxyEntity, noTraffic: Boolean) {
++            if (noTraffic) return
++            if (profile.id != DataStore.currentProfile) return
++            if (profile.status == 1 && profile.ping > 0) {
++                post { showDelay(profile.ping) }
++            }
++        }
++
++        override suspend fun onRemoved(groupId: Long, profileId: Long) = Unit
++    }
++
++    init {
++        inflate(context, R.layout.layout_connect_bar, this)
++        ipInfo = findViewById(R.id.bar_ip_info)
++        txText = findViewById(R.id.bar_tx)
++        rxText = findViewById(R.id.bar_rx)
++        delayZone = findViewById(R.id.bar_delay_zone)
++        delayValue = findViewById(R.id.bar_delay_value)
++        serviceButton = findViewById(R.id.bar_fab)
++        serviceProgress = findViewById(R.id.bar_fab_progress)
++
++        serviceButton.initProgress(serviceProgress)
++        serviceButton.setOnClickListener {
++            if (DataStore.serviceState.canStop) {
++                SagerNet.stopService()
++            } else {
++                (context as? MainActivity)?.launchConnect()
++            }
++        }
++
++        delayZone.setOnClickListener {
++            if (DataStore.serviceState.connected) {
++                setTesting()
++                onTestConnection?.invoke()
++            }
++        }
++
++        ipInfo.setOnClickListener {
++            val activity = context as? FragmentActivity ?: return@setOnClickListener
++            // 防重复：已有实例则不叠开
++            if (activity.supportFragmentManager
++                    .findFragmentByTag(OutboundIpDialogFragment.DIALOG_TAG) == null
++            ) {
++                OutboundIpDialogFragment()
++                    .show(activity.supportFragmentManager, OutboundIpDialogFragment.DIALOG_TAG)
++            }
++        }
++
++        // 导航栏 inset：底边距 = 4dp + 系统导航条高度（手势条 / 三大金刚都适用）
++        ViewCompat.setOnApplyWindowInsetsListener(this) { v, insets ->
++            val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
++            (v.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
++                val target = dp2px(BASE_BOTTOM_MARGIN_DP) + nav
++                if (lp.bottomMargin != target) {
++                    lp.bottomMargin = target
++                    v.requestLayout()
++                }
++            }
++            insets
++        }
++
++        updateSpeed(0, 0)
++    }
++
++    override fun onAttachedToWindow() {
++        super.onAttachedToWindow()
++        ProfileManager.addListener(profileListener)
++    }
++
++    override fun onDetachedFromWindow() {
++        ProfileManager.removeListener(profileListener)
++        super.onDetachedFromWindow()
++    }
++
++    fun changeState(state: BaseService.State) {
++        serviceButton.changeState(state, currentState, true)
++        currentState = state
++        if (state != BaseService.State.Connected) {
++            delayValue.setText(R.string.bar_delay_tap)
++        }
++    }
++
++    @android.annotation.SuppressLint("SetTextI18n")
++    fun updateSpeed(txRate: Long, rxRate: Long) {
++        txText.text = "▲  ${context.getString(R.string.speed, Formatter.formatFileSize(context, txRate))}"
++        rxText.text = "▼  ${context.getString(R.string.speed, Formatter.formatFileSize(context, rxRate))}"
++    }
++
++    fun setTesting() {
++        delayValue.setText(R.string.bar_delay_testing)
++    }
++
++    fun showDelay(ms: Int) {
++        delayValue.text = context.getString(R.string.bar_delay_value, ms)
++    }
++
++    fun showDelayError() {
++        delayValue.setText(R.string.bar_delay_failed)
++    }
++}
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/widget/FabProgressBehavior.kt b/app/src/main/java/io/nekohasekai/sagernet/widget/FabProgressBehavior.kt
+deleted file mode 100644
+index ae0855e..0000000
+--- a/app/src/main/java/io/nekohasekai/sagernet/widget/FabProgressBehavior.kt
++++ /dev/null
+@@ -1,29 +0,0 @@
+-package io.nekohasekai.sagernet.widget
+-
+-import android.content.Context
+-import android.util.AttributeSet
+-import android.view.View
+-import androidx.coordinatorlayout.widget.CoordinatorLayout
+-import com.google.android.material.progressindicator.CircularProgressIndicator
+-
+-class FabProgressBehavior(context: Context, attrs: AttributeSet?) :
+-    CoordinatorLayout.Behavior<CircularProgressIndicator>(context, attrs) {
+-    override fun layoutDependsOn(
+-        parent: CoordinatorLayout,
+-        child: CircularProgressIndicator,
+-        dependency: View,
+-    ): Boolean {
+-        return dependency.id == (child.layoutParams as CoordinatorLayout.LayoutParams).anchorId
+-    }
+-
+-    override fun onLayoutChild(
+-        parent: CoordinatorLayout, child: CircularProgressIndicator,
+-        layoutDirection: Int,
+-    ): Boolean {
+-        val size = parent.getDependencies(child).single().measuredHeight + child.trackThickness
+-        return if (child.indicatorSize != size) {
+-            child.indicatorSize = size
+-            true
+-        } else false
+-    }
+-}
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/widget/StatsBar.kt b/app/src/main/java/io/nekohasekai/sagernet/widget/StatsBar.kt
+deleted file mode 100644
+index 728a4cc..0000000
+--- a/app/src/main/java/io/nekohasekai/sagernet/widget/StatsBar.kt
++++ /dev/null
+@@ -1,346 +0,0 @@
+-package io.nekohasekai.sagernet.widget
+-
+-import android.annotation.SuppressLint
+-import android.content.Context
+-import android.text.format.Formatter
+-import android.util.AttributeSet
+-import android.view.View
+-import android.widget.TextView
+-import androidx.appcompat.widget.TooltipCompat
+-import androidx.coordinatorlayout.widget.CoordinatorLayout
+-import androidx.lifecycle.lifecycleScope
+-import androidx.lifecycle.whenStarted
+-import com.google.android.material.bottomappbar.BottomAppBar
+-import io.nekohasekai.sagernet.R
+-import io.nekohasekai.sagernet.bg.BaseService
+-import io.nekohasekai.sagernet.database.DataStore
+-import io.nekohasekai.sagernet.ktx.*
+-import io.nekohasekai.sagernet.ui.MainActivity
+-import kotlin.math.abs
+-import kotlinx.coroutines.Dispatchers
+-import kotlinx.coroutines.Job
+-import kotlinx.coroutines.delay
+-import kotlinx.coroutines.launch
+-
+-class StatsBar @JvmOverloads constructor(
+-    context: Context, attrs: AttributeSet? = null,
+-    defStyleAttr: Int = R.attr.bottomAppBarStyle,
+-) : BottomAppBar(context, attrs, defStyleAttr) {
+-    companion object {
+-        private const val INITIAL_HIDE_DELAY_MS = 100L
+-        private const val SCROLL_TOGGLE_THRESHOLD_DP = 8f
+-    }
+-
+-    private enum class Transition {
+-        ShowImmediate,
+-        ShowAnimated,
+-        HideImmediate,
+-        HideAfterStart,
+-    }
+-
+-    private lateinit var statusText: TextView
+-    private lateinit var txText: TextView
+-    private lateinit var rxText: TextView
+-    @Suppress("unused")
+-    private lateinit var behavior: YourBehavior
+-    private var currentState = BaseService.State.Idle
+-    private var pendingTransition: Transition? = Transition.HideImmediate
+-    private var transitionJob: Job? = null
+-
+-    private var scrollHidden = false
+-    private var scrollDirection = 0 // 1 = hide (dy>0), -1 = show (dy<0), 0 = none
+-    private var scrollAccumulatedDy = 0
+-    private val scrollToggleThresholdPx =
+-        (SCROLL_TOGGLE_THRESHOLD_DP * resources.displayMetrics.density).toInt().coerceAtLeast(8)
+-
+-    var useExternalScrollDriver = false
+-        set(value) {
+-            if (field == value) return
+-            field = value
+-            syncScrollHiddenFromView()
+-            resetScrollDriverState()
+-            updateHideOnScroll()
+-        }
+-
+-    var allowShow = false
+-        set(value) {
+-            field = value
+-            updateHideOnScroll()
+-        }
+-
+-    init {
+-        alpha = 0f
+-    }
+-
+-    override fun getBehavior(): YourBehavior {
+-        if (!this::behavior.isInitialized) behavior = YourBehavior()
+-        return behavior
+-    }
+-
+-    inner class YourBehavior : Behavior() {
+-
+-        override fun onStartNestedScroll(
+-            coordinatorLayout: CoordinatorLayout,
+-            child: BottomAppBar,
+-            directTarget: View,
+-            target: View,
+-            nestedScrollAxes: Int,
+-            type: Int,
+-        ): Boolean {
+-            if (useExternalScrollDriver) return false
+-            return super.onStartNestedScroll(
+-                coordinatorLayout,
+-                child,
+-                directTarget,
+-                target,
+-                nestedScrollAxes,
+-                type,
+-            )
+-        }
+-
+-        override fun slideUp(child: BottomAppBar) {
+-            if (!allowShow) return
+-            super.slideUp(child)
+-        }
+-    }
+-
+-    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+-        super.onLayout(changed, left, top, right, bottom)
+-        val transition = pendingTransition
+-        if (transition != null) {
+-            pendingTransition = null
+-            applyTransition(transition)
+-        } else if (alpha == 0f) {
+-            alpha = 1f
+-        }
+-    }
+-
+-    override fun setOnClickListener(l: OnClickListener?) {
+-        statusText = findViewById(R.id.status)
+-        txText = findViewById(R.id.tx)
+-        rxText = findViewById(R.id.rx)
+-        super.setOnClickListener(l)
+-    }
+-
+-    private fun setStatus(text: CharSequence) {
+-        statusText.text = text
+-        TooltipCompat.setTooltipText(this, text)
+-    }
+-
+-    private fun updateHideOnScroll() {
+-        hideOnScroll =
+-            !useExternalScrollDriver && allowShow && currentState == BaseService.State.Connected
+-    }
+-
+-    private fun shouldShow(): Boolean {
+-        return allowShow && currentState == BaseService.State.Connected
+-    }
+-
+-    private fun resetScrollDriverState() {
+-        scrollDirection = 0
+-        scrollAccumulatedDy = 0
+-    }
+-
+-    private fun syncScrollHiddenFromView() {
+-        if (!isLaidOut || height <= 0) return
+-        scrollHidden = translationY >= height / 2f
+-    }
+-
+-    fun onListScrolled(dy: Int) {
+-        if (!useExternalScrollDriver || !shouldShow() || dy == 0) return
+-
+-        val direction = if (dy > 0) 1 else -1
+-        if (direction != scrollDirection) {
+-            scrollDirection = direction
+-            scrollAccumulatedDy = 0
+-        }
+-        scrollAccumulatedDy += dy
+-
+-        val wantHidden = scrollAccumulatedDy > 0
+-        if (wantHidden == scrollHidden) {
+-            if (abs(scrollAccumulatedDy) > scrollToggleThresholdPx) {
+-                scrollAccumulatedDy = direction * scrollToggleThresholdPx
+-            }
+-            return
+-        }
+-        if (abs(scrollAccumulatedDy) < scrollToggleThresholdPx) return
+-
+-        scrollHidden = wantHidden
+-        scrollAccumulatedDy = 0
+-        if (wantHidden) performHide() else performShow()
+-    }
+-
+-    fun syncMainControls(
+-        showControls: Boolean,
+-        state: BaseService.State,
+-        showWhenConnected: Boolean,
+-        animate: Boolean,
+-    ) {
+-        currentState = state
+-        allowShow = showControls
+-        when {
+-            !showControls || state != BaseService.State.Connected -> {
+-                applyTransition(
+-                    if (animate && showControls) Transition.HideAfterStart else Transition.HideImmediate
+-                )
+-            }
+-
+-            showWhenConnected -> applyTransition(
+-                if (animate) Transition.ShowAnimated else Transition.ShowImmediate
+-            )
+-            alpha == 0f && isLaidOut -> alpha = 1f
+-        }
+-    }
+-
+-    private fun applyTransition(transition: Transition) {
+-        if (transition == Transition.HideImmediate && hasPendingDelayedHide()) return
+-        cancelPendingTransition()
+-        if (!isLaidOut || height == 0) {
+-            pendingTransition = transition
+-            alpha = if (transition == Transition.HideImmediate && !allowShow) 0f else 1f
+-            return
+-        }
+-        pendingTransition = null
+-        when (transition) {
+-            Transition.ShowImmediate -> commitVisible(animated = false)
+-            Transition.ShowAnimated -> commitVisible(animated = true)
+-            Transition.HideImmediate -> commitHidden(animated = false)
+-            Transition.HideAfterStart -> commitHidden(animated = true)
+-        }
+-    }
+-
+-    private fun commitVisible(animated: Boolean) {
+-        alpha = 1f
+-        scrollHidden = false
+-        resetScrollDriverState()
+-        if (animated) {
+-            performShow()
+-        } else {
+-            getBehavior().slideUp(this)
+-            animate().cancel()
+-            translationY = 0f
+-        }
+-    }
+-
+-    private fun commitHidden(animated: Boolean) {
+-        alpha = 1f
+-        scrollHidden = true
+-        resetScrollDriverState()
+-        if (!animated) {
+-            syncHiddenPosition()
+-            return
+-        }
+-        val activity = context as? MainActivity
+-        if (activity == null) {
+-            post {
+-                if (shouldShow()) {
+-                    commitVisible(animated = false)
+-                } else if (isLaidOut && height > 0) {
+-                    performHide()
+-                } else {
+-                    pendingTransition = Transition.HideAfterStart
+-                }
+-            }
+-            return
+-        }
+-        transitionJob = activity.lifecycleScope.launch(Dispatchers.Main) {
+-            delay(INITIAL_HIDE_DELAY_MS)
+-            activity.whenStarted {
+-                transitionJob = null
+-                if (shouldShow()) {
+-                    commitVisible(animated = false)
+-                } else if (isLaidOut && height > 0) {
+-                    performHide()
+-                } else {
+-                    pendingTransition = Transition.HideAfterStart
+-                }
+-            }
+-        }
+-    }
+-
+-    private fun syncHiddenPosition() {
+-        getBehavior().slideDown(this)
+-        animate().cancel()
+-        translationY = height.toFloat()
+-        alpha = 1f
+-    }
+-
+-    private fun cancelPendingTransition() {
+-        transitionJob?.cancel()
+-        transitionJob = null
+-    }
+-
+-    private fun hasPendingDelayedHide(): Boolean {
+-        return pendingTransition == Transition.HideAfterStart || transitionJob != null
+-    }
+-
+-    fun changeState(state: BaseService.State) {
+-        currentState = state
+-        updateHideOnScroll()
+-        if (state == BaseService.State.Connected) {
+-            setStatus(app.getText(R.string.vpn_connected))
+-        } else {
+-            updateSpeed(0, 0)
+-            setStatus(
+-                context.getText(
+-                    when (state) {
+-                        BaseService.State.Connecting -> R.string.connecting
+-                        BaseService.State.Stopping -> R.string.stopping
+-                        else -> R.string.not_connected
+-                    }
+-                )
+-            )
+-        }
+-    }
+-
+-    @SuppressLint("SetTextI18n")
+-    fun updateSpeed(txRate: Long, rxRate: Long) {
+-        txText.text = "▲  ${
+-            context.getString(
+-                R.string.speed, Formatter.formatFileSize(context, txRate)
+-            )
+-        }"
+-        rxText.text = "▼  ${
+-            context.getString(
+-                R.string.speed, Formatter.formatFileSize(context, rxRate)
+-            )
+-        }"
+-    }
+-
+-    fun testConnection() {
+-        val activity = context as MainActivity
+-        isEnabled = false
+-        setStatus(app.getText(R.string.connection_test_testing))
+-        runOnDefaultDispatcher {
+-            try {
+-                val elapsed = activity.urlTest()
+-                onMainDispatcher {
+-                    isEnabled = true
+-                    setStatus(
+-                        app.getString(
+-                            if (DataStore.connectionTestURL.startsWith("https://")) {
+-                                R.string.connection_test_available
+-                            } else {
+-                                R.string.connection_test_available_http
+-                            }, elapsed
+-                        )
+-                    )
+-                }
+-
+-            } catch (e: Exception) {
+-                Logs.w(e.toString())
+-                onMainDispatcher {
+-                    isEnabled = true
+-                    setStatus(app.getText(R.string.connection_test_testing))
+-
+-                    activity.snackbar(
+-                        app.getString(
+-                            R.string.connection_test_error, e.readableMessage
+-                        )
+-                    ).show()
+-                }
+-            }
+-        }
+-    }
+-
+-}
+diff --git a/app/src/main/res/drawable/bg_ip_flag.xml b/app/src/main/res/drawable/bg_ip_flag.xml
+new file mode 100644
+index 0000000..b650420
+--- /dev/null
++++ b/app/src/main/res/drawable/bg_ip_flag.xml
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- 017: 命中标记小徽章（圆角描边） -->
++<shape xmlns:android="http://schemas.android.com/apk/res/android">
++    <corners android:radius="6dp" />
++    <stroke
++        android:width="1dp"
++        android:color="#4DFFFFFF" />
++</shape>
+diff --git a/app/src/main/res/drawable/ic_outbound_ip.xml b/app/src/main/res/drawable/ic_outbound_ip.xml
+new file mode 100644
+index 0000000..1efe7ea
+--- /dev/null
++++ b/app/src/main/res/drawable/ic_outbound_ip.xml
+@@ -0,0 +1,14 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- 017: ⓘ 出站 IP 查询按钮图标（圆圈 + i） -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp"
++    android:height="24dp"
++    android:viewportWidth="24"
++    android:viewportHeight="24">
++    <path
++        android:fillColor="#FFFFFFFF"
++        android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM12,20c-4.41,0 -8,-3.59 -8,-8s3.59,-8 8,-8 8,3.59 8,8 -3.59,8 -8,8z" />
++    <path
++        android:fillColor="#FFFFFFFF"
++        android:pathData="M11,7h2v2h-2zM11,11h2v6h-2z" />
++</vector>
+diff --git a/app/src/main/res/layout/layout_connect_bar.xml b/app/src/main/res/layout/layout_connect_bar.xml
+new file mode 100644
+index 0000000..a061cc6
+--- /dev/null
++++ b/app/src/main/res/layout/layout_connect_bar.xml
+@@ -0,0 +1,124 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- 017: 底部长条启动栏内容。背景/圆角由外层 ConnectBar(MaterialCardView) 承担。
++     高度 64dp ≈ 节点卡片「地址行 + 协议/延迟行」两行的高度；
++     左右 2dp 边距与节点卡片对齐（layout_profile.xml margin=2dp）。 -->
++<merge xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:app="http://schemas.android.com/apk/res-auto"
++    xmlns:tools="http://schemas.android.com/tools"
++    tools:parentTag="com.google.android.material.card.MaterialCardView"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent">
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="match_parent"
++        android:gravity="center_vertical"
++        android:orientation="horizontal"
++        android:paddingStart="14dp"
++        android:paddingEnd="10dp"
++        android:paddingTop="8dp"
++        android:paddingBottom="8dp">
++
++        <!-- ⓘ 出站 IP 查询（竖直居中，占满两行） -->
++        <androidx.appcompat.widget.AppCompatImageView
++            android:id="@+id/bar_ip_info"
++            android:layout_width="wrap_content"
++            android:layout_height="match_parent"
++            android:adjustViewBounds="true"
++            android:scaleType="fitCenter"
++            android:background="?attr/selectableItemBackgroundBorderless"
++            android:contentDescription="@string/outbound_ip"
++            android:padding="8dp"
++            app:srcCompat="@drawable/ic_outbound_ip"
++            app:tint="@color/white" />
++
++        <!-- 上传/下载：上下各一行 -->
++        <LinearLayout
++            android:id="@+id/bar_speed_zone"
++            android:layout_width="0dp"
++            android:layout_height="wrap_content"
++            android:layout_marginStart="10dp"
++            android:layout_weight="1"
++            android:orientation="vertical">
++
++            <TextView
++                android:id="@+id/bar_tx"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:ellipsize="end"
++                android:singleLine="true"
++                android:textColor="@color/white"
++                android:textSize="12sp"
++                tools:text="▲ 0 B/s" />
++
++            <TextView
++                android:id="@+id/bar_rx"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:ellipsize="end"
++                android:singleLine="true"
++                android:textColor="@color/white"
++                android:textSize="12sp"
++                tools:text="▼ 0 B/s" />
++        </LinearLayout>
++
++        <!-- 实时延迟：标签 + 值 上下两行；点按 = 连接测试 -->
++        <LinearLayout
++            android:id="@+id/bar_delay_zone"
++            android:layout_width="0dp"
++            android:layout_height="match_parent"
++            android:layout_weight="1"
++            android:background="?android:attr/selectableItemBackground"
++            android:gravity="center_vertical"
++            android:orientation="vertical">
++
++            <TextView
++                android:id="@+id/bar_delay_label"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:alpha="0.72"
++                android:singleLine="true"
++                android:text="@string/bar_delay_label"
++                android:textColor="@color/white"
++                android:textSize="11sp" />
++
++            <TextView
++                android:id="@+id/bar_delay_value"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:ellipsize="end"
++                android:singleLine="true"
++                android:text="@string/bar_delay_tap"
++                android:textColor="@color/white"
++                android:textSize="12sp" />
++        </LinearLayout>
++
++        <!-- 启动/关闭按钮 + 连接进度环 -->
++        <FrameLayout
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content">
++
++            <io.nekohasekai.sagernet.widget.ServiceButton
++                android:id="@+id/bar_fab"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                app:fabSize="mini"
++                android:elevation="4dp"
++                app:backgroundTint="?attr/colorPrimary"
++                app:srcCompat="@drawable/ic_service_idle" />
++
++            <com.google.android.material.progressindicator.CircularProgressIndicator
++                android:id="@+id/bar_fab_progress"
++                android:layout_width="40dp"
++                android:layout_height="40dp"
++                android:layout_gravity="center"
++                android:indeterminate="true"
++                android:max="1"
++                android:visibility="invisible"
++                app:indicatorColor="?primaryOrTextSecondary"
++                app:trackCornerRadius="@dimen/mtrl_progress_track_thickness"
++                app:trackThickness="3dp" />
++        </FrameLayout>
++
++    </LinearLayout>
++</merge>
+diff --git a/app/src/main/res/layout/layout_main.xml b/app/src/main/res/layout/layout_main.xml
+index 8509252..3e44feb 100644
+--- a/app/src/main/res/layout/layout_main.xml
++++ b/app/src/main/res/layout/layout_main.xml
+@@ -19,84 +19,20 @@
+             android:layout_width="match_parent"
+             android:layout_height="match_parent" />
+ 
+-        <!-- We double trackThickness as half of it will be invisible -->
+-        <com.google.android.material.progressindicator.CircularProgressIndicator
+-            android:id="@+id/fabProgress"
+-            android:layout_width="wrap_content"
+-            android:layout_height="wrap_content"
+-            android:max="1"
+-            android:visibility="invisible"
+-            app:indicatorColor="?primaryOrTextSecondary"
+-            app:layout_anchor="@+id/fab"
+-            app:layout_anchorGravity="center"
+-            app:layout_behavior="io.nekohasekai.sagernet.widget.FabProgressBehavior"
+-            app:trackCornerRadius="@dimen/mtrl_progress_track_thickness"
+-            app:trackThickness="8dp" />
+-
+-        <io.nekohasekai.sagernet.widget.ServiceButton
+-            android:id="@+id/fab"
+-            android:layout_width="wrap_content"
+-            android:layout_height="wrap_content"
+-            android:elevation="6dp"
+-            android:nextFocusDown="@+id/stats"
+-            app:backgroundTint="?colorPrimary"
+-            app:layout_anchor="@id/stats"
+-            app:pressedTranslationZ="6dp"
+-            app:srcCompat="@drawable/ic_service_idle" />
+-
+-        <io.nekohasekai.sagernet.widget.StatsBar
+-            android:id="@+id/stats"
++        <!-- 017: 官方 FAB + 实时数据托板（fabProgress/fab/stats）整体移除，
++             替换为底部常驻长条启动栏：ⓘ出站IP | 上传/下载 | 实时延迟 | 启动按钮 -->
++        <io.nekohasekai.sagernet.widget.ConnectBar
++            android:id="@+id/connect_bar"
+             android:layout_width="match_parent"
+-            android:layout_height="wrap_content"
++            android:layout_height="64dp"
+             android:layout_gravity="bottom"
+-            android:nextFocusUp="@+id/fab"
+-            app:backgroundTint="?colorPrimary"
+-            app:contentInsetStart="0dp"
+-            app:hideOnScroll="true">
+-
+-            <LinearLayout
+-                android:layout_width="match_parent"
+-                android:layout_height="wrap_content"
+-                android:background="?android:attr/selectableItemBackground"
+-                android:orientation="vertical"
+-                android:padding="16dp">
+-
+-                <TextView
+-                    android:id="@+id/tx"
+-                    android:layout_width="wrap_content"
+-                    android:layout_height="wrap_content"
+-                    android:layout_columnWeight="1"
+-                    android:layout_gravity="fill_horizontal"
+-                    android:ellipsize="marquee"
+-                    android:singleLine="true"
+-                    android:textColor="@color/white"
+-                    android:textSize="14sp" />
+-
+-                <TextView
+-                    android:id="@+id/rx"
+-                    android:layout_width="wrap_content"
+-                    android:layout_height="wrap_content"
+-                    android:layout_columnWeight="1"
+-                    android:layout_gravity="fill_horizontal"
+-                    android:ellipsize="marquee"
+-                    android:singleLine="true"
+-                    android:textColor="@color/white"
+-                    android:textSize="14sp" />
+-
+-                <TextView
+-                    android:id="@+id/status"
+-                    android:layout_width="wrap_content"
+-                    android:layout_height="wrap_content"
+-                    android:layout_gravity="fill_horizontal"
+-                    android:ellipsize="end"
+-                    android:maxLines="1"
+-                    android:textColor="@color/white"
+-                    android:textSize="16sp"
+-                    tools:text="@string/connection_test_available" />
+-
+-            </LinearLayout>
+-
+-        </io.nekohasekai.sagernet.widget.StatsBar>
++            android:layout_marginStart="2dp"
++            android:layout_marginEnd="2dp"
++            android:layout_marginBottom="4dp"
++            android:elevation="6dp"
++            app:cardBackgroundColor="?attr/colorPrimary"
++            app:cardCornerRadius="18dp"
++            app:cardElevation="4dp" />
+ 
+     </androidx.coordinatorlayout.widget.CoordinatorLayout>
+ 
+diff --git a/app/src/main/res/layout/layout_outbound_ip_dialog.xml b/app/src/main/res/layout/layout_outbound_ip_dialog.xml
+new file mode 100644
+index 0000000..c1c7dcb
+--- /dev/null
++++ b/app/src/main/res/layout/layout_outbound_ip_dialog.xml
+@@ -0,0 +1,256 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- 017: 出站 IP 查询弹窗（复刻 FlClash 0.8.99 出站 IP 面板；仅保留「基础信息 + 网络」） -->
++<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:tools="http://schemas.android.com/tools"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:scrollbars="vertical">
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:orientation="vertical"
++        android:paddingStart="24dp"
++        android:paddingEnd="24dp"
++        android:paddingTop="8dp"
++        android:paddingBottom="4dp">
++
++        <!-- ── 基础信息 ── -->
++        <TextView
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="8dp"
++            android:text="@string/ip_info_basic"
++            android:textAppearance="?android:attr/textAppearanceMedium"
++            android:textColor="?android:attr/textColorSecondary" />
++
++        <LinearLayout
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="8dp"
++            android:orientation="vertical">
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:gravity="center_vertical"
++                android:orientation="horizontal"
++                android:paddingTop="10dp"
++                android:paddingBottom="10dp">
++
++                <TextView
++                    android:layout_width="0dp"
++                    android:layout_height="wrap_content"
++                    android:layout_weight="1"
++                    android:text="@string/ip_address"
++                    android:textAppearance="?android:attr/textAppearanceMedium" />
++
++                <TextView
++                    android:id="@+id/ip_value"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:gravity="end"
++                    android:textAppearance="?android:attr/textAppearanceMedium"
++                    android:textColor="?android:attr/textColorSecondary"
++                    tools:text="138.199.25.98" />
++            </LinearLayout>
++
++            <View
++                android:layout_width="match_parent"
++                android:layout_height="1dp"
++                android:background="?android:attr/listDivider" />
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:gravity="center_vertical"
++                android:orientation="horizontal"
++                android:paddingTop="10dp"
++                android:paddingBottom="10dp">
++
++                <TextView
++                    android:layout_width="0dp"
++                    android:layout_height="wrap_content"
++                    android:layout_weight="1"
++                    android:text="@string/ip_level"
++                    android:textAppearance="?android:attr/textAppearanceMedium" />
++
++                <TextView
++                    android:id="@+id/ip_level_value"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:gravity="end"
++                    android:textAppearance="?android:attr/textAppearanceMedium"
++                    android:textColor="?android:attr/textColorSecondary"
++                    tools:text="普通" />
++            </LinearLayout>
++
++            <View
++                android:layout_width="match_parent"
++                android:layout_height="1dp"
++                android:background="?android:attr/listDivider" />
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:gravity="center_vertical"
++                android:orientation="horizontal"
++                android:paddingTop="10dp"
++                android:paddingBottom="10dp">
++
++                <TextView
++                    android:layout_width="0dp"
++                    android:layout_height="wrap_content"
++                    android:layout_weight="1"
++                    android:text="@string/ip_type"
++                    android:textAppearance="?android:attr/textAppearanceMedium" />
++
++                <TextView
++                    android:id="@+id/ip_type_value"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:gravity="end"
++                    android:textAppearance="?android:attr/textAppearanceMedium"
++                    android:textColor="?android:attr/textColorSecondary"
++                    tools:text="机房" />
++            </LinearLayout>
++
++            <View
++                android:layout_width="match_parent"
++                android:layout_height="1dp"
++                android:background="?android:attr/listDivider" />
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:gravity="center_vertical"
++                android:orientation="horizontal"
++                android:paddingTop="10dp"
++                android:paddingBottom="10dp">
++
++                <TextView
++                    android:layout_width="0dp"
++                    android:layout_height="wrap_content"
++                    android:layout_weight="1"
++                    android:text="@string/ip_flags"
++                    android:textAppearance="?android:attr/textAppearanceMedium" />
++
++                <TextView
++                    android:id="@+id/ip_flags_value"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:background="@drawable/bg_ip_flag"
++                    android:gravity="end"
++                    android:paddingStart="10dp"
++                    android:paddingEnd="10dp"
++                    android:paddingTop="2dp"
++                    android:paddingBottom="2dp"
++                    android:textAppearance="?android:attr/textAppearanceSmall"
++                    android:textColor="?android:attr/textColorSecondary"
++                    tools:text="代理" />
++            </LinearLayout>
++        </LinearLayout>
++
++        <!-- ── 网络 ── -->
++        <TextView
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="20dp"
++            android:text="@string/ip_info_network"
++            android:textAppearance="?android:attr/textAppearanceMedium"
++            android:textColor="?android:attr/textColorSecondary" />
++
++        <LinearLayout
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="8dp"
++            android:orientation="vertical">
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:gravity="center_vertical"
++                android:orientation="horizontal"
++                android:paddingTop="10dp"
++                android:paddingBottom="10dp">
++
++                <TextView
++                    android:layout_width="0dp"
++                    android:layout_height="wrap_content"
++                    android:layout_weight="1"
++                    android:text="@string/ip_org"
++                    android:textAppearance="?android:attr/textAppearanceMedium" />
++
++                <TextView
++                    android:id="@+id/ip_org_value"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:gravity="end"
++                    android:textAppearance="?android:attr/textAppearanceMedium"
++                    android:textColor="?android:attr/textColorSecondary"
++                    tools:text="Cdn77 SGP" />
++            </LinearLayout>
++
++            <View
++                android:layout_width="match_parent"
++                android:layout_height="1dp"
++                android:background="?android:attr/listDivider" />
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:gravity="center_vertical"
++                android:orientation="horizontal"
++                android:paddingTop="10dp"
++                android:paddingBottom="10dp">
++
++                <TextView
++                    android:layout_width="0dp"
++                    android:layout_height="wrap_content"
++                    android:layout_weight="1"
++                    android:text="@string/ip_asn"
++                    android:textAppearance="?android:attr/textAppearanceMedium" />
++
++                <TextView
++                    android:id="@+id/ip_asn_value"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:gravity="end"
++                    android:textAppearance="?android:attr/textAppearanceMedium"
++                    android:textColor="?android:attr/textColorSecondary"
++                    tools:text="AS60068" />
++            </LinearLayout>
++
++            <View
++                android:layout_width="match_parent"
++                android:layout_height="1dp"
++                android:background="?android:attr/listDivider" />
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:gravity="center_vertical"
++                android:orientation="horizontal"
++                android:paddingTop="10dp"
++                android:paddingBottom="10dp">
++
++                <TextView
++                    android:layout_width="0dp"
++                    android:layout_height="wrap_content"
++                    android:layout_weight="1"
++                    android:text="@string/ip_source"
++                    android:textAppearance="?android:attr/textAppearanceMedium" />
++
++                <TextView
++                    android:id="@+id/ip_source_value"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:gravity="end"
++                    android:text="@string/ip_source_ipapicom"
++                    android:textAppearance="?android:attr/textAppearanceMedium"
++                    android:textColor="?android:attr/textColorSecondary" />
++            </LinearLayout>
++        </LinearLayout>
++
++    </LinearLayout>
++</ScrollView>
+diff --git a/app/src/main/res/values-fa/strings.xml b/app/src/main/res/values-fa/strings.xml
+index c59a591..cf227f4 100644
+--- a/app/src/main/res/values-fa/strings.xml
++++ b/app/src/main/res/values-fa/strings.xml
+@@ -501,7 +501,6 @@
+     <string name="domain_strategy_for_remote">راهبرد دامنه برای ارتباط از راه دور</string>
+     <string name="domain_strategy_for_direct">راهبرد دامنه برای ارتباط مستقیم</string>
+     <string name="domain_strategy_for_server">راهبرد دامنه برای نشانی‌های سرور</string>
+-    <string name="show_bottom_bar">نمایش نوار پایین مانند SagerNet</string>
+     <string name="utls_fingerprint">اثر انگشت uTLS</string>
+     <string name="custom_outbound_json">خروجی سفارشی JSON</string>
+     <string name="custom_config_json">پراکسی سفارشی JSON</string>
+diff --git a/app/src/main/res/values-ja/strings.xml b/app/src/main/res/values-ja/strings.xml
+index d614b09..e702550 100644
+--- a/app/src/main/res/values-ja/strings.xml
++++ b/app/src/main/res/values-ja/strings.xml
+@@ -471,7 +471,6 @@
+     <string name="domain_strategy_for_remote">リモートのドメイン戦略</string>
+     <string name="domain_strategy_for_direct">ダイレクトのドメイン戦略</string>
+     <string name="domain_strategy_for_server">サーバーアドレスのドメイン戦略</string>
+-    <string name="show_bottom_bar">SagerNet のようなボトムバーを表示</string>
+     <string name="utls_fingerprint">uTLS フィンガープリント</string>
+     <string name="custom_outbound_json">カスタムアウトバウンド JSON</string>
+     <string name="custom_config_json">カスタム設定 JSON</string>
+diff --git a/app/src/main/res/values-ko/strings.xml b/app/src/main/res/values-ko/strings.xml
+index 1cf8fd4..a6c125b 100644
+--- a/app/src/main/res/values-ko/strings.xml
++++ b/app/src/main/res/values-ko/strings.xml
+@@ -465,7 +465,6 @@
+     <string name="domain_strategy_for_remote">원격용 도메인 전략</string>
+     <string name="domain_strategy_for_direct">직접용 도메인 전략</string>
+     <string name="domain_strategy_for_server">서버 주소용 도메인 전략</string>
+-    <string name="show_bottom_bar">SagerNet처럼 하단 바 표시</string>
+     <string name="utls_fingerprint">uTLS 지문</string>
+     <string name="custom_outbound_json">사용자 지정 아웃바운드 JSON</string>
+     <string name="custom_config_json">사용자 지정 구성 JSON</string>
+diff --git a/app/src/main/res/values-ru/strings.xml b/app/src/main/res/values-ru/strings.xml
+index 4fc87af..2259baf 100644
+--- a/app/src/main/res/values-ru/strings.xml
++++ b/app/src/main/res/values-ru/strings.xml
+@@ -415,7 +415,6 @@
+ <string name="share">Поделиться</string>
+ <string name="share_qr_nfc">QR-код</string>
+ <string name="share_subscription">Поделиться подпиской</string>
+-<string name="show_bottom_bar">Показать нижнюю панель, как в SagerNet</string>
+ <string name="show_direct_speed">Показать прямую скорость</string>
+ <string name="show_direct_speed_sum">Также в уведомлении показывать скорость трафика без прокси</string>
+ <string name="show_group_in_notification">Показывать название группы в уведомлении</string>
+diff --git a/app/src/main/res/values-uk/strings.xml b/app/src/main/res/values-uk/strings.xml
+index 528e309..4cc12fe 100644
+--- a/app/src/main/res/values-uk/strings.xml
++++ b/app/src/main/res/values-uk/strings.xml
+@@ -475,7 +475,6 @@
+     <string name="domain_strategy_for_remote">Стратегія доменів для віддаленого</string>
+     <string name="domain_strategy_for_direct">Стратегія доменів для прямого</string>
+     <string name="domain_strategy_for_server">Стратегія доменів для адреси сервера</string>
+-    <string name="show_bottom_bar">Показувати нижню панель, як у SagerNet</string>
+     <string name="utls_fingerprint">Відбиток uTLS</string>
+     <string name="custom_outbound_json">Власний JSON вихідного з\'єднання</string>
+     <string name="custom_config_json">Власний JSON конфігурації</string>
+diff --git a/app/src/main/res/values-zh-rCN/strings.xml b/app/src/main/res/values-zh-rCN/strings.xml
+index 25ce900..56ace09 100644
+--- a/app/src/main/res/values-zh-rCN/strings.xml
++++ b/app/src/main/res/values-zh-rCN/strings.xml
+@@ -204,7 +204,6 @@
+     <string name="kcp_mtu">mKCP MTU</string>
+     <string name="kcp_tti">mKCP TTI</string>
+     <string name="kcp_cwnd_multiplier">拥塞窗口倍数</string>
+-    <string name="show_bottom_bar">像 SagerNet 一样显示底栏</string>
+     <string name="utls_fingerprint">uTLS 指纹</string>
+     <string name="grpc_service_name">gRPC 服务名称</string>
+     <string name="alpn">应用层协议协商</string>
+@@ -616,4 +615,31 @@
+     <string name="filter_local">本地</string>
+     <string name="sort_ascending">升序</string>
+     <string name="sort_descending">降序</string>
++    <string name="bar_delay_label">实时延迟</string>
++    <string name="bar_delay_tap">点击测试</string>
++    <string name="bar_delay_testing">测试中…</string>
++    <string name="bar_delay_value">延迟 %d ms</string>
++    <string name="bar_delay_failed">测试失败</string>
++    <string name="outbound_ip">出站 IP</string>
++    <string name="ip_info_basic">基础信息</string>
++    <string name="ip_info_network">网络</string>
++    <string name="ip_address">IP 地址</string>
++    <string name="ip_level">等级</string>
++    <string name="ip_type">类型</string>
++    <string name="ip_flags">命中标记</string>
++    <string name="ip_org">组织</string>
++    <string name="ip_asn">ASN</string>
++    <string name="ip_source">采用来源</string>
++    <string name="ip_source_ipapicom">ip-api.com</string>
++    <string name="ip_level_good">优质</string>
++    <string name="ip_level_normal">普通</string>
++    <string name="ip_type_residential">住宅</string>
++    <string name="ip_type_mobile">移动</string>
++    <string name="ip_type_hosting">机房</string>
++    <string name="ip_flag_proxy">代理</string>
++    <string name="ip_none">无</string>
++    <string name="ip_loading">查询中…</string>
++    <string name="ip_query_failed">查询失败</string>
++    <string name="ip_action_refresh">刷新</string>
++    <string name="group_deleted_undo">已删除分组 %s</string>
+ </resources>
+diff --git a/app/src/main/res/values-zh-rTW/strings.xml b/app/src/main/res/values-zh-rTW/strings.xml
+index 9d8c1ce..3669be7 100644
+--- a/app/src/main/res/values-zh-rTW/strings.xml
++++ b/app/src/main/res/values-zh-rTW/strings.xml
+@@ -489,7 +489,6 @@
+     <string name="domain_strategy_for_remote">域名策略（遠端）</string>
+     <string name="domain_strategy_for_direct">域名策略（直連）</string>
+     <string name="domain_strategy_for_server">域名策略（伺服器地址）</string>
+-    <string name="show_bottom_bar">像 SagerNet 一樣顯示底欄</string>
+     <string name="utls_fingerprint">uTLS 指紋</string>
+     <string name="custom_outbound_json">自定義出站 JSON</string>
+     <string name="custom_config_json">自定義配置 JSON</string>
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index c81eb4d..77179c2 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -590,7 +590,6 @@
+     <string name="domain_strategy_for_remote">Domain strategy for Remote</string>
+     <string name="domain_strategy_for_direct">Domain strategy for Direct</string>
+     <string name="domain_strategy_for_server">Domain strategy for Server address</string>
+-    <string name="show_bottom_bar">Show bottom bar like SagerNet</string>
+     <string name="utls_fingerprint">uTLS fingerprint</string>
+     <string name="custom_outbound_json">Custom outbound JSON</string>
+     <string name="custom_config_json">Custom config JSON</string>
+@@ -722,4 +721,31 @@
+     <string name="filter_local">Local</string>
+     <string name="sort_ascending">Ascending</string>
+     <string name="sort_descending">Descending</string>
++    <string name="bar_delay_label">Delay</string>
++    <string name="bar_delay_tap">Tap to test</string>
++    <string name="bar_delay_testing">Testing…</string>
++    <string name="bar_delay_value">%d ms</string>
++    <string name="bar_delay_failed">Test failed</string>
++    <string name="outbound_ip">Outbound IP</string>
++    <string name="ip_info_basic">Basic info</string>
++    <string name="ip_info_network">Network</string>
++    <string name="ip_address">IP address</string>
++    <string name="ip_level">Level</string>
++    <string name="ip_type">Type</string>
++    <string name="ip_flags">Flags</string>
++    <string name="ip_org">Organization</string>
++    <string name="ip_asn">ASN</string>
++    <string name="ip_source">Source</string>
++    <string name="ip_source_ipapicom">ip-api.com</string>
++    <string name="ip_level_good">Good</string>
++    <string name="ip_level_normal">Normal</string>
++    <string name="ip_type_residential">Residential</string>
++    <string name="ip_type_mobile">Mobile</string>
++    <string name="ip_type_hosting">Hosting</string>
++    <string name="ip_flag_proxy">Proxy</string>
++    <string name="ip_none">None</string>
++    <string name="ip_loading">Looking up…</string>
++    <string name="ip_query_failed">Lookup failed</string>
++    <string name="ip_action_refresh">Refresh</string>
++    <string name="group_deleted_undo">Group %s deleted</string>
+ </resources>
+diff --git a/app/src/main/res/xml/global_preferences.xml b/app/src/main/res/xml/global_preferences.xml
+index a413532..977fd8e 100644
+--- a/app/src/main/res/xml/global_preferences.xml
++++ b/app/src/main/res/xml/global_preferences.xml
+@@ -314,9 +314,6 @@
+             app:key="appTLSVersion"
+             app:title="@string/app_tls_version"
+             app:useSimpleSummaryProvider="true" />
+-        <SwitchPreference
+-            app:key="showBottomBar"
+-            app:title="@string/show_bottom_bar" />
+         <Preference
+             app:icon="@drawable/baseline_undo_24"
+             app:key="resetSettings"

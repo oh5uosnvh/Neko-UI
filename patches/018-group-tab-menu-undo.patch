@@ -1,0 +1,88 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+index a88371d..7400ea0 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+@@ -32,6 +32,7 @@ import androidx.core.graphics.ColorUtils
+ import androidx.core.view.ViewCompat
+ import androidx.core.view.WindowInsetsCompat
+ import androidx.core.view.updatePadding
++import com.google.android.material.snackbar.Snackbar
+ import androidx.core.net.toUri
+ import androidx.core.view.isGone
+ import androidx.core.view.isVisible
+@@ -524,10 +525,28 @@ class ConfigurationFragment @JvmOverloads constructor(
+             if (adapter.groupList.size > position) {
+                 tab.text = adapter.groupList[position].displayName()
+             }
+-            tab.view.setOnLongClickListener {
++            tab.view.setOnLongClickListener { v ->
+                 if (position in adapter.groupList.indices) {
+                     val group = adapter.groupList[position]
+-                    (activity as? MainActivity)?.openGroupAt(group.id)
++                    // 018: 长按分组标签 → 编辑 / 跳转 / 删除（删除带还原）
++                    val popup = PopupMenu(requireContext(), v)
++                    popup.menu.add(0, 1, 0, R.string.edit)
++                    popup.menu.add(0, 2, 1, R.string.jump_to_group)
++                    popup.menu.add(0, 3, 2, R.string.delete)
++                    popup.setOnMenuItemClickListener { mi ->
++                        when (mi.itemId) {
++                            1 -> context?.startActivity(
++                                Intent(context, GroupSettingsActivity::class.java)
++                                    .putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, group.id)
++                            )
++
++                            2 -> (activity as? MainActivity)?.openGroupAt(group.id)
++
++                            3 -> deleteGroupWithUndo(group)
++                        }
++                        true
++                    }
++                    popup.show()
+                 }
+                 true
+             }
+@@ -1507,6 +1526,44 @@ class ConfigurationFragment @JvmOverloads constructor(
+         }
+     }
+ 
++    /** 018: 长按分组标签 → 删除分组（带还原）。snackbar 超时（或滑动消失）后不可恢复。 */
++    fun deleteGroupWithUndo(group: ProxyGroup) {
++        runOnDefaultDispatcher {
++            val profiles = SagerDatabase.proxyDao.getByGroup(group.id)
++            val wasCurrent = DataStore.currentGroupId() == group.id
++            GroupManager.deleteGroup(group.id)
++            if (wasCurrent) {
++                // 删除的是当前分组 → 先切到第一个剩余分组，避免 pager 悬在已删分组
++                SagerDatabase.groupDao.allGroups().firstOrNull()?.let {
++                    DataStore.selectedGroup = it.id
++                }
++            }
++            onMainDispatcher {
++                if (!isAdded) return@onMainDispatcher
++                snackbar(getString(R.string.group_deleted_undo, group.displayName())).apply {
++                    setAction(R.string.undo) {
++                        runOnDefaultDispatcher {
++                            restoreGroup(group, profiles, wasCurrent)
++                        }
++                    }
++                    duration = Snackbar.LENGTH_LONG
++                }.show()
++            }
++        }
++    }
++
++    /** 018: 还原刚删除的分组（按原 id 回插，节点随组恢复）。 */
++    private suspend fun restoreGroup(group: ProxyGroup, profiles: List<ProxyEntity>, wasCurrent: Boolean) {
++        SagerDatabase.groupDao.createGroup(group)
++        if (profiles.isNotEmpty()) {
++            SagerDatabase.proxyDao.insert(profiles)
++        }
++        if (wasCurrent) {
++            DataStore.selectedGroup = group.id
++        }
++        GroupManager.postReload(group.id)
++    }
++
+     inner class GroupPagerAdapter : FragmentStateAdapter(this),
+         ProfileManager.Listener,
+         GroupManager.Listener {

@@ -30,6 +30,11 @@
 | `ui/GroupSettingsActivity.kt` | 015 | child 空安全（as?）+ 菜单事件护栏——修高频点击 NPE fatal |
 | `ui/profile/ProfileSettingsActivity.kt` | 015 | 同上 |
 | `ui/RouteSettingsActivity.kt` | 015 | 同上 |
+| `ui/profile/ProfileSettingsActivity.kt` | 016 | 密码类偏好并入标准编辑弹窗；删除 PasswordDialogFragment |
+| `widget/ConnectBar.kt`、`layout_main.xml`、`layout_connect_bar.xml` | 017 | 底部长条启动栏替代 FAB+StatsBar；删除 StatsBar/FabProgressBehavior；移除 showBottomBar |
+| `ui/OutboundIpDialogFragment.kt`、`layout_outbound_ip_dialog.xml` | 017 | 出站 IP 查询弹窗（ip-api.com，FlClash 0.8.99 字段映射） |
+| `ui/ConfigurationFragment.kt` | 017 | 移除旧底部滚动驱动；列表预留启动栏滚动余量 |
+| `ui/ConfigurationFragment.kt` | 018 | 分组标签长按三选菜单；删除分组带还原（按原 id 回插） |
 | `nb4a.properties` | 不打包 | 发版时更新 `PRE_VERSION_NAME`（sbNN） |
 
 ## 基线自带（A01 已有、补丁不触碰——升级上游随基线走）

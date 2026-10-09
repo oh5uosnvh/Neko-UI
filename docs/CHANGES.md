@@ -269,6 +269,40 @@
 - **验证**：进设置页秒点菜单不崩；“取消测试→跳分组→新建”复现路径无 fatal。
 - **红线**：不得改回 `by lazy` 非空强转。
 
+### M. 偏好编辑弹窗统一（补丁 `016-preference-edit-unify.patch`）
+- **根因**：ProfileSettingsActivity 把 PasswordSummaryProvider 类偏好分流到
+  PasswordDialogFragment（裸显示、只读、无清空、无输入态）；标准
+  CopyableEditTextPreferenceDialog 本身就支持明文+清空+输入态。
+- **修复**：删除分流分支与 PasswordDialogFragment 死代码，密码/UUID 与其他
+  参数走同一编辑弹窗（取消/清空/复制/保存 + 自动弹键盘）。
+- **验证**：点 用户ID/密码 → 出现与“服务器”同款输入态弹窗，含清空；列表圆点摘要不变。
+- **红线**：不得恢复按 summaryProvider 分流的弹窗路径。
+
+### N. 底部长条启动栏 + 出站 IP 查询（补丁 `017-bottom-connect-bar.patch`）
+- **改动**：layout_main 移除 fabProgress/fab/stats（官方 FAB + 实时数据托板），
+  新增常驻 ConnectBar（64dp 圆角长条，左右 2dp 与卡片对齐）：
+  ⓘ出站IP查询 \| 上传/下载两行 \| 实时延迟两行(点按=主连接 urlTest，ProfileManager
+  实时回写联动) \| 启动按钮(ServiceButton 复用)。StatsBar/FabProgressBehavior
+  源码删除；showBottomBar 设置项移除；配置列表预留 72dp+inset 滚动余量
+  （滚动到底时末卡片与栏间距=卡片间距）。
+- **出站 IP**：复刻 FlClash v0.8.99（ip_quality.dart）字段映射——
+  ip-api.com 单源：等级(hosting→普通/其余→优质)、类型(机房/移动/住宅)、
+  命中标记(proxy→代理)、组织(org?:isp)、ASN(as 前缀)、来源 ip-api.com；
+  查询走 VPN 隧道（应用流量经 TUN）；弹窗=基础信息+网络 两区块，底部 刷新/确定。
+- **验证**：启动/关闭/状态动画正常；速度两行实时；延迟区点按出主连接 RTT，
+  列表测试时选中节点延迟实时上屏；ⓘ 弹窗刷新/确定可用。
+- **红线**：ConnectBar 常驻、不得恢复 hideOnScroll；ServiceButton 状态动画
+  （iconConnecting 的延迟进度环）不得动；IP 查询不得改用与 FlClash 不同的字段语义。
+
+### O. 分组标签长按三选菜单 + 删除带还原（补丁 `018-group-tab-menu-undo.patch`）
+- **改动**：配置页顶栏分组标签长按由“直接跳转”改为 PopupMenu：编辑(进分组设置)/
+  跳转(原 openGroupAt)/删除(组+节点入库前快照 → 删除 → “已删除分组 %s \| 还原”
+  snackbar；还原按原 id 回插组与节点，当前组被删时先切到首个剩余组，还原时回选)。
+- **验证**：长按弹菜单三项各就各位；删除当前分组后列表正常落位；还原后组、节点、
+  id 原样回归。
+- **红线**：还原必须走“快照 + 原 id 回插”，不得新建分组（id 会变）；undo 依赖
+  snackbar 存活期，超时后不可恢复属预期。
+
 ---
 
 ## 移植到新上游时的冲突热区（按历史经验排序）
