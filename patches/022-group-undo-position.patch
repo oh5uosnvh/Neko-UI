@@ -1,0 +1,72 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+index 8bb2288..f2811d1 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+@@ -1531,6 +1531,8 @@ class ConfigurationFragment @JvmOverloads constructor(
+         runOnDefaultDispatcher {
+             val profiles = SagerDatabase.proxyDao.getByGroup(group.id)
+             val wasCurrent = DataStore.currentGroupId() == group.id
++            // 022: 记录删除前的标签位置 —— 还原必须回到原位（对齐节点卡片撤销语义）
++            val position = adapter.groupList.indexOfFirst { it.id == group.id }
+             GroupManager.deleteGroup(group.id)
+             if (wasCurrent) {
+                 // 删除的是当前分组 → 先切到第一个剩余分组，避免 pager 悬在已删分组
+@@ -1543,7 +1545,7 @@ class ConfigurationFragment @JvmOverloads constructor(
+                 snackbar(getString(R.string.group_deleted_undo, group.displayName())).apply {
+                     setAction(R.string.undo) {
+                         runOnDefaultDispatcher {
+-                            restoreGroup(group, profiles, wasCurrent)
++                            restoreGroup(group, profiles, wasCurrent, position)
+                         }
+                     }
+                     duration = Snackbar.LENGTH_LONG
+@@ -1552,20 +1554,25 @@ class ConfigurationFragment @JvmOverloads constructor(
+         }
+     }
+ 
+-    /** 018/020: 还原刚删除的分组（按原 id 回插，节点随组恢复）。
++    /** 018/022: 还原刚删除的分组（按原 id 回插 + **原位插回标签条**，节点随组恢复）。
+      *  020 修复「点了还原但毫无变化」：pager 只认 groupAdd/groupRemoved
+-     *  （groupUpdated(groupId) 是空实现），必须发 groupAdd 把标签条加回来；
+-     *  postReload 只负责组内节点重载。全程 runCatching，避免 GlobalScope 静默崩溃。 */
+-    private suspend fun restoreGroup(group: ProxyGroup, profiles: List<ProxyEntity>, wasCurrent: Boolean) {
++     *  （groupUpdated(groupId) 是空实现）。
++     *  022 修复「还原被丢到末尾」：groupAdd 永远加在尾部——改为 restoreGroupAt
++     *  按删除前记录的位置原位插回（对齐节点卡片撤销的原位语义）。 */
++    private suspend fun restoreGroup(
++        group: ProxyGroup, profiles: List<ProxyEntity>, wasCurrent: Boolean, position: Int,
++    ) {
+         runCatching {
+             SagerDatabase.groupDao.createGroup(group)
+             if (profiles.isNotEmpty()) {
+                 SagerDatabase.proxyDao.insert(profiles)
+             }
+-            GroupManager.iterator { groupAdd(group) }
+             if (wasCurrent) {
+                 DataStore.selectedGroup = group.id
+             }
++            onMainDispatcher {
++                adapter.restoreGroupAt(group, position)
++            }
+             GroupManager.postReload(group.id)
+         }.onFailure {
+             Logs.w(it)
+@@ -1723,6 +1730,18 @@ class ConfigurationFragment @JvmOverloads constructor(
+             }
+         }
+ 
++        /** 022: 分组删除还原 —— 按删除前的位置原位插回（groupAdd 只会加到尾部）。 */
++        fun restoreGroupAt(group: ProxyGroup, index: Int) {
++            if (groupList.any { it.id == group.id }) return
++            tabLayout.post {
++                val at = index.coerceIn(0, groupList.size)
++                groupList.add(at, group)
++                notifyItemInserted(at)
++                if (groupList.any { !it.ungrouped }) tabLayout.visibility = View.VISIBLE
++                tabLayout.getTabAt(at)?.select()
++            }
++        }
++
+         override suspend fun groupUpdated(group: ProxyGroup) {
+             val index = groupList.indexOfFirst { it.id == group.id }
+             if (index == -1) return

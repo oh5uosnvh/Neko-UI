@@ -203,7 +203,7 @@ jobs:
           cmp libcore/protocol/xhttp/cipher.go ../mods/Neko-xhttp/libcore/protocol/xhttp/cipher.go
           echo "x365 + Blackstone mods applied:"; git -C . diff --stat -- libcore app | tail -3
 
-      - name: Apply mod patches (20)
+      - name: Apply mod patches (22)
         run: |
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
@@ -305,7 +305,11 @@ jobs:
             || { echo "::error::017 showBottomBar pref not removed"; exit 1; }
           grep -q 'connectBar.onTestConnection' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
             || { echo "::error::019 delay zone not wired (would stick on testing)"; exit 1; }
-          echo "017+019 bottom connect bar present"
+          grep -q 'syncConnectBar' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
+            || { echo "::error::021 config-only visibility missing"; exit 1; }
+          ! test -f app/src/main/java/io/nekohasekai/sagernet/widget/ServiceButton.kt \
+            || { echo "::error::021 ServiceButton should be gone"; exit 1; }
+          echo "017+019+021 bottom connect bar present"
 
       - name: Assert 018 group tab menu + undo delete is in place
         run: |
@@ -325,8 +329,10 @@ jobs:
           set -euo pipefail
           cd upstream
           F=app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
-          grep -q 'GroupManager.iterator { groupAdd(group) }' "$F" \
-            || { echo "::error::020 undo pager sync missing"; exit 1; }
+          grep -q 'restoreGroupAt' "$F" \
+            || { echo "::error::020/022 undo pager sync missing"; exit 1; }
+          grep -q 'fun restoreGroupAt' "$F" \
+            || { echo "::error::022 in-position restore missing"; exit 1; }
           D=app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
           grep -q 'country' "$D" || { echo "::error::019 country field missing"; exit 1; }
           grep -q 'bindCopy' "$D" || { echo "::error::019 copy-on-tap missing"; exit 1; }

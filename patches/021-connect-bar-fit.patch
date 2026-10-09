@@ -1,0 +1,361 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+index 78bb9af..441007b 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+@@ -151,6 +151,7 @@ class MainActivity : ThemedActivity(),
+             currentMainFragment =
+                 supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
+         }
++        syncConnectBar()
+         changeState(
+             BaseService.State.Idle,
+             animate = false,
+@@ -218,6 +219,7 @@ class MainActivity : ThemedActivity(),
+         if (restoredFragment != null && restoredFragment !== currentMainFragment) {
+             currentMainFragment = restoredFragment
+         }
++        syncConnectBar()
+     }
+ 
+     fun applyHideFromRecentApps(hide: Boolean) {
+@@ -469,6 +471,7 @@ class MainActivity : ThemedActivity(),
+             transaction.commitAllowingStateLoss()
+ 
+             currentMainFragment = fragment
++            syncConnectBar()
+         }
+ 
+         binding.drawerLayout.closeDrawers()
+@@ -744,6 +747,12 @@ class MainActivity : ThemedActivity(),
+         connect.launch(null)
+     }
+ 
++    /** 021: 底部长条启动栏仅配置页显示。 */
++    private fun syncConnectBar() {
++        binding.connectBar.visibility =
++            if (currentMainFragment is ConfigurationFragment) View.VISIBLE else View.GONE
++    }
++
+     // may NOT called when app is in background
+     // ONLY do UI update here, write DB in bg process
+     override fun cbSpeedUpdate(stats: SpeedDisplayData) {
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt b/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
+index 707a2aa..63e23c9 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
+@@ -1,14 +1,17 @@
+ package io.nekohasekai.sagernet.widget
+ 
+ import android.content.Context
++import android.text.format.Formatter
+ import android.util.AttributeSet
++import android.view.View
+ import android.view.ViewGroup
+ import android.widget.TextView
++import androidx.appcompat.widget.AppCompatImageView
+ import androidx.core.view.ViewCompat
+ import androidx.core.view.WindowInsetsCompat
+ import androidx.fragment.app.FragmentActivity
+-import android.text.format.Formatter
+ import com.google.android.material.card.MaterialCardView
++import com.google.android.material.progressindicator.CircularProgressIndicator
+ import io.nekohasekai.sagernet.R
+ import io.nekohasekai.sagernet.SagerNet
+ import io.nekohasekai.sagernet.aidl.TrafficData
+@@ -23,12 +26,13 @@ import io.nekohasekai.sagernet.ui.OutboundIpDialogFragment
+ /**
+  * 017: 底部长条启动栏 —— 替代官方 FAB + StatsBar（实时数据托板）。
+  *
+- * 布局（横向）：ⓘ 出站IP查询 | 上传/下载(上下两行) | 实时延迟(标签+值两行，点按测试) | 启动按钮
+- * - 栏高 64dp ≈ 节点卡片两行；左右 2dp 与卡片对齐；底边距 4dp（滚动到底时与末卡片
+- *   间距 = 卡片间距）。
+- * - 常驻显示，不再随滚动隐藏（官方 hideOnScroll 逻辑一并移除）。
+- * - 启动按钮沿用 ServiceButton（状态动画 + 进度环），点击 start/stop 与原 FAB 相同。
+- * - 延迟值来源：① 点按延迟区 → 主连接 urlTest（原 StatsBar 点击语义）；
++ * 布局（横向）：ⓘ 出站IP查询 | 上传/下载(上下两行) | 实时延迟(值+标签两行，点按测试) | 启动按钮
++ * - 栏高 64dp ≈ 节点卡片两行；底边距 4dp（滚动到底时与末卡片间距 = 卡片间距）。
++ * - 021: 仅配置页显示（MainActivity.syncConnectBar 控制可见性）；根视图可点击，
++ *   空白区域不再把触摸穿透到下层节点卡片。
++ * - 021: 启动按钮 = 普通 ImageView + 静态状态图标（连接中/停止中显示进度环），
++ *   无 FAB 自绘底色 —— 与栏底色完全统一。
++ * - 延迟值来源：① 点按延迟区 → 主连接 urlTest（MainActivity 接线 onTestConnection）；
+  *   ② ProfileManager 实时广播 → 当前选中节点的测试结果（012 实时回写链路）。
+  */
+ class ConnectBar @JvmOverloads constructor(
+@@ -39,13 +43,13 @@ class ConnectBar @JvmOverloads constructor(
+         private const val BASE_BOTTOM_MARGIN_DP = 4
+     }
+ 
+-    private val ipInfo: androidx.appcompat.widget.AppCompatImageView
++    private val ipInfo: AppCompatImageView
+     private val txText: TextView
+     private val rxText: TextView
+     private val delayZone: ViewGroup
+     private val delayValue: TextView
+-    private val serviceButton: ServiceButton
+-    private val serviceProgress: com.google.android.material.progressindicator.CircularProgressIndicator
++    private val serviceIcon: AppCompatImageView
++    private val serviceProgress: CircularProgressIndicator
+ 
+     private var currentState = BaseService.State.Idle
+ 
+@@ -73,11 +77,13 @@ class ConnectBar @JvmOverloads constructor(
+         rxText = findViewById(R.id.bar_rx)
+         delayZone = findViewById(R.id.bar_delay_zone)
+         delayValue = findViewById(R.id.bar_delay_value)
+-        serviceButton = findViewById(R.id.bar_fab)
++        serviceIcon = findViewById(R.id.bar_fab)
+         serviceProgress = findViewById(R.id.bar_fab_progress)
+ 
+-        serviceButton.initProgress(serviceProgress)
+-        serviceButton.setOnClickListener {
++        // 021: 拦截空白区触摸，防止点击穿透到下层节点卡片
++        isClickable = true
++
++        serviceIcon.setOnClickListener {
+             if (DataStore.serviceState.canStop) {
+                 SagerNet.stopService()
+             } else {
+@@ -130,7 +136,21 @@ class ConnectBar @JvmOverloads constructor(
+     }
+ 
+     fun changeState(state: BaseService.State) {
+-        serviceButton.changeState(state, currentState, true)
++        val res = when (state) {
++            BaseService.State.Connecting -> R.drawable.ic_service_connecting
++            BaseService.State.Connected -> R.drawable.ic_service_connected
++            BaseService.State.Stopping -> R.drawable.ic_service_stopping
++            else -> R.drawable.ic_service_idle
++        }
++        serviceIcon.setImageResource(res)
++        serviceProgress.visibility =
++            if (state == BaseService.State.Connecting || state == BaseService.State.Stopping) {
++                View.VISIBLE
++            } else {
++                View.INVISIBLE
++            }
++        serviceIcon.contentDescription =
++            context.getText(if (state.canStop) R.string.stop else R.string.connect)
+         currentState = state
+         if (state != BaseService.State.Connected) {
+             delayValue.setText(R.string.bar_delay_tap)
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/widget/ServiceButton.kt b/app/src/main/java/io/nekohasekai/sagernet/widget/ServiceButton.kt
+deleted file mode 100644
+index 73404c4..0000000
+--- a/app/src/main/java/io/nekohasekai/sagernet/widget/ServiceButton.kt
++++ /dev/null
+@@ -1,150 +0,0 @@
+-package io.nekohasekai.sagernet.widget
+-
+-import android.content.Context
+-import android.graphics.drawable.Drawable
+-import android.os.Build
+-import android.util.AttributeSet
+-import android.view.PointerIcon
+-import android.view.View
+-import androidx.annotation.DrawableRes
+-import androidx.appcompat.widget.TooltipCompat
+-import androidx.dynamicanimation.animation.DynamicAnimation
+-import androidx.lifecycle.LifecycleOwner
+-import androidx.lifecycle.lifecycleScope
+-import androidx.vectordrawable.graphics.drawable.Animatable2Compat
+-import androidx.vectordrawable.graphics.drawable.AnimatedVectorDrawableCompat
+-import com.google.android.material.floatingactionbutton.FloatingActionButton
+-import com.google.android.material.progressindicator.BaseProgressIndicator
+-import io.nekohasekai.sagernet.R
+-import io.nekohasekai.sagernet.bg.BaseService
+-import kotlinx.coroutines.Job
+-import kotlinx.coroutines.delay
+-import java.util.*
+-
+-class ServiceButton @JvmOverloads constructor(
+-    context: Context,
+-    attrs: AttributeSet? = null,
+-    defStyleAttr: Int = 0
+-) :
+-    FloatingActionButton(context, attrs, defStyleAttr), DynamicAnimation.OnAnimationEndListener {
+-
+-    private val callback = object : Animatable2Compat.AnimationCallback() {
+-        override fun onAnimationEnd(drawable: Drawable) {
+-            super.onAnimationEnd(drawable)
+-            var next = animationQueue.peek() ?: return
+-            if (next.icon.current == drawable) {
+-                animationQueue.pop()
+-                next = animationQueue.peek() ?: return
+-            }
+-            next.start()
+-        }
+-    }
+-
+-    private inner class AnimatedState(
+-        @DrawableRes resId: Int,
+-        private val onStart: BaseProgressIndicator<*>.() -> Unit = { hideProgress() }
+-    ) {
+-        val icon: AnimatedVectorDrawableCompat =
+-            AnimatedVectorDrawableCompat.create(context, resId)!!.apply {
+-                registerAnimationCallback(this@ServiceButton.callback)
+-            }
+-
+-        fun start() {
+-            setImageDrawable(icon)
+-            icon.start()
+-            progress.onStart()
+-        }
+-
+-        fun stop() = icon.stop()
+-    }
+-
+-    private val iconStopped by lazy { AnimatedState(R.drawable.ic_service_stopped) }
+-    private val iconConnecting by lazy {
+-        AnimatedState(R.drawable.ic_service_connecting) {
+-            hideProgress()
+-            delayedAnimation = (context as LifecycleOwner).lifecycleScope.launchWhenStarted {
+-                delay(context.resources.getInteger(android.R.integer.config_mediumAnimTime) + 1000L)
+-                isIndeterminate = true
+-                show()
+-            }
+-        }
+-    }
+-    private val iconConnected by lazy {
+-        AnimatedState(R.drawable.ic_service_connected) {
+-            delayedAnimation?.cancel()
+-            setProgressCompat(1, true)
+-        }
+-    }
+-    private val iconStopping by lazy { AnimatedState(R.drawable.ic_service_stopping) }
+-    private val animationQueue = ArrayDeque<AnimatedState>()
+-
+-    private var checked = false
+-    private var delayedAnimation: Job? = null
+-    private lateinit var progress: BaseProgressIndicator<*>
+-    fun initProgress(progress: BaseProgressIndicator<*>) {
+-        this.progress = progress
+-        progress.progressDrawable?.addSpringAnimationEndListener(this)
+-    }
+-
+-    override fun onAnimationEnd(
+-        animation: DynamicAnimation<out DynamicAnimation<*>>?, canceled: Boolean, value: Float,
+-        velocity: Float
+-    ) {
+-        if (!canceled) progress.hide()
+-    }
+-
+-    fun hideProgress() {
+-        delayedAnimation?.cancel()
+-        progress.hide()
+-    }
+-
+-    override fun onCreateDrawableState(extraSpace: Int): IntArray {
+-        val drawableState = super.onCreateDrawableState(extraSpace + 1)
+-        if (checked) View.mergeDrawableStates(
+-            drawableState,
+-            intArrayOf(android.R.attr.state_checked)
+-        )
+-        return drawableState
+-    }
+-
+-    fun changeState(state: BaseService.State, previousState: BaseService.State, animate: Boolean) {
+-        when (state) {
+-            BaseService.State.Connecting -> changeState(iconConnecting, animate)
+-            BaseService.State.Connected -> changeState(iconConnected, animate)
+-            BaseService.State.Stopping -> {
+-                changeState(iconStopping, animate && previousState == BaseService.State.Connected)
+-            }
+-            else -> changeState(iconStopped, animate)
+-        }
+-        checked = state == BaseService.State.Connected
+-        refreshDrawableState()
+-        val description = context.getText(if (state.canStop) R.string.stop else R.string.connect)
+-        contentDescription = description
+-        TooltipCompat.setTooltipText(this, description)
+-        val enabled = state.canStop || state == BaseService.State.Stopped
+-        isEnabled = enabled
+-        if (Build.VERSION.SDK_INT >= 24) pointerIcon = PointerIcon.getSystemIcon(
+-            context,
+-            if (enabled) PointerIcon.TYPE_HAND else PointerIcon.TYPE_WAIT
+-        )
+-    }
+-
+-    private fun changeState(icon: AnimatedState, animate: Boolean) {
+-        fun counters(a: AnimatedState, b: AnimatedState): Boolean =
+-            a == iconStopped && b == iconConnecting ||
+-                    a == iconConnecting && b == iconStopped ||
+-                    a == iconConnected && b == iconStopping ||
+-                    a == iconStopping && b == iconConnected
+-        if (animate) {
+-            if (animationQueue.size < 2 || !counters(animationQueue.last, icon)) {
+-                animationQueue.add(icon)
+-                if (animationQueue.size == 1) icon.start()
+-            } else animationQueue.removeLast()
+-        } else {
+-            animationQueue.peekFirst()?.stop()
+-            animationQueue.clear()
+-            icon.start()    // force ensureAnimatorSet to be called so that stop() will work
+-            icon.stop()
+-        }
+-    }
+-}
+diff --git a/app/src/main/res/layout/layout_connect_bar.xml b/app/src/main/res/layout/layout_connect_bar.xml
+index 1b5251c..686ea03 100644
+--- a/app/src/main/res/layout/layout_connect_bar.xml
++++ b/app/src/main/res/layout/layout_connect_bar.xml
+@@ -62,17 +62,18 @@
+                 tools:text="▼ 0 B/s" />
+         </LinearLayout>
+ 
+-        <!-- 实时延迟：值在上、标签在下；宽度=内容宽（ripple 不再占半条栏） -->
++        <!-- 实时延迟：值在上、标签在下；固定宽度 —— 文案在
++             点击测试/测试中…/延迟 xx ms 之间切换时区域宽度不变，整条栏不再左右晃 -->
+         <LinearLayout
+             android:id="@+id/bar_delay_zone"
+-            android:layout_width="wrap_content"
++            android:layout_width="96dp"
+             android:layout_height="match_parent"
+             android:layout_marginEnd="6dp"
+             android:background="?android:attr/selectableItemBackground"
+             android:gravity="center_vertical"
+             android:orientation="vertical"
+             android:paddingStart="10dp"
+-            android:paddingEnd="10dp">
++            android:paddingEnd="4dp">
+ 
+             <TextView
+                 android:id="@+id/bar_delay_value"
+@@ -100,14 +101,15 @@
+             android:layout_width="wrap_content"
+             android:layout_height="wrap_content">
+ 
+-            <io.nekohasekai.sagernet.widget.ServiceButton
++            <!-- 021: 普通 ImageView 替代 FAB —— FAB 自绘底色/阴影与栏底色有
++                 色差；静态状态图标 + 连接中进度环，底色与栏完全统一 -->
++            <androidx.appcompat.widget.AppCompatImageView
+                 android:id="@+id/bar_fab"
+-                android:layout_width="wrap_content"
+-                android:layout_height="wrap_content"
+-                app:fabSize="mini"
+-                android:elevation="0dp"
+-                app:backgroundTint="@android:color/transparent"
+-                app:maxImageSize="30dp"
++                android:layout_width="36dp"
++                android:layout_height="36dp"
++                android:background="?attr/selectableItemBackgroundBorderless"
++                android:contentDescription="@string/connect"
++                android:scaleType="fitCenter"
+                 app:srcCompat="@drawable/ic_service_idle" />
+ 
+             <com.google.android.material.progressindicator.CircularProgressIndicator
+diff --git a/app/src/main/res/layout/layout_main.xml b/app/src/main/res/layout/layout_main.xml
+index 62ef8e5..eb78d17 100644
+--- a/app/src/main/res/layout/layout_main.xml
++++ b/app/src/main/res/layout/layout_main.xml
+@@ -26,8 +26,8 @@
+             android:layout_width="match_parent"
+             android:layout_height="64dp"
+             android:layout_gravity="bottom"
+-            android:layout_marginStart="10dp"
+-            android:layout_marginEnd="10dp"
++            android:layout_marginStart="16dp"
++            android:layout_marginEnd="16dp"
+             android:layout_marginBottom="4dp"
+             android:elevation="6dp"
+             app:cardBackgroundColor="?attr/colorPrimary"

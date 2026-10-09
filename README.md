@@ -1,6 +1,6 @@
 # Neko-UI
 
-NekoBoxF 的 UI 定制补丁与构建管线。基线 `A01`（tag @ f167ebc，fork 原版），18 个补丁按序应用即得成品。
+NekoBoxF 的 UI 定制补丁与构建管线。基线 `A01`（tag @ f167ebc，fork 原版），22 个补丁按序应用即得成品。
 
 **当前版本：[Neko 0.01](../../releases/tag/v0.01)** · APK 见 [Releases](../../releases)
 
@@ -39,13 +39,17 @@ NekoBoxF 的 UI 定制补丁与构建管线。基线 `A01`（tag @ f167ebc，for
 | 016 | 偏好编辑弹窗统一：密码/UUID 与普通参数同款（可输入+清空+复制），删除 PasswordDialogFragment |
 | 017 | 底部长条启动栏（ⓘ出站IP \| 上传/下载 \| 实时延迟 \| 启动按钮）替代 FAB+实时数据托板；出站 IP 查询弹窗（复刻 FlClash 0.8.99）；移除 showBottomBar 设置 |
 | 018 | 顶栏分组标签长按 → 编辑/跳转/删除三选菜单；删除分组带「还原」 |
+| 019 | 启动栏抛光：延迟测试接线（修永远“测试中”）、延迟区收窄、出站IP弹窗加国家地区+IP/组织/ASN点击复制 |
+| 020 | 分组删除还原修复（pager 只认 groupAdd） |
+| 021 | 启动栏：按钮改静态图标+进度环（底色统一）、栏左右 16dp、延迟区固定宽（防文字晃动）、空白区防触摸穿透、仅配置页显示 |
+| 022 | 分组还原原位插回（对齐节点卡片撤销语义） |
 
 ## 构建
 
 ```bash
 git clone --recurse-submodules https://github.com/oh5uosnvh/NekoBoxForAndroid.git upstream
 cd upstream && git checkout A01
-python3 ../scripts/apply_all.py                # 应用 18 补丁（--check 仅预检）
+python3 ../scripts/apply_all.py                # 应用 22 补丁（--check 仅预检）
 ./run init action gradle && ./gradlew app:assemblePreviewRelease   # release=R8 混淆+收缩，APK ≈16MB
 python3 ../scripts/verify_build.py <apk>       # 成品校验
 ```
