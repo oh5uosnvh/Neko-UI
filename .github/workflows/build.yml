@@ -203,7 +203,7 @@ jobs:
           cmp libcore/protocol/xhttp/cipher.go ../mods/Neko-xhttp/libcore/protocol/xhttp/cipher.go
           echo "x365 + Blackstone mods applied:"; git -C . diff --stat -- libcore app | tail -3
 
-      - name: Apply mod patches (18)
+      - name: Apply mod patches (20)
         run: |
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
@@ -303,7 +303,9 @@ jobs:
             || { echo "::error::017 MainActivity still binds fab/stats"; exit 1; }
           ! grep -q 'showBottomBar' app/src/main/java/io/nekohasekai/sagernet/Constants.kt \
             || { echo "::error::017 showBottomBar pref not removed"; exit 1; }
-          echo "017 bottom connect bar present"
+          grep -q 'connectBar.onTestConnection' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
+            || { echo "::error::019 delay zone not wired (would stick on testing)"; exit 1; }
+          echo "017+019 bottom connect bar present"
 
       - name: Assert 018 group tab menu + undo delete is in place
         run: |
@@ -317,6 +319,20 @@ jobs:
           grep -q 'group_deleted_undo' "$F" \
             || { echo "::error::018 undo snackbar string missing"; exit 1; }
           echo "018 group tab menu + undo present"
+
+      - name: Assert 019/020 polish and undo fix are in place
+        run: |
+          set -euo pipefail
+          cd upstream
+          F=app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+          grep -q 'GroupManager.iterator { groupAdd(group) }' "$F" \
+            || { echo "::error::020 undo pager sync missing"; exit 1; }
+          D=app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
+          grep -q 'country' "$D" || { echo "::error::019 country field missing"; exit 1; }
+          grep -q 'bindCopy' "$D" || { echo "::error::019 copy-on-tap missing"; exit 1; }
+          grep -q 'row_country\|ip_country_value' app/src/main/res/layout/layout_outbound_ip_dialog.xml \
+            || { echo "::error::019 country row missing"; exit 1; }
+          echo "019/020 polish + undo fix present"
 
       - name: Setup Java
         uses: actions/setup-java@v4

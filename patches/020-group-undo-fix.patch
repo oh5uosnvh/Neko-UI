@@ -1,0 +1,37 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+index 7400ea0..8bb2288 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+@@ -1552,16 +1552,24 @@ class ConfigurationFragment @JvmOverloads constructor(
+         }
+     }
+ 
+-    /** 018: 还原刚删除的分组（按原 id 回插，节点随组恢复）。 */
++    /** 018/020: 还原刚删除的分组（按原 id 回插，节点随组恢复）。
++     *  020 修复「点了还原但毫无变化」：pager 只认 groupAdd/groupRemoved
++     *  （groupUpdated(groupId) 是空实现），必须发 groupAdd 把标签条加回来；
++     *  postReload 只负责组内节点重载。全程 runCatching，避免 GlobalScope 静默崩溃。 */
+     private suspend fun restoreGroup(group: ProxyGroup, profiles: List<ProxyEntity>, wasCurrent: Boolean) {
+-        SagerDatabase.groupDao.createGroup(group)
+-        if (profiles.isNotEmpty()) {
+-            SagerDatabase.proxyDao.insert(profiles)
+-        }
+-        if (wasCurrent) {
+-            DataStore.selectedGroup = group.id
++        runCatching {
++            SagerDatabase.groupDao.createGroup(group)
++            if (profiles.isNotEmpty()) {
++                SagerDatabase.proxyDao.insert(profiles)
++            }
++            GroupManager.iterator { groupAdd(group) }
++            if (wasCurrent) {
++                DataStore.selectedGroup = group.id
++            }
++            GroupManager.postReload(group.id)
++        }.onFailure {
++            Logs.w(it)
+         }
+-        GroupManager.postReload(group.id)
+     }
+ 
+     inner class GroupPagerAdapter : FragmentStateAdapter(this),

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Neko-UI 补丁应用器（18 补丁）。在**上游源码树根目录**运行。
+"""Neko-UI 补丁应用器（20 补丁）。在**上游源码树根目录**运行。
 
 用法:
   python3 apply_all.py --check          # 只预检（临时 index 累积干跑，不改工作区）
@@ -42,6 +42,8 @@ ORDERED = [
     "016-preference-edit-unify.patch",
     "017-bottom-connect-bar.patch",
     "018-group-tab-menu-undo.patch",
+    "019-connect-bar-polish.patch",
+    "020-group-undo-fix.patch",
 ]
 
 
