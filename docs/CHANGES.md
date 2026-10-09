@@ -303,6 +303,41 @@
 - **红线**：还原必须走“快照 + 原 id 回插”，不得新建分组（id 会变）；undo 依赖
   snackbar 存活期，超时后不可恢复属预期。
 
+### P. 启动栏抛光与延迟接线（补丁 `019-connect-bar-polish.patch`）
+- **根因（延迟卡“测试中…”）**：ConnectBar.onTestConnection 无人接线——点击只改文案。
+- **修复**：MainActivity 接线（主连接 urlTest → showDelay/showDelayError）；延迟区
+  内容宽（ripple 不再占半条栏）；出站 IP 弹窗加国家地区行、IP/组织/ASN 三行点击复制。
+- **红线**：延迟区点击必须走主连接 urlTest；复制仅限这三行。
+
+### Q. 分组删除还原修复（补丁 `020-group-undo-fix.patch`）
+- **根因**：GroupPagerAdapter.groupUpdated(groupId) 是空实现，postReload 不刷新标签条。
+- **修复**：改发 groupAdd 让 pager 把组加回（022 再升级为原位插回）。
+- **红线**：不得依赖 postReload 同步 pager 的组列表。
+
+### R. 启动栏二抛（补丁 `023-connect-bar-fit3.patch`）
+- **改动**：左右留白/块间距微调、延迟区固定宽（文案切换不再左右晃）、飞机垂直居中
+  （FrameLayout 内默认顶对齐是根因）、三处触摸底色统一 bg_touch_rounded（圆角矩形）。
+- **红线**：触摸底色必须是圆角矩形 ripple，不得回退 borderless 圆形/直角长条。
+
+### S. 启动按钮官方动效回归 + 四区重构（补丁 `024-service-icon-anim.patch`）
+- **根因**：021 的静态图标丢了官方 AVD 动画（斜线直接出现/消失）；FAB 自绘底色
+  与进度环“转圈”是源码遗留显示问题。
+- **修复**：ServiceIconView = 官方动画队列引擎（AnimatedState/计数器切换/动画回调）
+  移植到 AppCompatImageView——保留斜线划出/飞机形变动效，删除 FAB 底色与进度环；
+  初始态 animate=false 静态首帧（与官方调用语义一致）。四区 [ⓘ|速度|弹性|延迟|启动]
+  均匀分布。
+- **红线**：动画队列计数逻辑不得简化；进度环不得回归；bar_fab 必须是
+  ServiceIconView（FAB 自绘底色与栏底色有色差）。
+
+### T. 出站 IP 六源对冲（补丁 `025-ip-quality-multisource.patch`）
+- **根因（与 FlClash 结果不一致）**：017 只用 ip-api.com（宽松），FlClash 0.8.99
+  是六源对冲，命中源带 is_datacenter/is_abuser 等严格字段。
+- **修复**：IpQualityLookup 逐行复刻 FlClash（六源并发、非推断先到先得、推断兜底、
+  总超时 8s）；字段映射/等级（优/普通/风险+颜色）/命中标记（Tor/滥用记录/VPN/代理，
+  顿号连接）/类型（机房/移动网络/住宅/商业）全对齐；国家地区各源尽力提供。
+- **红线**：源列表与 _pickType/_declaredType/_asn 逻辑必须与 FlClash v0.8.99
+  ip_quality.dart 一致；等级色 risky=红/good=绿/normal=默认。
+
 ---
 
 ## 移植到新上游时的冲突热区（按历史经验排序）

@@ -32,9 +32,14 @@
 | `ui/RouteSettingsActivity.kt` | 015 | 同上 |
 | `ui/profile/ProfileSettingsActivity.kt` | 016 | 密码类偏好并入标准编辑弹窗；删除 PasswordDialogFragment |
 | `widget/ConnectBar.kt`、`layout_main.xml`、`layout_connect_bar.xml` | 017 | 底部长条启动栏替代 FAB+StatsBar；删除 StatsBar/FabProgressBehavior；移除 showBottomBar |
-| `ui/OutboundIpDialogFragment.kt`、`layout_outbound_ip_dialog.xml` | 017 | 出站 IP 查询弹窗（ip-api.com，FlClash 0.8.99 字段映射） |
+| `ui/OutboundIpDialogFragment.kt`、`layout_outbound_ip_dialog.xml` | 017/019/025 | 出站 IP 查询弹窗；国家地区行+三行点击复制（019）；数据源=025 六源对冲 |
 | `ui/ConfigurationFragment.kt` | 017 | 移除旧底部滚动驱动；列表预留启动栏滚动余量 |
 | `ui/ConfigurationFragment.kt` | 018 | 分组标签长按三选菜单；删除分组带还原（按原 id 回插） |
+| `ui/MainActivity.kt` | 019 | 延迟区点击接线 onTestConnection（修永远“测试中”） |
+| `ui/ConfigurationFragment.kt` | 020/022 | 删除分组还原：pager 同步修复 → 按删除前位置原位插回（restoreGroupAt） |
+| `layout_connect_bar.xml`、`bg_touch_rounded.xml` | 023 | 三处触摸底色统一圆角矩形；延迟区固定宽；间距/留白微调 |
+| `widget/ServiceIconView.kt` | 024 | 官方 AVD 动画引擎纯图标版（斜线/形变动画队列）；删除进度环遗留；四区均匀分布 |
+| `ui/IpQualityLookup.kt` | 025 | FlClash 0.8.99 六源对冲查询（ident.me/ip-api/ipquery/iplocate/ipapi.is/proxycheck），字段/等级/命中标记全对齐 |
 | `nb4a.properties` | 不打包 | 发版时更新 `PRE_VERSION_NAME`（sbNN） |
 
 ## 基线自带（A01 已有、补丁不触碰——升级上游随基线走）
