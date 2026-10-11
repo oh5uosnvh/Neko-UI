@@ -385,6 +385,27 @@
   `false`（不消费，交回卡片完成点击态）；`runningTest` 群测期间速度区点按维持
   现状（无反应）不做队列。
 
+### Z. 030 两项修复的真实生效修补（补丁 `031/032`）
+- **031 修正**：030 的刷新触发挂在 `onResume`——但设置页是同 Activity 内的
+  `SettingsFragment`（`nav_settings -> SettingsFragment()`），返回配置页走
+  show/hide，**onResume 不触发**，开关依旧像没生效。改为监听
+  `DataStore.configurationStore`（RoomPreferenceDataStore）的
+  `OnPreferenceDataStoreChangeListener`：开关拨动**瞬间**即对所有已创建分组页
+  `reloadProfiles()`（onResume 保留作兜底）。
+- **032 修正（路由页滑块卡在中部 + 配置页触摸滑块上跳）**：官方
+  recyclerview-fastscroll 2.0.1 的 `updateThumbPosition` 进度分母用
+  「适配器高度估算」（MeasurableAdapter 缓存 / 首行高×行数），变高卡片列表
+  分母失准——滑到底滑块仍停在轨道中部偏下，上半段行程无效；且拖动映射用
+  「视口高度」、渲染映射用「内容高度」，两套基准不一致——触摸滑块原位置后
+  会向上跳一截。新增 `ExactScrollRecyclerView`（继承 FastScrollRecyclerView），
+  渲染与拖动统一改用 RecyclerView 自身精确度量
+  `computeVerticalScrollOffset / (range - extent)`；`layout_route.xml` 与
+  `layout_profile_list.xml` 换用该类。
+- **验证**：设置切换开关 → 不返回页面卡片即时变化；路由页滑到底 → 滑块贴轨道
+  底部、拖到顶 → 列表到顶；配置页触摸滑块 → 原位不跳。
+- **红线**：`ExactScrollRecyclerView` 的渲染与拖动必须共用同一套精确度量；
+  不得改回估算分母；mScrollbar 反射获取仅限本类。
+
 ---
 
 ## 移植到新上游时的冲突热区（按历史经验排序）

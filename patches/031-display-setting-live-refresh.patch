@@ -1,0 +1,62 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+index 8e029b7..7e63d7a 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+@@ -66,6 +66,7 @@ import io.nekohasekai.sagernet.database.ProxyEntity
+ import io.nekohasekai.sagernet.database.ProxyGroup
+ import io.nekohasekai.sagernet.database.SagerDatabase
+ import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
++import io.nekohasekai.sagernet.database.preference.PreferenceDataStore
+ import io.nekohasekai.sagernet.databinding.LayoutProfileListBinding
+ import io.nekohasekai.sagernet.databinding.LayoutProgressListBinding
+ import io.nekohasekai.sagernet.fmt.AbstractBean
+@@ -519,6 +520,9 @@ class ConfigurationFragment @JvmOverloads constructor(
+         adapter = GroupPagerAdapter()
+         ProfileManager.addListener(adapter)
+         GroupManager.addListener(adapter)
++        // 031: “始终显示地址”等显示开关即时生效——监听配置存储，变化即刷新所有
++        // 已创建分组页的卡片（不等返回页面，更不等重启）
++        DataStore.configurationStore.registerChangeListener(displayPrefListener)
+ 
+         groupPager.adapter = adapter
+         groupPager.offscreenPageLimit = 2
+@@ -618,6 +622,7 @@ class ConfigurationFragment @JvmOverloads constructor(
+ 
+     override fun onDestroy() {
+         DataStore.profileCacheStore.unregisterChangeListener(this)
++        DataStore.configurationStore.unregisterChangeListener(displayPrefListener)
+ 
+         if (::groupPager.isInitialized) {
+             try {
+@@ -1583,10 +1588,29 @@ class ConfigurationFragment @JvmOverloads constructor(
+ 
+     override fun onResume() {
+         super.onResume()
+-        // 030: 从设置返回时若“始终显示地址”开关变化，立即刷新当前页卡片
++        // 030/031: 兜底——从设置返回时若开关变化，立即刷新当前页卡片
+         if (lastAppliedAlwaysShowAddress != DataStore.alwaysShowAddress) {
+             lastAppliedAlwaysShowAddress = DataStore.alwaysShowAddress
+-            adapter.reload(now = true)
++            runOnMainDispatcher {
++                if (!isAdded) return@runOnMainDispatcher
++                adapter.groupFragments.values.forEach { page ->
++                    runCatching { page.reloadProfiles() }
++                }
++            }
++        }
++    }
++
++    // 031: 显示开关变化 → 刷新所有已创建分组页的卡片（地址行显隐 + 行高）
++    private val displayPrefListener = object : OnPreferenceDataStoreChangeListener {
++        override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
++            if (key != Key.ALWAYS_SHOW_ADDRESS) return
++            lastAppliedAlwaysShowAddress = DataStore.alwaysShowAddress
++            runOnMainDispatcher {
++                if (!isAdded || !::adapter.isInitialized) return@runOnMainDispatcher
++                adapter.groupFragments.values.forEach { page ->
++                    runCatching { page.reloadProfiles() }
++                }
++            }
+         }
+     }
+ 

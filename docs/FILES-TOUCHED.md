@@ -26,6 +26,8 @@
 | `bg/proto/TestInstance.kt` | 013 | suspendCancellableCoroutine + invokeOnCancellation 即时关实例（僵尸秒死）；阻塞段 withContext 进专用池 |
 | `bg/proto/UrlTest.kt` | 013 | 接收每轮专用阻塞线程池，不再占用 Dispatchers.Default |
 | `ui/ConfigurationFragment.kt` | 013 | urlTest 创建 newFixedThreadPool(concurrent∈[1,16])；test.cancel 关池 |
+| `ui/ConfigurationFragment.kt` | 031 | 显示开关即时生效修补：configurationStore 监听 + 分组页 reloadProfiles 传播（onResume 在 show/hide 导航下不触发的缺口） |
+| `widget/ExactScrollRecyclerView.kt` | 032 | 精确滚动度量滑块（修复路由页滑块卡中部/配置页触摸滑块上跳）；layout_route/layout_profile_list 换用 |
 | `ui/ConfigurationFragment.kt` | 014 | 清理不可用/去重接 undoManager“还原”snackbar（可见卡可还原，隐藏卡立即删）+ isUndoReady 兜底 |
 | `ui/GroupSettingsActivity.kt` | 015 | child 空安全（as?）+ 菜单事件护栏——修高频点击 NPE fatal |
 | `ui/profile/ProfileSettingsActivity.kt` | 015 | 同上 |

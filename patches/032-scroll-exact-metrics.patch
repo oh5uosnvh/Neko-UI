@@ -1,0 +1,113 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt b/app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt
+new file mode 100644
+index 0000000..6939a83
+--- /dev/null
++++ b/app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt
+@@ -0,0 +1,74 @@
++package io.nekohasekai.sagernet.widget
++
++import android.content.Context
++import android.util.AttributeSet
++import com.simplecityapps.recyclerview_fastscroll.views.FastScrollRecyclerView
++
++/**
++ * 032: 修复官方 fastscroll 库（com.simplecityapps:recyclerview-fastscroll 2.0.1）
++ * 的两处滑块定位缺陷：
++ *
++ *  1) 渲染进度分母用「适配器高度估算」（MeasurableAdapter 的 mScrollOffsets 缓存，
++ *     或 首行高×行数）。路由页规则卡片高度各异、缓存失准时分母偏大——
++ *     列表滑到底滑块仍停在轨道中部偏下，且拖动滑块上半段行程是无效区。
++ *  2) 拖动映射用「视口高度」(height - thumbHeight)，而渲染映射用「内容高度」，
++ *     两套基准不一致——触摸滑块原位置后，滑块会向上跳过一截
++ *     （渲染丢掉了首可见卡片的 rowTopOffset 像素偏移）。
++ *
++ * 本类统一改用 RecyclerView 自身的精确滚动度量：
++ *   progress = computeVerticalScrollOffset() / (range - extent)
++ * 渲染与拖动共用同一基准，滑块与内容严格同步，两个页面的缺陷同时消除。
++ *
++ * 覆写点：updateThumbPosition（渲染）/ scrollToPositionAtProgress（拖动）。
++ * mScrollbar 为库内私有字段，通过反射获取（仅一次）。
++ */
++class ExactScrollRecyclerView @JvmOverloads constructor(
++    context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0,
++) : FastScrollRecyclerView(context, attrs, defStyleAttr) {
++
++    private val scrollbar: FastScroller? by lazy {
++        runCatching {
++            FastScrollRecyclerView::class.java.getDeclaredField("mScrollbar").apply {
++                isAccessible = true
++            }.get(this) as? FastScroller
++        }.getOrNull()
++    }
++
++    override fun updateThumbPosition(
++        state: FastScrollRecyclerView.ScrollPositionState,
++        scrollY: Int,
++    ) {
++        val scrollbar = scrollbar ?: return
++        val range = computeVerticalScrollRange()
++        val extent = computeVerticalScrollExtent()
++        val scrollable = (range - extent).coerceAtLeast(0)
++        if (scrollable <= 0) {
++            scrollbar.setThumbPosition(-1, -1)
++            return
++        }
++        val offset = computeVerticalScrollOffset().coerceIn(0, scrollable)
++        val progress = offset.toFloat() / scrollable.toFloat()
++        val y = paddingTop + (progress * getAvailableScrollBarHeight()).toInt()
++        scrollbar.setThumbPosition(thumbX(), y)
++    }
++
++    override fun scrollToPositionAtProgress(progress: Float): String {
++        val range = computeVerticalScrollRange()
++        val extent = computeVerticalScrollExtent()
++        val scrollable = (range - extent).coerceAtLeast(0)
++        val target = (progress.coerceIn(0f, 1f) * scrollable).toInt()
++        scrollBy(0, target - computeVerticalScrollOffset())
++        return sectionNameAt()
++    }
++
++    private fun thumbX(): Int = width - getScrollBarWidth()
++
++    private fun sectionNameAt(): String {
++        val lm = layoutManager as? androidx.recyclerview.widget.LinearLayoutManager
++            ?: return ""
++        val pos = lm.findFirstCompletelyVisibleItemPosition()
++        if (pos < 0) return ""
++        val sectioned = adapter as? FastScrollRecyclerView.SectionedAdapter ?: return ""
++        return runCatching { sectioned.getSectionForPosition(pos) }.getOrDefault("")
++    }
++}
+diff --git a/app/src/main/res/layout/layout_profile_list.xml b/app/src/main/res/layout/layout_profile_list.xml
+index 9f8a4b5..e975b8f 100644
+--- a/app/src/main/res/layout/layout_profile_list.xml
++++ b/app/src/main/res/layout/layout_profile_list.xml
+@@ -1,5 +1,5 @@
+ <?xml version="1.0" encoding="utf-8"?>
+-<com.simplecityapps.recyclerview_fastscroll.views.FastScrollRecyclerView xmlns:android="http://schemas.android.com/apk/res/android"
++<io.nekohasekai.sagernet.widget.ExactScrollRecyclerView xmlns:android="http://schemas.android.com/apk/res/android"
+     xmlns:app="http://schemas.android.com/apk/res-auto"
+     xmlns:tools="http://schemas.android.com/tools"
+     android:id="@+id/configuration_list"
+diff --git a/app/src/main/res/layout/layout_route.xml b/app/src/main/res/layout/layout_route.xml
+index 971231f..0ca1bbb 100644
+--- a/app/src/main/res/layout/layout_route.xml
++++ b/app/src/main/res/layout/layout_route.xml
+@@ -14,7 +14,7 @@
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content" />
+ 
+-        <com.simplecityapps.recyclerview_fastscroll.views.FastScrollRecyclerView
++        <io.nekohasekai.sagernet.widget.ExactScrollRecyclerView
+             android:id="@+id/route_list"
+             android:layout_width="match_parent"
+             android:layout_height="match_parent"
+@@ -24,7 +24,7 @@
+             app:fastScrollThumbColor="?colorPrimary"
+             app:fastScrollThumbInactiveColor="?colorPrimary">
+ 
+-        </com.simplecityapps.recyclerview_fastscroll.views.FastScrollRecyclerView>
++        </io.nekohasekai.sagernet.widget.ExactScrollRecyclerView>
+ 
+     </LinearLayout>
+ 
