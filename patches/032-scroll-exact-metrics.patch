@@ -1,13 +1,14 @@
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt b/app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt
 new file mode 100644
-index 0000000..6939a83
+index 0000000..46d32f8
 --- /dev/null
 +++ b/app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt
-@@ -0,0 +1,74 @@
+@@ -0,0 +1,75 @@
 +package io.nekohasekai.sagernet.widget
 +
 +import android.content.Context
 +import android.util.AttributeSet
++import com.simplecityapps.recyclerview_fastscroll.views.FastScroller
 +import com.simplecityapps.recyclerview_fastscroll.views.FastScrollRecyclerView
 +
 +/**
