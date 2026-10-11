@@ -182,7 +182,7 @@ grep -q 'isPressed = true' "$C" \
   || fail "030 whole-bar press mirror missing"
 grep -q 'displayPrefListener' "$F" \
   || fail "031 display pref listener missing"
-grep -q 'page.reloadProfiles()' "$F" \
+grep -q 'page.adapter?.reloadProfiles()' "$F" \
   || fail "031 page refresh propagation missing"
 test -f app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt \
   || fail "032 exact-metrics scrollbar missing"
