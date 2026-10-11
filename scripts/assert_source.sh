@@ -185,4 +185,15 @@ grep -q 'displayPrefListener' "$F" \
 grep -q 'page.adapter?.reloadProfiles()' "$F" \
   || fail "031 page refresh propagation missing"
 
-echo "== 源码断言全部通过（011–031）=="
+# ------------------------------------------------ 033 滚动条拖动锚定 + 速度/延迟统一测试
+E=app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt
+test -f "$E" || fail "033 ExactScrollRecyclerView missing"
+grep -q 'grabOffset' "$E" || fail "033 scrollbar grab offset missing"
+grep -q 'trackingTouch' "$E" || fail "033 scrollbar touch tracking missing"
+grep -q 'getScrollBarThumbHeight' "$E" || fail "033 scrollbar hit bounds missing"
+# Both zones must call one shared test action, not separate behavior.
+grep -q 'val testConnection = {' "$C" || fail "033 shared test action missing"
+grep -q 'delayZone.setOnTouchListener(mirrorPress)' "$C" || fail "033 delay press mirror missing"
+grep -q 'speedZone.setOnTouchListener(mirrorPress)' "$C" || fail "033 speed press mirror missing"
+
+echo "== 源码断言全部通过（011–033）=="

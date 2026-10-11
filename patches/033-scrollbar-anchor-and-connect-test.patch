@@ -1,0 +1,200 @@
+--- a/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
+@@ -4,6 +4,7 @@
+ import android.text.format.Formatter
+ import android.util.AttributeSet
+ import android.view.MotionEvent
++import android.view.View
+ import android.view.ViewGroup
+ import android.widget.TextView
+ import androidx.appcompat.widget.AppCompatImageView
+@@ -90,23 +91,13 @@
+             }
+         }
+ 
+-        delayZone.setOnClickListener {
++        val testConnection = {
+             if (DataStore.serviceState.connected) {
+                 setTesting()
+                 onTestConnection?.invoke()
+             }
+         }
+-
+-        // 030: 点按速度区 = 与延迟区相同的延迟测试（需已连接）。
+-        // 触摸不消费：手动把按压态镜像到整条 MaterialCardView，
+-        // 保留「整个框」按压底色的既有视觉。
+-        speedZone.setOnClickListener {
+-            if (DataStore.serviceState.connected) {
+-                setTesting()
+-                onTestConnection?.invoke()
+-            }
+-        }
+-        speedZone.setOnTouchListener { _, event ->
++        val mirrorPress = View.OnTouchListener { _, event ->
+             when (event.actionMasked) {
+                 MotionEvent.ACTION_DOWN -> {
+                     isPressed = true
+@@ -116,6 +107,13 @@
+             }
+             false
+         }
++
++        // Both information blocks are one command: run the latency test and use the same
++        // whole-bar pressed feedback. Their hit boxes stay separate, but their behavior does not.
++        delayZone.setOnClickListener { testConnection() }
++        delayZone.setOnTouchListener(mirrorPress)
++        speedZone.setOnClickListener { testConnection() }
++        speedZone.setOnTouchListener(mirrorPress)
+ 
+         ipInfo.setOnClickListener {
+             val activity = context as? FragmentActivity ?: return@setOnClickListener
+--- a/app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt
+@@ -1,46 +1,117 @@
+ package io.nekohasekai.sagernet.widget
+ 
+ import android.content.Context
++import android.graphics.Point
+ import android.util.AttributeSet
++import android.view.MotionEvent
+ import com.simplecityapps.recyclerview_fastscroll.views.FastScrollRecyclerView
+ 
+-/** Uses RecyclerView's measured scroll range for the thumb, preserving safe drag behavior. */
++/** Uses measured scroll metrics and keeps the thumb anchored to the user's finger. */
+ class ExactScrollRecyclerView @JvmOverloads constructor(
+     context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0,
+ ) : FastScrollRecyclerView(context, attrs, defStyleAttr) {
+ 
+-    private val scrollbar: Any? by lazy {
+-        runCatching {
+-            FastScrollRecyclerView::class.java.getDeclaredField("mScrollbar").apply {
+-                isAccessible = true
+-            }.get(this)
+-        }.getOrNull()
++    private val scrollbarField = FastScrollRecyclerView::class.java.getDeclaredField("mScrollbar").apply {
++        isAccessible = true
+     }
++    private val touchOffsetField by lazy { scrollbarClass().getDeclaredField("mTouchOffset").apply { isAccessible = true } }
++    private val draggingField by lazy { scrollbarClass().getDeclaredField("mIsDragging").apply { isAccessible = true } }
++    private val thumbPositionField by lazy { scrollbarClass().getDeclaredField("mThumbPosition").apply { isAccessible = true } }
++    private val thumbMethod by lazy {
++        scrollbarClass().getMethod(
++            "setThumbPosition",
++            Int::class.javaPrimitiveType,
++            Int::class.javaPrimitiveType,
++        )
++    }
+ 
++    private var downY = 0
++    private var grabOffset = 0
++    private var trackingTouch = false
++
++    private fun scrollbar(): Any = scrollbarField.get(this)
++
++    private fun scrollbarClass() = scrollbarField.type
++
++    private fun thumbPosition(): Point = thumbPositionField.get(scrollbar()).let { it as Point }
++
++    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
++        val y = event.y.toInt()
++        when (event.actionMasked) {
++            MotionEvent.ACTION_DOWN -> {
++                downY = y
++                val thumb = thumbPosition()
++                val touchInset = (24 * resources.displayMetrics.density).toInt()
++                val x = event.x.toInt()
++                val isRtl = layoutDirection == LAYOUT_DIRECTION_RTL
++                val thumbLeft = if (isRtl) 0 else thumb.x - touchInset
++                val thumbRight = if (isRtl) getScrollBarWidth() + touchInset else thumb.x + getScrollBarWidth() + touchInset
++                trackingTouch = thumb.x >= 0 && thumb.y >= 0 &&
++                    x in thumbLeft..thumbRight &&
++                    y >= thumb.y - touchInset &&
++                    y <= thumb.y + getScrollBarThumbHeight() + touchInset
++                if (trackingTouch) {
++                    grabOffset = (y - thumb.y).coerceIn(0, getScrollBarThumbHeight())
++                }
++            }
++            MotionEvent.ACTION_MOVE -> if (trackingTouch) {
++                // On the first MOVE FastScroller adds (lastY - downY) before starting
++                // the drag. Cancel that one duplicated delta; later moves preserve the
++                // original grab offset because FastScroller no longer adds it while dragging.
++                val bar = scrollbar()
++                val offset = if (draggingField.getBoolean(bar)) {
++                    grabOffset
++                } else {
++                    grabOffset - (y - downY)
++                }
++                touchOffsetField.setInt(bar, offset)
++            }
++        }
++
++        val handled = super.dispatchTouchEvent(event)
++
++        if (trackingTouch && event.actionMasked == MotionEvent.ACTION_MOVE) {
++            val bar = scrollbar()
++            if (draggingField.getBoolean(bar)) {
++                touchOffsetField.setInt(bar, grabOffset)
++                // FastScroller recalculates the thumb from content position during the same
++                // frame. Restore the grab point after that calculation so the thumb stays under
++                // the finger instead of jumping away from it.
++                val thumbY = (y - grabOffset).coerceIn(
++                    paddingTop,
++                    height - paddingBottom - getScrollBarThumbHeight(),
++                )
++                val thumbX = if (layoutDirection == LAYOUT_DIRECTION_RTL) 0 else width - getScrollBarWidth()
++                thumbMethod.invoke(bar, thumbX, thumbY)
++            }
++        }
++
++        if (event.actionMasked == MotionEvent.ACTION_UP ||
++            event.actionMasked == MotionEvent.ACTION_CANCEL
++        ) {
++            trackingTouch = false
++            grabOffset = 0
++        }
++        return handled
++    }
++
+     override fun updateThumbPosition(
+         state: FastScrollRecyclerView.ScrollPositionState,
+         scrollY: Int,
+     ) {
+-        val bar = scrollbar ?: return
++        val bar = scrollbar()
++        if (draggingField.getBoolean(bar) && trackingTouch) return
++
+         val scrollable = (computeVerticalScrollRange() - computeVerticalScrollExtent())
+             .coerceAtLeast(0)
+         if (scrollable == 0) {
+-            setThumbPosition(bar, -1, -1)
++            thumbMethod.invoke(bar, -1, -1)
+             return
+         }
+         val offset = computeVerticalScrollOffset().coerceIn(0, scrollable)
+         val fraction = offset.toFloat() / scrollable.toFloat()
+         val y = paddingTop + (fraction * getAvailableScrollBarHeight()).toInt()
+-        setThumbPosition(bar, width - getScrollBarWidth(), y)
+-    }
+-
+-    private fun setThumbPosition(bar: Any, x: Int, y: Int) {
+-        runCatching {
+-            bar.javaClass.getMethod(
+-                "setThumbPosition",
+-                Int::class.javaPrimitiveType,
+-                Int::class.javaPrimitiveType,
+-            ).invoke(bar, x, y)
+-        }
++        val x = if (layoutDirection == LAYOUT_DIRECTION_RTL) 0 else width - getScrollBarWidth()
++        thumbMethod.invoke(bar, x, y)
+     }
+ }
+--- a/app/src/main/res/layout/layout_connect_bar.xml
++++ b/app/src/main/res/layout/layout_connect_bar.xml
+@@ -67,7 +67,6 @@
+             android:layout_width="76dp"
+             android:layout_height="match_parent"
+             android:layout_marginEnd="4dp"
+-            android:background="@drawable/bg_touch_rounded"
+             android:gravity="center_vertical"
+             android:orientation="vertical"
+             android:paddingStart="10dp"
