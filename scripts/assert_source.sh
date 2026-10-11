@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Neko-UI 源码断言器：011–029 修复/功能锚点（从 CI workflow 抽出，语义 1:1）。
+# Neko-UI 源码断言器：011–030 修复/功能锚点（从 CI workflow 抽出，语义 1:1）。
 #
 # 用法:
 #   bash scripts/assert_source.sh <上游源码目录>
@@ -167,4 +167,19 @@ grep -q 'IpQualityLookup.lookup(profileId)' "$D" \
   || fail "025/028 dialog not wired to lookup"
 echo "025 ip quality multisource present"
 
-echo "== 源码断言全部通过（011–029）=="
+# ------------------------------------------------ 030 显示开关即时生效 + 速度区点按测延迟
+F=app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+grep -q 'val alwaysShowAddress get() = DataStore.alwaysShowAddress' "$F" \
+  || fail "030 live getter missing"
+! grep -q 'val alwaysShowAddress by lazy' "$F" \
+  || fail "030 old lazy cache still present"
+grep -q 'lastAppliedAlwaysShowAddress' "$F" \
+  || fail "030 onResume refresh missing"
+C=app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
+grep -q 'speedZone.setOnClickListener' "$C" \
+  || fail "030 speed-zone test tap missing"
+grep -q 'isPressed = true' "$C" \
+  || fail "030 whole-bar press mirror missing"
+echo "030 display live-apply + speed-zone tap-test present"
+
+echo "== 源码断言全部通过（011–030）=="

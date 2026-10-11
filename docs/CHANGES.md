@@ -372,6 +372,19 @@
   连接成功的自动 ping 前置 500ms 稳定期（锚点 `delay(500)`）。
 - **红线**：重试仅一次（防雪崩）；3s 预算 / 700ms 退避 / 500ms 稳定期不得随手调整。
 
+### Y. “始终显示地址”即时生效 + 速度区点按测延迟（补丁 `030-display-live-and-speed-tap.patch`）
+- **根因1**：`ConfigurationFragment.alwaysShowAddress` 用 `by lazy` 缓存（官方源码同病），
+  设置里开关后必须重启进程才重新读取。
+- **修复1**：改为实时 getter；`onResume` 检测开关变化后 `adapter.reload(now = true)`，
+  从设置返回立即生效（卡片地址行显隐 + 行高 `hasMiddleRow` 跟随）。
+- **修复2**：连接栏速度区（`bar_speed_zone`）点按 = 与延迟区相同的延迟测试
+  （`setTesting()` + `onTestConnection`，需已连接）；触摸不消费，ACTION_DOWN 把
+  按压态镜像到整条 MaterialCardView（`isPressed` + `drawableHotspotChanged`），
+  保留「整个框」按压底色的既有视觉。
+- **红线**：`alwaysShowAddress` 不得改回 `by lazy`；速度区触摸监听必须返回
+  `false`（不消费，交回卡片完成点击态）；`runningTest` 群测期间速度区点按维持
+  现状（无反应）不做队列。
+
 ---
 
 ## 移植到新上游时的冲突热区（按历史经验排序）

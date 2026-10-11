@@ -1,0 +1,86 @@
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+index f2811d1..8e029b7 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+@@ -233,7 +233,9 @@ class ConfigurationFragment @JvmOverloads constructor(
+ 
+     /** 🔍 那个可折叠菜单项，收起搜索框时要用它 collapseActionView() */
+ 
+-    val alwaysShowAddress by lazy { DataStore.alwaysShowAddress }
++    // 030: 实时读取——旧的 by lazy 首访后缓存，设置里开关后必须重启才生效
++    val alwaysShowAddress get() = DataStore.alwaysShowAddress
++    private var lastAppliedAlwaysShowAddress = DataStore.alwaysShowAddress
+ 
+     @Volatile
+     private var selectedProxySnapshot = selectedItem?.id ?: 0L
+@@ -1579,6 +1581,15 @@ class ConfigurationFragment @JvmOverloads constructor(
+         }
+     }
+ 
++    override fun onResume() {
++        super.onResume()
++        // 030: 从设置返回时若“始终显示地址”开关变化，立即刷新当前页卡片
++        if (lastAppliedAlwaysShowAddress != DataStore.alwaysShowAddress) {
++            lastAppliedAlwaysShowAddress = DataStore.alwaysShowAddress
++            adapter.reload(now = true)
++        }
++    }
++
+     inner class GroupPagerAdapter : FragmentStateAdapter(this),
+         ProfileManager.Listener,
+         GroupManager.Listener {
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt b/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
+index 22619cb..a78f7f6 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
+@@ -3,6 +3,7 @@ package io.nekohasekai.sagernet.widget
+ import android.content.Context
+ import android.text.format.Formatter
+ import android.util.AttributeSet
++import android.view.MotionEvent
+ import android.view.ViewGroup
+ import android.widget.TextView
+ import androidx.appcompat.widget.AppCompatImageView
+@@ -44,6 +45,7 @@ class ConnectBar @JvmOverloads constructor(
+     private val ipInfo: AppCompatImageView
+     private val txText: TextView
+     private val rxText: TextView
++    private val speedZone: ViewGroup
+     private val delayZone: ViewGroup
+     private val delayValue: TextView
+     private val serviceIcon: ServiceIconView
+@@ -72,6 +74,7 @@ class ConnectBar @JvmOverloads constructor(
+         ipInfo = findViewById(R.id.bar_ip_info)
+         txText = findViewById(R.id.bar_tx)
+         rxText = findViewById(R.id.bar_rx)
++        speedZone = findViewById(R.id.bar_speed_zone)
+         delayZone = findViewById(R.id.bar_delay_zone)
+         delayValue = findViewById(R.id.bar_delay_value)
+         serviceIcon = findViewById(R.id.bar_fab)
+@@ -94,6 +97,26 @@ class ConnectBar @JvmOverloads constructor(
+             }
+         }
+ 
++        // 030: 点按速度区 = 与延迟区相同的延迟测试（需已连接）。
++        // 触摸不消费：手动把按压态镜像到整条 MaterialCardView，
++        // 保留「整个框」按压底色的既有视觉。
++        speedZone.setOnClickListener {
++            if (DataStore.serviceState.connected) {
++                setTesting()
++                onTestConnection?.invoke()
++            }
++        }
++        speedZone.setOnTouchListener { _, event ->
++            when (event.actionMasked) {
++                MotionEvent.ACTION_DOWN -> {
++                    isPressed = true
++                    drawableHotspotChanged(event.x, event.y)
++                }
++                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> isPressed = false
++            }
++            false
++        }
++
+         ipInfo.setOnClickListener {
+             val activity = context as? FragmentActivity ?: return@setOnClickListener
+             // 防重复：已有实例则不叠开
