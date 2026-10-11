@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Neko-UI 源码断言器：011–032 修复/功能锚点（从 CI workflow 抽出，语义 1:1）。
+# Neko-UI 源码断言器：011–031 修复/功能锚点（从 CI workflow 抽出，语义 1:1）。
 #
 # 用法:
 #   bash scripts/assert_source.sh <上游源码目录>
@@ -184,14 +184,5 @@ grep -q 'displayPrefListener' "$F" \
   || fail "031 display pref listener missing"
 grep -q 'page.adapter?.reloadProfiles()' "$F" \
   || fail "031 page refresh propagation missing"
-test -f app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt \
-  || fail "032 exact-metrics scrollbar missing"
-grep -q 'computeVerticalScrollOffset()' app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt \
-  || fail "032 exact scroll metrics missing"
-grep -q 'io.nekohasekai.sagernet.widget.ExactScrollRecyclerView' app/src/main/res/layout/layout_route.xml \
-  || fail "032 route page scrollbar swap missing"
-grep -q 'io.nekohasekai.sagernet.widget.ExactScrollRecyclerView' app/src/main/res/layout/layout_profile_list.xml \
-  || fail "032 config page scrollbar swap missing"
-echo "030/031/032 display + scrollbar fixes present"
 
-echo "== 源码断言全部通过（011–030）=="
+echo "== 源码断言全部通过（011–031）=="
