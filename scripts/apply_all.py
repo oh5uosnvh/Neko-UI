@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Neko-UI 补丁应用器（A01 基线上的 33 个补丁）。在**上游源码树根目录**运行。
+"""Neko-UI 最新 UI 移植补丁应用器（starifly 1.4.2-rev-24 基线）。
+在**上游源码树根目录**运行。
 
 用法:
   python3 apply_all.py --check          # 只预检（临时 index 累积干跑，不改工作区）

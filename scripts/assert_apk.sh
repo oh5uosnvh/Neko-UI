@@ -33,7 +33,14 @@ for SO in "$TMP"/lib/*/libgojni.so; do
   check Blackstone 'do not hack this protocol please' 1
   check viewTurbo  viewTurbo 1
   check fastup     fastup 1
-  check oppa       'oppa-mod/oppa' 1
+  # starifly 1.4.2-rev-24 does not ship the Oppa runtime marker;
+  # keep the historical check opt-in for older A01/mod baselines.
+  if [ "${EXPECT_OPPA_MARKER:-0}" = 1 ]; then
+    check oppa     'oppa-mod/oppa' 1
+  else
+    n=$(strings -a "$SO" | grep -c 'oppa-mod/oppa' || true)
+    echo "  [$abi] oppa (optional on rev24): $n"
+  fi
   check mihomo     'mihomo/1.19.25' 1
   echo "libgojni [$abi] 协议标记齐全"
 done

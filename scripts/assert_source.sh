@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Neko-UI 源码断言器：A01 基线上的 011–033 修复/功能锚点（CI 同款）。
+# Neko-UI 源码断言器：rev24 基线上的最终 UI/功能锚点（CI 同款）。
 #
 # 用法:
 #   bash scripts/assert_source.sh <上游源码目录>
@@ -196,4 +196,4 @@ grep -q 'val testConnection = {' "$C" || fail "033 shared test action missing"
 grep -q 'delayZone.setOnTouchListener(mirrorPress)' "$C" || fail "033 delay press mirror missing"
 grep -q 'speedZone.setOnTouchListener(mirrorPress)' "$C" || fail "033 speed press mirror missing"
 
-echo "== 源码断言全部通过（011–033）=="
+echo "== rev24 最终 UI/功能源码断言全部通过 =="

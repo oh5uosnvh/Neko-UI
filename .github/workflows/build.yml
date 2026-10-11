@@ -1,6 +1,6 @@
 name: Build from patches
 
-# NekoBoxF = immutable upstream A01  +  Neko-UI 33 UI patches
+# NekoBoxF = starifly 1.4.2-rev-24  +  final UI/function migration
 #            +  Nekobox-MG protocol mods (x365 / xhttp / shanlian / vt / fastup / oppa)
 #
 # The protocol mods are NOT baked into the upstream checkout: this workflow
@@ -13,11 +13,11 @@ on:
       upstream_repo:
         description: '上游源码仓库 (owner/name)'
         required: true
-        default: 'oh5uosnvh/NekoBoxForAndroid'
+        default: 'starifly/NekoBoxForAndroid'
       upstream_ref:
         description: '上游分支/标签/commit'
         required: true
-        default: 'f167ebc88e9a733e65380e13dab39726eba917b2'
+        default: '1.4.2-rev-24'
       mods_ref:
         description: 'Nekobox-MG ref (协议魔改源码, 空=HEAD)'
         required: false
@@ -133,10 +133,10 @@ jobs:
           cd upstream
           git checkout "$REF"
           git submodule update --init --recursive --jobs 8
-          ACTUAL_A01="f167ebc88e9a733e65380e13dab39726eba917b2"
-          if [ "$REPO" = "oh5uosnvh/NekoBoxForAndroid" ] && [ "$REF" = "$ACTUAL_A01" ]; then
-            test "$(git rev-parse HEAD)" = "$ACTUAL_A01" || {
-              echo "::error::requested A01 did not resolve to the immutable expected commit"; exit 1;
+          ACTUAL_REV24="a4c5072040329a68cc139d8823d016f8aeba6094"
+          if [ "$REPO" = "starifly/NekoBoxForAndroid" ] && [ "$REF" = "1.4.2-rev-24" ]; then
+            test "$(git rev-parse HEAD)" = "$ACTUAL_REV24" || {
+              echo "::error::1.4.2-rev-24 did not resolve to the expected immutable commit"; exit 1;
             }
           fi
           git log --oneline -1
@@ -163,7 +163,7 @@ jobs:
           #  a) upstream is a BARE NekoBoxForAndroid -> integrate.sh applies
           #     patches/000-integration.patch (40 modified files) then overlays
           #     files/ (12 new files).
-          #  b) upstream already carries the integration (tag A01 and friends)
+          #  b) upstream already carries the integration (rev24 and friends)
           #     -> patching again would conflict, so we only refresh the
           #     protocol sources from Nekobox-MG, which is what we actually
           #     want to ship.
@@ -209,12 +209,12 @@ jobs:
           cmp libcore/protocol/xhttp/cipher.go ../mods/Neko-xhttp/libcore/protocol/xhttp/cipher.go
           echo "x365 + Blackstone mods applied:"; git -C . diff --stat -- libcore app | tail -3
 
-      - name: Apply Neko-UI patches (33)
+      - name: Apply final UI/function migration
         run: |
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
 
-      - name: Assert A01 final 011-033 anchors (scripts/assert_source.sh)
+      - name: Assert final UI/function anchors (scripts/assert_source.sh)
         run: |
           bash "$GITHUB_WORKSPACE/scripts/assert_source.sh" upstream
 
@@ -352,7 +352,7 @@ jobs:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           set -euo pipefail
-          # A01 的 assets.sh 把 geoip/geosite 钉死在旧版本号（当年为躲 API 限流），
+          # rev24 的 assets.sh 把 geoip/geosite 钉死在旧版本号（当年为躲 API 限流），
           # 旧 release 一失效下载就 404。这里动态取最新 release 号替换——带 token
           # 防 runner 限流。geo 滚动更新后无需再手动修版本。
           cd upstream
@@ -375,7 +375,7 @@ jobs:
           # 保留 lintVital 的 fatal 检查关不动的部分。CI 不让 lint 噪音挡出包。
           sed -i 's/checkReleaseBuilds = true/checkReleaseBuilds = false/' \
             buildSrc/src/main/kotlin/Helpers.kt
-          # 双架构：A01 把 splits 钉死在 arm64-v8a；放开 armeabi-v7a，
+          # 双架构：rev24 把 splits 钉死在 arm64-v8a；放开 armeabi-v7a，
           # 一次 gradle 构建同时产出两个 ABI 的 split APK。
           sed -i 's/include("arm64-v8a")/include("arm64-v8a", "armeabi-v7a")/' \
             buildSrc/src/main/kotlin/Helpers.kt

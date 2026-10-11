@@ -3,10 +3,10 @@
 适用场景：上游（matsuridayo/NekoBoxForAndroid、starifly/NekoBoxForAndroid 或其他
 分支）发布了大更新，需要把本套改动移植到新版本上。
 
-> 本仓库的可复现最终基线不是上游 main，而是
-> `oh5uosnvh/NekoBoxForAndroid:A01`
-> （`f167ebc88e9a733e65380e13dab39726eba917b2`）。除非明确开始移植任务，
-> 不要把 A01 替换成 main 或 v0.9.x。
+> 本仓库当前源码基线是
+> `starifly/NekoBoxForAndroid:1.4.2-rev-24`
+> （`a4c5072040329a68cc139d8823d016f8aeba6094`）。UI/功能逻辑以旧版最终 033
+> 为来源，协议和构建管线独立保留；不要把当前源码回退到 A01。
 
 ## 前置输入
 

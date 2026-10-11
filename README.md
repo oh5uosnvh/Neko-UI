@@ -1,9 +1,12 @@
 # Neko-UI
 
-NekoBoxF 的 UI 定制补丁与构建管线。唯一基线是上游 `A01` tag 的不可变提交
-`f167ebc88e9a733e65380e13dab39726eba917b2`，共 33 个补丁按序应用即得最终成品。
+NekoBoxF 的 UI 定制补丁与构建管线。
 
-**当前最终基线：A01（f167ebc）** · APK 见 [Releases](../../releases)
+**当前源码基线**：上游 `starifly/NekoBoxForAndroid` Release
+`1.4.2-rev-24`，提交 `a4c5072040329a68cc139d8823d016f8aeba6094`。
+
+**UI/功能逻辑基线**：我们最后验证过的 033 版本；协议魔改和构建注入继续沿用
+Nekobox-MG。旧 A01 方案仅保存在 `patches/legacy-a01/`，不再作为默认源码基线。
 
 ## 功能规格（8 项）
 
@@ -54,21 +57,21 @@ NekoBoxF 的 UI 定制补丁与构建管线。唯一基线是上游 `A01` tag �
 | 030 | “始终显示地址”免重启即时生效；连接栏速度区点按=延迟测试（整条按压底色保留） |
 | 031 | 显示开关即时生效修补：configurationStore 监听 + 分组页刷新传播（onResume 缺口） |
 | 032 | 精确滚动度量滑块：修复路由页滑块卡中部/配置页触摸滑块上跳 |
-| 033 | 滚动条拖动保持抓取点；配置页/路由页统一跟手；速度区与实时延迟区统一触发延迟测试和整栏按压底色 |
+| rev24-ui | 将最终 033 UI/功能逻辑移植到 1.4.2-rev-24；配置页、分组页、侧边栏缓存、连接栏、滚动条、顶栏控件统一整理 |
 
 ## 构建
 
 ```bash
-git clone --recurse-submodules https://github.com/oh5uosnvh/NekoBoxForAndroid.git upstream
-cd upstream && git checkout f167ebc88e9a733e65380e13dab39726eba917b2
-python3 ../scripts/apply_all.py                # 应用 33 补丁（--check 仅预检；自动发现 patches/NNN-*.patch）
-bash ../scripts/assert_source.sh .             # 011–033 源码锚点校验（CI 同款）
+git clone --recurse-submodules https://github.com/starifly/NekoBoxForAndroid.git upstream
+cd upstream && git checkout a4c5072040329a68cc139d8823d016f8aeba6094
+python3 ../scripts/apply_all.py                # 应用最新 UI 移植补丁
+bash ../scripts/assert_source.sh .             # 最新 UI 源码锚点校验（CI 同款）
 ./run init action gradle && ./gradlew app:assemblePreviewRelease   # release=R8；双 ABI（arm64-v8a + armeabi-v7a）各一 APK
 python3 ../scripts/verify_build.py <apk>       # 成品校验（dex 锚点 + libgojni 标记）
 ```
 
 云端：Actions → **Build from patches** → Run（默认锁定
-`upstream_ref=f167ebc88e9a733e65380e13dab39726eba917b2`）。
+`upstream_ref=1.4.2-rev-24`）。
 CI 产出 **release 签名双架构包**（稳定 keystore 存于私有 Nekobox-MG `keystore/`，
 覆盖安装友好；debug 构建的 runner 随机调试签名已废弃）：
 `NekoBoxF-mod-rN-arm64-v8a.apk` + `NekoBoxF-mod-rN-armeabi-v7a.apk` + SHA256 清单。
@@ -78,7 +81,7 @@ CI 产出 **release 签名双架构包**（稳定 keystore 存于私有 Nekobox-
 ```bash
 bash scripts/assert_apk.sh <apk>               # 全套成品断言（CI 同款）
 python3 scripts/verify_build.py <apk>          # 仅成品校验
-bash scripts/assert_source.sh <上游树>          # 011–033 源码锚点（CI 同款）
+bash scripts/assert_source.sh <上游树>          # rev24 最终 UI/功能锚点（CI 同款）
 ```
 
 - dex 必需符号 9 项（含 `armFallback`/`applyGroupCounts`）
@@ -108,4 +111,4 @@ bash scripts/assert_source.sh <上游树>          # 011–033 源码锚点（CI
 | 版本 | 日期 | 说明 |
 |---|---|---|
 | 0.01 | 2026-10-06 | 首个发布：8 项规格全量；拖动排序回归官方手感（松手落库+广播）；☴ 行名称·数量；20/20 兜底装载 |
-| A01-final / r51 | 2026-10-11 | 以真实 A01（f167ebc）为基线的最终整理版；033 滚动条抓取点修复、速度/延迟统一测试；CI #51 双 ABI 全绿 |
+| rev24-ui-final | 2026-10-11 | 以 starifly 1.4.2-rev-24 为源码基线，移植最终 033 UI/功能逻辑；协议与构建管线保持 Nekobox-MG 方案 |

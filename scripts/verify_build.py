@@ -10,6 +10,7 @@
   4) 全部 libgojni.so 协议 mod 标记（x365/viewTurbo/fastup/oppa-mod/mihomo 伪装）
      ——双架构 split 包各含一个 ABI 的 so，逐个校验（未来 universal 包全覆盖）
 """
+import os
 import sys
 import zipfile
 
@@ -27,7 +28,8 @@ FORBIDDEN_DEX = [
     b"sharedRecycledViewPool", b"ensureProfilesLoaded", b"startPageWarmUp",
     b"sortButton", b"groupSort",
 ]
-REQUIRED_SO = [b"x365", b"viewTurbo", b"fastup", b"oppa-mod/oppa", b"mihomo/1.19.25"]
+REQUIRED_SO = [b"x365", b"viewTurbo", b"fastup", b"mihomo/1.19.25"]
+OPTIONAL_SO = [b"oppa-mod/oppa"]
 
 
 def main() -> int:
@@ -62,6 +64,11 @@ def main() -> int:
             hit = m in so
             print(f"[{'OK ' if hit else 'MISS'}] libgojni 标记 {m.decode()}  ({n})")
             ok &= hit
+        for m in OPTIONAL_SO:
+            hit = m in so
+            print(f"[{'OK ' if hit else 'SKIP'}] 可选 libgojni 标记 {m.decode()}  ({n})")
+            if os.environ.get("EXPECT_OPPA_MARKER") == "1":
+                ok &= hit
 
     print("\n结论:", "PASS — 无瑕疵成品" if ok else "FAIL — 见上方 BAD/MISS 项")
     return 0 if ok else 1
