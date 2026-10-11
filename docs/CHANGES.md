@@ -408,6 +408,25 @@
 
 ---
 
+### AA. 最终修订 033：滚动条抓取点锚定 + 速度/延迟统一测试
+
+- **基线**：上游 `oh5uosnvh/NekoBoxForAndroid` 的 `A01` tag，固定提交
+  `f167ebc88e9a733e65380e13dab39726eba917b2`；033 不升级到上游 main。
+- **滚动条根因**：官方 `FastScrollRecyclerView` 在触摸开始时把当前 `lastY` 与
+  `downY` 的位移再次加入 `mTouchOffset`，导致手指按在滑块中部后第一次移动就
+  跳离触点。配置页与路由页原先虽共用库，但变高卡片的估算滚动范围又让跳动更明显。
+- **修复**：`ExactScrollRecyclerView` 记录 `grabOffset`，首次 MOVE 抵消重复位移，
+  拖动期间锁定抓取点；命中区按 density 计算并兼容 RTL；非拖动时继续使用真实
+  `computeVerticalScrollOffset / (range - extent)` 绘制滑块，避免破坏 RecyclerView
+  的官方布局事务。
+- **连接栏**：速度区与实时延迟区共用 `testConnection` 和 `mirrorPress`，两者均触发
+  延迟测试、`setTesting()`、`onTestConnection` 以及整栏按压底色；删除延迟区独立
+  ripple，保证视觉和行为统一。
+- **红线**：禁止在拖动路径重新引入 `scrollBy()`；禁止两个信息区出现不同测试入口；
+  必须保留 033 的触摸命中、抓取偏移和 RTL 分支。
+- **验证**：A01 干净树按序应用 001–033 全部 CLEAN；源码断言 011–033 通过；CI #51
+  的 x365 wire tests、R8 release、arm64-v8a、armeabi-v7a 全部成功。
+
 ## 移植到新上游时的冲突热区（按历史经验排序）
 
 1. `ConfigurationFragment.kt` —— 改动最频繁。策略：先保证切换路径=官方原文，

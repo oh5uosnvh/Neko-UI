@@ -56,6 +56,163 @@ index c84919c..6a4db64 100644
 -          overwrite_files: true
 -        env:
 -          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/Constants.kt b/app/src/main/java/io/nekohasekai/sagernet/Constants.kt
+index 1b2e834..a53f14a 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/Constants.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/Constants.kt
+@@ -73,7 +73,6 @@ object Key {
+ 
+     const val ACQUIRE_WAKE_LOCK = "acquireWakeLock"
+     const val HIDE_FROM_RECENT_APPS = "hideFromRecentApps"
+-    const val SHOW_BOTTOM_BAR = "showBottomBar"
+     const val CONFIRM_PROFILE_DELETE = "confirmProfileDelete"
+     const val GROUP_LAYOUT_MODE = "groupLayoutMode"
+     const val PROFILE_CARD_STYLE = "profileCardStyle"
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/bg/proto/TestInstance.kt b/app/src/main/java/io/nekohasekai/sagernet/bg/proto/TestInstance.kt
+index bc69071..d63fdd2 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/bg/proto/TestInstance.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/bg/proto/TestInstance.kt
+@@ -5,35 +5,71 @@ import io.nekohasekai.sagernet.bg.GuardedProcessPool
+ import io.nekohasekai.sagernet.database.ProxyEntity
+ import io.nekohasekai.sagernet.fmt.buildConfig
+ import io.nekohasekai.sagernet.ktx.Logs
+-import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+-import io.nekohasekai.sagernet.ktx.tryResume
+-import io.nekohasekai.sagernet.ktx.tryResumeWithException
++import kotlinx.coroutines.DelicateCoroutinesApi
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.GlobalScope
+ import kotlinx.coroutines.delay
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.suspendCancellableCoroutine
++import kotlinx.coroutines.withContext
+ import libcore.Libcore
+ import moe.matsuri.nb4a.net.LocalResolverImpl
+-import kotlin.coroutines.suspendCoroutine
++import java.util.concurrent.atomic.AtomicBoolean
++import kotlin.coroutines.CoroutineContext
+ 
+ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: Int) :
+     BoxInstance(profile) {
+ 
+-    suspend fun doTest(): Int {
+-        return suspendCoroutine { c ->
++    private val closed = AtomicBoolean(false)
++
++    // 013: 取消时最多关一次。close() 自带全套守卫（processes/box 未初始化自动跳过），
++    // 在测的 Go urlTest 会被 close 打断并立即报错返回。
++    private fun closeOnce() {
++        if (!closed.compareAndSet(false, true)) return
++        runCatching { close() }
++    }
++
++    /**
++     * 013 连接测试提速 + 取消即停：
++     * - context 为每轮测试专用的阻塞线程池（ConfigurationFragment.urlTest 创建）。
++     *   旧实现把 init/launch/Libcore.urlTest 整条链跑在 Dispatchers.Default 上：
++     *   每个在测实例钉死一个 Default 线程直到 HTTP 完成/超时，有效并发被 CPU 核数
++     *   封顶 —— 这就是"并发设置开再高，测速还是慢"的根因。
++     * - suspendCancellableCoroutine + invokeOnCancellation：取消瞬间关闭实例，
++     *   Go 侧 urlTest 立刻返回错误。旧实现取消后实例继续跑到 connectionTestTimeout，
++     *   僵尸实例霸占全部 Default 线程 —— 这就是"取消后重测 2~3 秒空档"的根因。
++     *   真实 HTTP 延迟测量路径（经代理 GET 测试 URL）零改动。
++     * - resume 用 resumeWith + 吃 IllegalStateException（协程已取消时静默丢弃结果），
++     *   不碰 CancellableContinuation 自带的内部 API tryResume。
++     */
++    @OptIn(DelicateCoroutinesApi::class)
++    suspend fun doTest(context: CoroutineContext): Int {
++        return suspendCancellableCoroutine { c ->
++            c.invokeOnCancellation { closeOnce() }
+             processes = GuardedProcessPool {
+                 Logs.w(it)
+-                c.tryResumeWithException(it)
++                runCatching { c.resumeWith(Result.failure(it)) }
+             }
+-            runOnDefaultDispatcher {
++            // 外层跑 Default，阻塞段用 withContext 进专用池：池被提前关闭时
++            // withContext 抛 RejectedExecutionException，走 catch 干净失败，
++            // 不在 dispatch 阶段炸协程。
++            GlobalScope.launch(Dispatchers.Default) {
+                 use {
+                     try {
+-                        init()
+-                        launch()
++                        withContext(context) {
++                            init()
++                            launch()
++                        }
+                         if (processes.processCount > 0) {
+                             // wait for plugin start
+                             delay(500)
+                         }
+-                        c.tryResume(Libcore.urlTest(box, link, timeout))
++                        val latency = withContext(context) {
++                            Libcore.urlTest(box, link, timeout)
++                        }
++                        c.resumeWith(Result.success(latency))
+                     } catch (e: Exception) {
+-                        c.tryResumeWithException(e)
++                        runCatching { c.resumeWith(Result.failure(e)) }
+                     }
+                 }
+             }
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/bg/proto/UrlTest.kt b/app/src/main/java/io/nekohasekai/sagernet/bg/proto/UrlTest.kt
+index 24fa559..1fd2818 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/bg/proto/UrlTest.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/bg/proto/UrlTest.kt
+@@ -2,14 +2,17 @@ package io.nekohasekai.sagernet.bg.proto
+ 
+ import io.nekohasekai.sagernet.database.DataStore
+ import io.nekohasekai.sagernet.database.ProxyEntity
++import kotlin.coroutines.CoroutineContext
+ 
+-class UrlTest {
++// 013: context = 每轮测试专用的阻塞线程池（ConfigurationFragment.urlTest 创建，
++// 测完/取消后关闭）。不再占用 Dispatchers.Default。
++class UrlTest(private val context: CoroutineContext) {
+ 
+     val link = DataStore.connectionTestURL
+     private val timeout = DataStore.connectionTestTimeout
+ 
+     suspend fun doTest(profile: ProxyEntity): Int {
+-        return TestInstance(profile, link, timeout).doTest()
++        return TestInstance(profile, link, timeout).doTest(context)
+     }
+ 
+ }
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/database/DataStore.kt b/app/src/main/java/io/nekohasekai/sagernet/database/DataStore.kt
+index ce1d57b..e27d3a0 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/database/DataStore.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/database/DataStore.kt
+@@ -90,7 +90,6 @@ object DataStore : OnPreferenceDataStoreChangeListener {
+ 
+     var appTLSVersion by configurationStore.string(Key.APP_TLS_VERSION)
+     var enableClashAPI by configurationStore.boolean(Key.ENABLE_CLASH_API)
+-    var showBottomBar by configurationStore.boolean(Key.SHOW_BOTTOM_BAR)
+     var confirmProfileDelete by configurationStore.boolean(Key.CONFIRM_PROFILE_DELETE) { true }
+     var groupLayoutMode by configurationStore.stringToInt(Key.GROUP_LAYOUT_MODE) { 0 }
+     var profileCardStyle by configurationStore.stringToInt(Key.PROFILE_CARD_STYLE) { 0 }
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/group/GroupUpdater.kt b/app/src/main/java/io/nekohasekai/sagernet/group/GroupUpdater.kt
+index 426e3d7..9e0891e 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/group/GroupUpdater.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/group/GroupUpdater.kt
+@@ -163,7 +163,15 @@ abstract class GroupUpdater {
+         suspend fun finishUpdate(proxyGroup: ProxyGroup) {
+             updating.remove(proxyGroup.id)
+             progress.remove(proxyGroup.id)
+-            GroupManager.postUpdate(proxyGroup)
++            // 修复：广播数据库中的最新持久化对象，而不是调用方手里的同一实例。
++            // 官方 groupUpdated 无条件重绑；Neko-UI 003 为消除拖动落库后的卡片
++            // 闪烁，对“同一实例回声”做了去重（groupList[index] === group 直接
++            // return）。而 startUpdate 传入的正是分组卡片适配器列表里的同一个
++            // 对象——更新完成的通知因此被当作回声吞掉，卡片顶部的更新进度条
++            // 再也没有机会收起（表现：订阅内容已更新，进度条永远转圈）。
++            // 改为经 postUpdate(groupId) 从数据库重取后广播：完成通知不再是
++            // 同一实例，重绑必然发生；拖动去重逻辑不受任何影响。
++            GroupManager.postUpdate(proxyGroup.id)
+         }
+ 
+     }
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt
 index 75a64a8..624643b 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt
@@ -87,10 +244,21 @@ index 75a64a8..624643b 100644
          super.onViewCreated(view, savedInstanceState)
  
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
-index afd90b7..c19813d 100644
+index afd90b7..571e6b9 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
 +++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
-@@ -40,6 +40,7 @@ import androidx.preference.PreferenceDataStore
+@@ -29,6 +29,10 @@ import androidx.appcompat.widget.PopupMenu
+ import androidx.appcompat.widget.SearchView
+ import androidx.appcompat.widget.Toolbar
+ import androidx.core.graphics.ColorUtils
++import androidx.core.view.ViewCompat
++import androidx.core.view.WindowInsetsCompat
++import androidx.core.view.updatePadding
++import com.google.android.material.snackbar.Snackbar
+ import androidx.core.net.toUri
+ import androidx.core.view.isGone
+ import androidx.core.view.isVisible
+@@ -40,6 +44,7 @@ import androidx.preference.PreferenceDataStore
  import androidx.recyclerview.widget.ItemTouchHelper
  import androidx.recyclerview.widget.LinearLayoutManager
  import androidx.recyclerview.widget.RecyclerView
@@ -98,24 +266,90 @@ index afd90b7..c19813d 100644
  import androidx.viewpager2.adapter.FragmentStateAdapter
  import androidx.viewpager2.widget.ViewPager2
  import com.google.android.material.card.MaterialCardView
-@@ -520,15 +521,7 @@ class ConfigurationFragment @JvmOverloads constructor(
-             tab.view.setOnLongClickListener {
+@@ -112,6 +117,7 @@ import kotlinx.coroutines.CompletableDeferred
+ import kotlinx.coroutines.DelicateCoroutinesApi
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.Job
++import kotlinx.coroutines.asCoroutineDispatcher
+ import kotlinx.coroutines.channels.Channel
+ import kotlinx.coroutines.isActive
+ import kotlinx.coroutines.joinAll
+@@ -135,6 +141,8 @@ import java.net.URLDecoder
+ import java.net.UnknownHostException
+ import java.util.concurrent.ConcurrentHashMap
+ import java.util.concurrent.ConcurrentLinkedQueue
++import java.util.concurrent.Executors
++import java.util.concurrent.atomic.AtomicBoolean
+ import java.util.concurrent.atomic.AtomicInteger
+ import java.util.concurrent.atomic.AtomicLong
+ import java.util.zip.ZipInputStream
+@@ -225,7 +233,9 @@ class ConfigurationFragment @JvmOverloads constructor(
+ 
+     /** 🔍 那个可折叠菜单项，收起搜索框时要用它 collapseActionView() */
+ 
+-    val alwaysShowAddress by lazy { DataStore.alwaysShowAddress }
++    // 030: 实时读取——旧的 by lazy 首访后缓存，设置里开关后必须重启才生效
++    val alwaysShowAddress get() = DataStore.alwaysShowAddress
++    private var lastAppliedAlwaysShowAddress = DataStore.alwaysShowAddress
+ 
+     @Volatile
+     private var selectedProxySnapshot = selectedItem?.id ?: 0L
+@@ -509,6 +519,9 @@ class ConfigurationFragment @JvmOverloads constructor(
+         adapter = GroupPagerAdapter()
+         ProfileManager.addListener(adapter)
+         GroupManager.addListener(adapter)
++        // 031: “始终显示地址”等显示开关即时生效——监听配置存储，变化即刷新所有
++        // 已创建分组页的卡片（不等返回页面，更不等重启）
++        DataStore.configurationStore.registerChangeListener(displayPrefListener)
+ 
+         groupPager.adapter = adapter
+         groupPager.offscreenPageLimit = 2
+@@ -517,18 +530,28 @@ class ConfigurationFragment @JvmOverloads constructor(
+             if (adapter.groupList.size > position) {
+                 tab.text = adapter.groupList[position].displayName()
+             }
+-            tab.view.setOnLongClickListener {
++            tab.view.setOnLongClickListener { v ->
                  if (position in adapter.groupList.indices) {
                      val group = adapter.groupList[position]
 -                    val targetFragment = io.nekohasekai.sagernet.ui.GroupFragment().apply {
 -                        arguments = Bundle().apply {
 -                            putLong(io.nekohasekai.sagernet.ui.GroupFragment.EXTRA_TARGET_GROUP_ID, group.id)
--                        }
--                    }
++                    // 018: 长按分组标签 → 编辑 / 跳转 / 删除（删除带还原）
++                    val popup = PopupMenu(requireContext(), v)
++                    popup.menu.add(0, 1, 0, R.string.edit)
++                    popup.menu.add(0, 2, 1, R.string.jump_to_group)
++                    popup.menu.add(0, 3, 2, R.string.delete)
++                    popup.setOnMenuItemClickListener { mi ->
++                        when (mi.itemId) {
++                            1 -> context?.startActivity(
++                                Intent(context, GroupSettingsActivity::class.java)
++                                    .putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, group.id)
++                            )
++
++                            2 -> (activity as? MainActivity)?.openGroupAt(group.id)
++
++                            3 -> deleteGroupWithUndo(group)
+                         }
++                        true
+                     }
 -                    (activity as? MainActivity)?.apply {
 -                        displayFragment(targetFragment)
 -                        navigation.menu.findItem(R.id.nav_group)?.isChecked = true
 -                    }
-+                    (activity as? MainActivity)?.openGroupAt(group.id)
++                    popup.show()
                  }
                  true
              }
-@@ -616,6 +609,41 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -598,6 +621,7 @@ class ConfigurationFragment @JvmOverloads constructor(
+ 
+     override fun onDestroy() {
+         DataStore.profileCacheStore.unregisterChangeListener(this)
++        DataStore.configurationStore.unregisterChangeListener(displayPrefListener)
+ 
+         if (::groupPager.isInitialized) {
+             try {
+@@ -616,6 +640,41 @@ class ConfigurationFragment @JvmOverloads constructor(
          super.onDestroy()
      }
  
@@ -157,7 +391,324 @@ index afd90b7..c19813d 100644
      override fun onKeyDown(ketCode: Int, event: KeyEvent): Boolean {
          val fragment = getCurrentGroupFragment()
          fragment?.configurationListView?.apply {
-@@ -1529,8 +1557,9 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -967,21 +1026,44 @@ class ConfigurationFragment @JvmOverloads constructor(
+                             MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
+                                 .setMessage(R.string.delete_confirm_prompt)
+                                 .setPositiveButton(R.string.yes) { _, _ ->
+-                                    for (profile in toClear) {
+-                                        adapter.groupFragments[DataStore.selectedGroup]?.adapter?.apply {
+-                                            val index = configurationIdList.indexOf(profile.id)
++                                    // 014: 与滑动删除同一撤销通道 —— 卡片即时移除 +
++                                    // "已删除 N 项 | 还原" snackbar；snackbar 消失后
++                                    // 才经 undoManager.commit 真正删库。被过滤隐藏、
++                                    // 无卡可还原的节点维持旧的立即删除语义。
++                                    val groupFragment =
++                                        adapter.groupFragments[DataStore.selectedGroup]
++                                    val currentAdapter = groupFragment?.adapter
++                                    val visible = mutableListOf<Pair<Int, ProxyEntity>>()
++                                    val invisible = mutableListOf<ProxyEntity>()
++                                    if (currentAdapter != null) {
++                                        for (profile in toClear) {
++                                            val index =
++                                                currentAdapter.configurationIdList.indexOf(profile.id)
+                                             if (index >= 0) {
+-                                                configurationIdList.removeAt(index)
+-                                                configurationList.remove(profile.id)
+-                                                notifyItemRemoved(index)
++                                                // 逐个移除再取下一个 index，避免位移错位
++                                                currentAdapter.remove(index)
++                                                visible.add(index to profile)
++                                            } else {
++                                                invisible.add(profile)
+                                             }
+                                         }
++                                    } else {
++                                        invisible.addAll(toClear)
+                                     }
+-                                    runOnDefaultDispatcher {
+-                                        for (profile in toClear) {
+-                                            ProfileManager.deleteProfile2(
+-                                                profile.groupId, profile.id
+-                                            )
++                                    if (visible.isNotEmpty() && groupFragment?.isUndoReady() == true) {
++                                        groupFragment.undoManager.remove(visible)
++                                    } else {
++                                        visible.forEach {
++                                            runOnDefaultDispatcher {
++                                                ProfileManager.deleteProfile2(
++                                                    it.second.groupId, it.second.id
++                                                )
++                                            }
++                                        }
++                                    }
++                                    invisible.forEach {
++                                        runOnDefaultDispatcher {
++                                            ProfileManager.deleteProfile2(it.groupId, it.id)
+                                         }
+                                     }
+                                 }
+@@ -1019,21 +1101,40 @@ class ConfigurationFragment @JvmOverloads constructor(
+                                             }.joinToString("\n")
+                                 )
+                                 .setPositiveButton(R.string.yes) { _, _ ->
+-                                    for (profile in toClear) {
+-                                        adapter.groupFragments[DataStore.selectedGroup]?.adapter?.apply {
+-                                            val index = configurationIdList.indexOf(profile.id)
++                                    // 014: 与清理不可用同一撤销通道（可见卡片可还原）。
++                                    val groupFragment =
++                                        adapter.groupFragments[DataStore.selectedGroup]
++                                    val currentAdapter = groupFragment?.adapter
++                                    val visible = mutableListOf<Pair<Int, ProxyEntity>>()
++                                    val invisible = mutableListOf<ProxyEntity>()
++                                    if (currentAdapter != null) {
++                                        for (profile in toClear) {
++                                            val index =
++                                                currentAdapter.configurationIdList.indexOf(profile.id)
+                                             if (index >= 0) {
+-                                                configurationIdList.removeAt(index)
+-                                                configurationList.remove(profile.id)
+-                                                notifyItemRemoved(index)
++                                                currentAdapter.remove(index)
++                                                visible.add(index to profile)
++                                            } else {
++                                                invisible.add(profile)
+                                             }
+                                         }
++                                    } else {
++                                        invisible.addAll(toClear)
+                                     }
+-                                    runOnDefaultDispatcher {
+-                                        for (profile in toClear) {
+-                                            ProfileManager.deleteProfile2(
+-                                                profile.groupId, profile.id
+-                                            )
++                                    if (visible.isNotEmpty() && groupFragment?.isUndoReady() == true) {
++                                        groupFragment.undoManager.remove(visible)
++                                    } else {
++                                        visible.forEach {
++                                            runOnDefaultDispatcher {
++                                                ProfileManager.deleteProfile2(
++                                                    it.second.groupId, it.second.id
++                                                )
++                                            }
++                                        }
++                                    }
++                                    invisible.forEach {
++                                        runOnDefaultDispatcher {
++                                            ProfileManager.deleteProfile2(it.groupId, it.id)
+                                         }
+                                     }
+                                 }
+@@ -1106,12 +1207,43 @@ class ConfigurationFragment @JvmOverloads constructor(
+         var notification: ConnectionTestNotification? = null
+ 
+         val results: MutableSet<ProxyEntity> = ConcurrentHashMap.newKeySet()
++        private val flushScheduled = AtomicBoolean(false)
++        private val resultsLock = Any()
+         var proxyN = 0
+         val finishedN = AtomicInteger(0)
+ 
++        // 012: 单个节点测完即防抖批量回写（250ms 合并窗口）。
++        // 行延迟经 ProfileManager.onUpdated 定点刷新，实时变化；
++        // 不再等全部测完/取消后串行回写（旧实现 180 节点要等 2~3 秒才变化）。
++        fun scheduleFlush() {
++            if (dialogStatus.get() == 2) return
++            if (!flushScheduled.compareAndSet(false, true)) return
++            runOnDefaultDispatcher {
++                delay(250)
++                flushScheduled.set(false)
++                flushPending()
++            }
++        }
++
++        // 取出当前累积结果一次性批量落库；cancel 收尾也复用同一入口。
++        suspend fun flushPending() {
++            val snapshot = synchronized(resultsLock) {
++                val copy = ArrayList(results)
++                results.clear()
++                copy
++            }
++            if (snapshot.isEmpty()) return
++            try {
++                ProfileManager.updateProfile(snapshot)
++            } catch (e: Exception) {
++                Logs.w(e)
++            }
++        }
++
+         fun update(profile: ProxyEntity) {
+             if (dialogStatus.get() != 2) {
+-                results.add(profile)
++                synchronized(resultsLock) { results.add(profile) }
++                scheduleFlush()
+             }
+             runOnMainDispatcher {
+                 val context = context ?: return@runOnMainDispatcher
+@@ -1301,18 +1433,15 @@ class ConfigurationFragment @JvmOverloads constructor(
+         test.cancel = {
+             test.dialogStatus.set(2)
+             dialog.dismiss()
++            // 012: 先放行下一次测试（空档期≈0）；取消与回写全部后台收尾。
++            // 进行中的 urlTest 实例最多再跑自身超时（默认 3s）后自行关闭，不阻塞新测试。
++            DataStore.runningTest = false
+             runOnDefaultDispatcher {
+                 mainJob.cancel()
+                 testJobs.forEach { it.cancel() }
+-                test.results.forEach {
+-                    try {
+-                        ProfileManager.updateProfile(it)
+-                    } catch (e: Exception) {
+-                        Logs.w(e)
+-                    }
+-                }
++                // update() 已在测试过程中实时批量落库；这里只补冲最后一批收尾结果。
++                test.flushPending()
+                 GroupManager.postReload(DataStore.currentGroupId())
+-                DataStore.runningTest = false
+             }
+         }
+         test.minimize = {
+@@ -1332,6 +1461,15 @@ class ConfigurationFragment @JvmOverloads constructor(
+         val dialog = test.builder.show()
+         val testJobs = mutableListOf<Job>()
+         val group = DataStore.currentGroup()
++        // 013: 单实例测试的 init/launch/Libcore.urlTest 全程占用一个线程；旧实现把
++        // 这条阻塞链跑在 Dispatchers.Default 上，有效并发被 CPU 核数封顶（并发设置
++        // 开再高也快不起来），且取消后的僵尸实例霸占全部 Default 线程直到超时
++        // （取消后重测 2~3 秒空档的根因）。改为专用阻塞池：测试实例为无入站轻量
++        // 配置，16 路（≈2×CPU 核数）内存安全；真实 HTTP 延迟测量路径零改动。
++        // 两条收尾路径（自然测完 / 用户取消）都会经 test.cancel 关闭池子。
++        val testPool = Executors.newFixedThreadPool(
++            DataStore.connectionTestConcurrent.coerceIn(1, 16)
++        ).asCoroutineDispatcher()
+ 
+         val mainJob = runOnDefaultDispatcher {
+             val profilesList = SagerDatabase.proxyDao.getByGroup(group.id)
+@@ -1339,7 +1477,7 @@ class ConfigurationFragment @JvmOverloads constructor(
+             val profiles = ConcurrentLinkedQueue(profilesList)
+             repeat(DataStore.connectionTestConcurrent) {
+                 testJobs.add(launch(Dispatchers.IO) {
+-                    val urlTest = UrlTest() // note: this is NOT in bg process
++                    val urlTest = UrlTest(testPool) // note: this is NOT in bg process
+                     while (isActive) {
+                         val profile = profiles.poll() ?: break
+                         profile.status = 0
+@@ -1370,18 +1508,18 @@ class ConfigurationFragment @JvmOverloads constructor(
+         test.cancel = {
+             test.dialogStatus.set(2)
+             dialog.dismiss()
++            // 012: 先放行下一次测试（空档期≈0）；取消与回写全部后台收尾。
++            // 013: 僵尸实例已由 TestInstance.invokeOnCancellation 即时关闭，
++            // 这里同步关闭专用测试池；Default 线程不再被占坑，postReload 的
++            // 后台 DiffUtil 不再被饿死。
++            DataStore.runningTest = false
++            runCatching { testPool.close() }
+             runOnDefaultDispatcher {
+                 mainJob.cancel()
+                 testJobs.forEach { it.cancel() }
+-                test.results.forEach {
+-                    try {
+-                        ProfileManager.updateProfile(it)
+-                    } catch (e: Exception) {
+-                        Logs.w(e)
+-                    }
+-                }
++                // update() 已在测试过程中实时批量落库；这里只补冲最后一批收尾结果。
++                test.flushPending()
+                 GroupManager.postReload(DataStore.currentGroupId())
+-                DataStore.runningTest = false
+             }
+         }
+         test.minimize = {
+@@ -1394,6 +1532,87 @@ class ConfigurationFragment @JvmOverloads constructor(
+         }
+     }
+ 
++    /** 018: 长按分组标签 → 删除分组（带还原）。snackbar 超时（或滑动消失）后不可恢复。 */
++    fun deleteGroupWithUndo(group: ProxyGroup) {
++        runOnDefaultDispatcher {
++            val profiles = SagerDatabase.proxyDao.getByGroup(group.id)
++            val wasCurrent = DataStore.currentGroupId() == group.id
++            // 022: 记录删除前的标签位置 —— 还原必须回到原位（对齐节点卡片撤销语义）
++            val position = adapter.groupList.indexOfFirst { it.id == group.id }
++            GroupManager.deleteGroup(group.id)
++            if (wasCurrent) {
++                // 删除的是当前分组 → 先切到第一个剩余分组，避免 pager 悬在已删分组
++                SagerDatabase.groupDao.allGroups().firstOrNull()?.let {
++                    DataStore.selectedGroup = it.id
++                }
++            }
++            onMainDispatcher {
++                if (!isAdded) return@onMainDispatcher
++                snackbar(getString(R.string.group_deleted_undo, group.displayName())).apply {
++                    setAction(R.string.undo) {
++                        runOnDefaultDispatcher {
++                            restoreGroup(group, profiles, wasCurrent, position)
++                        }
++                    }
++                    duration = Snackbar.LENGTH_LONG
++                }.show()
++            }
++        }
++    }
++
++    /** 018/022: 还原刚删除的分组（按原 id 回插 + **原位插回标签条**，节点随组恢复）。
++     *  020 修复「点了还原但毫无变化」：pager 只认 groupAdd/groupRemoved
++     *  （groupUpdated(groupId) 是空实现）。
++     *  022 修复「还原被丢到末尾」：groupAdd 永远加在尾部——改为 restoreGroupAt
++     *  按删除前记录的位置原位插回（对齐节点卡片撤销的原位语义）。 */
++    private suspend fun restoreGroup(
++        group: ProxyGroup, profiles: List<ProxyEntity>, wasCurrent: Boolean, position: Int,
++    ) {
++        runCatching {
++            SagerDatabase.groupDao.createGroup(group)
++            if (profiles.isNotEmpty()) {
++                SagerDatabase.proxyDao.insert(profiles)
++            }
++            if (wasCurrent) {
++                DataStore.selectedGroup = group.id
++            }
++            onMainDispatcher {
++                adapter.restoreGroupAt(group, position)
++            }
++            GroupManager.postReload(group.id)
++        }.onFailure {
++            Logs.w(it)
++        }
++    }
++
++    override fun onResume() {
++        super.onResume()
++        // 030/031: 兜底——从设置返回时若开关变化，立即刷新当前页卡片
++        if (lastAppliedAlwaysShowAddress != DataStore.alwaysShowAddress) {
++            lastAppliedAlwaysShowAddress = DataStore.alwaysShowAddress
++            runOnMainDispatcher {
++                if (!isAdded) return@runOnMainDispatcher
++                adapter.groupFragments.values.forEach { page ->
++                    runCatching { page.adapter?.reloadProfiles() }
++                }
++            }
++        }
++    }
++
++    // 031: 显示开关变化 → 刷新所有已创建分组页的卡片（地址行显隐 + 行高）
++    private val displayPrefListener = object : OnPreferenceDataStoreChangeListener {
++        override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
++            if (key != Key.ALWAYS_SHOW_ADDRESS) return
++            lastAppliedAlwaysShowAddress = DataStore.alwaysShowAddress
++            runOnMainDispatcher {
++                if (!isAdded || !::adapter.isInitialized) return@runOnMainDispatcher
++                adapter.groupFragments.values.forEach { page ->
++                    runCatching { page.adapter?.reloadProfiles() }
++                }
++            }
++        }
++    }
++
+     inner class GroupPagerAdapter : FragmentStateAdapter(this),
+         ProfileManager.Listener,
+         GroupManager.Listener {
+@@ -1529,8 +1748,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                      tabLayout.visibility = View.VISIBLE
                  }
  
@@ -169,7 +720,26 @@ index afd90b7..c19813d 100644
              }
          }
  
-@@ -1555,9 +1584,74 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -1544,6 +1764,18 @@ class ConfigurationFragment @JvmOverloads constructor(
+             }
+         }
+ 
++        /** 022: 分组删除还原 —— 按删除前的位置原位插回（groupAdd 只会加到尾部）。 */
++        fun restoreGroupAt(group: ProxyGroup, index: Int) {
++            if (groupList.any { it.id == group.id }) return
++            tabLayout.post {
++                val at = index.coerceIn(0, groupList.size)
++                groupList.add(at, group)
++                notifyItemInserted(at)
++                if (groupList.any { !it.ungrouped }) tabLayout.visibility = View.VISIBLE
++                tabLayout.getTabAt(at)?.select()
++            }
++        }
++
+         override suspend fun groupUpdated(group: ProxyGroup) {
+             val index = groupList.indexOfFirst { it.id == group.id }
+             if (index == -1) return
+@@ -1555,9 +1787,74 @@ class ConfigurationFragment @JvmOverloads constructor(
              // 于是拿到的还是改名前那个旧对象 —— 表现就是「名字像没改一样」，
              // 直到列表被整体重建（切页/进设置再回来）才刷新。
              // 就地替换保持原有顺序，同时把 ☴ 列表和 tab 一起更新掉。
@@ -246,10 +816,13 @@ index afd90b7..c19813d 100644
              }
          }
  
-@@ -1598,6 +1692,16 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -1598,6 +1895,19 @@ class ConfigurationFragment @JvmOverloads constructor(
          lateinit var undoManager: UndoSnackbarManager<ProxyEntity>
          var adapter: ConfigurationAdapter? = null
  
++        // 014: 撤销通道是否就绪（select 模式下不初始化 undoManager）。
++        fun isUndoReady(): Boolean = ::undoManager.isInitialized
++
 +        /** 问题1-B：切回配置页时节点列表回顶部 */
 +        fun resetScrollState() {
 +            if (::configurationListView.isInitialized) configurationListView.scrollToPosition(0)
@@ -263,7 +836,58 @@ index afd90b7..c19813d 100644
          override fun onSaveInstanceState(outState: Bundle) {
              super.onSaveInstanceState(outState)
  
-@@ -1931,6 +2035,7 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -1874,39 +2184,21 @@ class ConfigurationFragment @JvmOverloads constructor(
+             if (!select) {
+                 undoManager = UndoSnackbarManager(activity as MainActivity, adapter!!)
+                 setupItemTouchHelper()
+-                setupBottomBarScrollDriver()
+             }
+-        }
+-
+-        private fun setupBottomBarScrollDriver() {
+-            val mainActivity = activity as? MainActivity ?: return
+-            configurationListView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+-                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+-                    if (dy != 0) mainActivity.driveBottomBar(dy)
+-                }
+-            })
+-
+-            val touchSlop = ViewConfiguration.get(requireContext()).scaledTouchSlop
+-            var lastRawY = 0f
+-            configurationListView.setOnTouchListener { recyclerView, event ->
+-                when (event.actionMasked) {
+-                    MotionEvent.ACTION_DOWN -> lastRawY = event.rawY
+-                    MotionEvent.ACTION_MOVE -> {
+-                        val cannotScroll = !recyclerView.canScrollVertically(-1) &&
+-                                !recyclerView.canScrollVertically(1)
+-                        if (cannotScroll) {
+-                            val fingerDy = event.rawY - lastRawY
+-                            if (abs(fingerDy) >= touchSlop) {
+-                                mainActivity.driveBottomBar(-fingerDy.toInt())
+-                                lastRawY = event.rawY
+-                            }
+-                        }
+-                    }
+-                }
+-                false
++            // 017: 底部常驻启动栏 —— 预留 栏高64dp + 卡片间距4dp + 栏边距4dp 的滚动余量，
++            // 滚动到底时末卡片与栏之间恰好一个卡片间距；导航栏 inset 叠加在余量之下。
++            configurationListView.clipToPadding = false
++            ViewCompat.setOnApplyWindowInsetsListener(configurationListView) { v, insets ->
++                v.updatePadding(
++                    bottom = dp2px(72) + insets.getInsets(
++                        WindowInsetsCompat.Type.navigationBars()
++                    ).bottom
++                )
++                insets
+             }
+         }
+ 
++
+         override fun onDestroy() {
+             adapter?.let {
+                 ProfileManager.removeListener(it)
+@@ -1931,6 +2223,7 @@ class ConfigurationFragment @JvmOverloads constructor(
              var configurationIdList: MutableList<Long> = mutableListOf()
              val configurationList = HashMap<Long, ProxyEntity>()
              private val pendingTrafficUpdates = HashSet<Long>()
@@ -271,7 +895,7 @@ index afd90b7..c19813d 100644
              private val profileStatePayload = Any()
  
              private fun getItem(profileId: Long): ProxyEntity {
-@@ -2357,6 +2462,9 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -2357,6 +2650,9 @@ class ConfigurationFragment @JvmOverloads constructor(
              }
  
              fun reloadProfiles() {
@@ -281,7 +905,7 @@ index afd90b7..c19813d 100644
                  var newProfiles = SagerDatabase.proxyDao.getByGroup(proxyGroup.id)
                  when (proxyGroup.order) {
                      GroupOrder.BY_NAME -> {
-@@ -2380,20 +2488,139 @@ class ConfigurationFragment @JvmOverloads constructor(
+@@ -2380,20 +2676,139 @@ class ConfigurationFragment @JvmOverloads constructor(
                      selectedProfileIndex = newProfileIds.indexOf(selectedProxy)
                  }
  
@@ -628,7 +1252,7 @@ index af75c17..45c7c4d 100644
              updateButton.isInvisible = proxyGroup.type != GroupType.SUBSCRIPTION
              groupName.text = proxyGroup.displayName()
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt
-index 346c742..30be375 100644
+index 346c742..e81ad21 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt
 +++ b/app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt
 @@ -330,6 +330,8 @@ class GroupSettingsActivity(
@@ -640,6 +1264,376 @@ index 346c742..30be375 100644
              if (newGroup.type == GroupType.SUBSCRIPTION && !newGroup.subscription?.link.isNullOrEmpty()) {
                  GroupUpdater.startUpdate(newGroup, true)
              }
+@@ -352,14 +354,19 @@ class GroupSettingsActivity(
+ 
+     }
+ 
+-    val child by lazy { supportFragmentManager.findFragmentById(R.id.settings) as MyPreferenceFragmentCompat }
++    // 015: fragment 提交是双重异步（DB 协程 + commit()），高频操作下手速快于
++    // fragment attach 时 findFragmentById 返回 null，旧的非空强转直接 NPE 崩溃
++    // （崩溃日志 GroupSettingsActivity.child_delegate$lambda）。未就绪时交给父类。
++    val child: MyPreferenceFragmentCompat?
++        get() = supportFragmentManager.findFragmentById(R.id.settings) as? MyPreferenceFragmentCompat
+ 
+     override fun onCreateOptionsMenu(menu: Menu): Boolean {
+         menuInflater.inflate(R.menu.profile_config_menu, menu)
+         return true
+     }
+ 
+-    override fun onOptionsItemSelected(item: MenuItem) = child.onOptionsItemSelected(item)
++    override fun onOptionsItemSelected(item: MenuItem): Boolean =
++        child?.onOptionsItemSelected(item) ?: super.onOptionsItemSelected(item)
+ 
+     override fun onBackPressed() {
+         if (needSave()) {
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt
+new file mode 100644
+index 0000000..6aded04
+--- /dev/null
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt
+@@ -0,0 +1,342 @@
++package io.nekohasekai.sagernet.ui
++
++import io.nekohasekai.sagernet.ktx.Logs
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.async
++import kotlinx.coroutines.coroutineScope
++import kotlinx.coroutines.selects.select
++import kotlinx.coroutines.withTimeoutOrNull
++import okhttp3.OkHttpClient
++import okhttp3.Request
++import org.json.JSONObject
++import java.io.IOException
++import java.util.concurrent.TimeUnit
++
++/**
++ * 025/028: 出站 IP 质量查询 —— 复刻 FlClash v0.8.99 多源对冲语义。
++ *
++ * 028 关键修复：
++ * - **先答先赢回归**（026 曾为合并国家改成等全部源完成，最慢 8s 拖死整体）：
++ *   select/onAwait 按完成顺序消费，第一个非推断结果立即胜出；胜者缺国家地区时
++ *   仅宽限 1.5s 等其他源补国家，补不到就先用，绝不拖慢主结果。
++ * - **缓存绑定节点身份**（profileId）：切换节点/VPN 重连 → 缓存自动失效 → 重查，
++ *   不再“无动于衷”。
++ * - 预查询：VPN 连接瞬间由 MainActivity 触发（点开 ⓘ 秒出）；失败不冲缓存。
++ * 查询经 VPN 隧道（应用自身流量走 TUN），测的是节点出口 IP。
++ */
++object IpQualityLookup {
++
++    data class IpQuality(
++        val ip: String,
++        val source: String,
++        val type: String, // residential / mobile / business / hosting
++        val organization: String?,
++        val asn: Int?,
++        val isProxy: Boolean,
++        val isVpn: Boolean,
++        val isTor: Boolean,
++        val isAbuser: Boolean,
++        val country: String?,
++        val inferred: Boolean,
++        val elapsedMs: Long = 0,
++    ) {
++        val level: String
++            get() = when {
++                isTor || isAbuser -> "risky"
++                type == "hosting" -> "normal"
++                else -> "good"
++            }
++
++        val flags: List<String>
++            get() = buildList {
++                if (isTor) add("tor")
++                if (isAbuser) add("abuser")
++                if (isVpn) add("vpn")
++                if (isProxy) add("proxy")
++            }
++    }
++
++    data class CacheEntry(val quality: IpQuality, val profileId: Long, val atMs: Long)
++
++    @Volatile
++    private var cache: CacheEntry? = null
++
++    private const val CACHE_FRESH_MS = 60_000L      // 同节点 1 分钟内不重复查
++    private const val TOTAL_TIMEOUT_MS = 10_000L    // 六源对冲总超时
++    private const val COUNTRY_GRACE_MS = 1_500L     // 胜者缺国家时的宽限期
++
++    /** 指定节点的缓存（节点不匹配 = 视为无缓存）。 */
++    fun cacheFor(profileId: Long): CacheEntry? =
++        cache?.takeIf { it.profileId == profileId }
++
++    /** 新鲜缓存（同节点 + maxAgeMs 内）——预查询跳过判断用。 */
++    fun freshCache(profileId: Long, maxAgeMs: Long = CACHE_FRESH_MS): CacheEntry? =
++        cacheFor(profileId)?.takeIf { System.currentTimeMillis() - it.atMs < maxAgeMs }
++
++    /** 成功后写缓存（绑定节点）。 */
++    suspend fun lookup(forProfile: Long): IpQuality {
++        val q = doLookup()
++        cache = CacheEntry(q, forProfile, System.currentTimeMillis())
++        return q
++    }
++
++    /** 026/028: 预查询 —— 节点匹配且有新鲜缓存则跳过，否则后台重查。 */
++    suspend fun prefetch(forProfile: Long) {
++        if (freshCache(forProfile) == null) {
++            runCatching { lookup(forProfile) }.onFailure { Logs.w("ip prefetch: ${it.message}") }
++        }
++    }
++
++    private class SourceFailure(val kind: String) : Exception(kind)
++
++    private val client by lazy {
++        OkHttpClient.Builder()
++            .connectTimeout(8, TimeUnit.SECONDS)
++            .readTimeout(8, TimeUnit.SECONDS)
++            .callTimeout(8, TimeUnit.SECONDS)
++            .build()
++    }
++
++    private fun getJson(url: String): JSONObject {
++        val request = Request.Builder().url(url).build()
++        client.newCall(request).execute().use { response ->
++            if (response.code == 429) throw SourceFailure("rateLimited")
++            if (response.code != 200) throw SourceFailure("failed")
++            return JSONObject(response.body?.string().orEmpty())
++        }
++    }
++
++    // ---- FlClash helpers ----
++    private fun obj(value: Any?): JSONObject =
++        if (value is JSONObject) value else JSONObject()
++
++    private fun flag(value: Any?): Boolean = value == true
++
++    private fun text(value: Any?): String? =
++        (value as? String)?.takeIf { it.isNotEmpty() }
++
++    private fun asnOf(value: Any?): Int? = when (value) {
++        is Int -> value.takeIf { it != 0 }
++        is String -> Regex("\\d+").find(value)?.value?.toIntOrNull()?.takeIf { it != 0 }
++        else -> null
++    }
++
++    private fun declaredType(value: Any?): String? = when (value) {
++        "isp" -> "residential"
++        "business", "education", "government", "banking" -> "business"
++        "hosting" -> "hosting"
++        else -> null
++    }
++
++    private fun pickType(hosting: Boolean, mobile: Boolean = false, declared: String? = null): String? =
++        when {
++            hosting || declared == "hosting" -> "hosting"
++            mobile -> "mobile"
++            else -> declared
++        }
++
++    private fun quality(
++        ip: String, source: String, type: String?, inferred: Boolean = false,
++        organization: String? = null, asn: Int? = null, country: String? = null,
++        isProxy: Boolean = false, isVpn: Boolean = false,
++        isTor: Boolean = false, isAbuser: Boolean = false, elapsedMs: Long = 0,
++    ): IpQuality? {
++        if (type == null) return null
++        return IpQuality(
++            ip, source, type, organization, asn, isProxy, isVpn, isTor, isAbuser,
++            country, inferred, elapsedMs
++        )
++    }
++
++    // ---- 六源解析（与 FlClash _fromXxx 一一对应） ----
++    private fun fromIdentMe(): IpQuality {
++        val json = getJson("https://ident.me/json")
++        val type = declaredType(json.optString("type"))
++        return quality(
++            json.optString("ip"), "ident.me", type,
++            inferred = type == null,
++            organization = text(json.optString("aso")),
++            asn = asnOf(json.opt("asn")),
++        ) ?: throw SourceFailure("noType")
++    }
++
++    private fun fromIpApiCom(): IpQuality {
++        val json = getJson(
++            "http://ip-api.com/json/?fields=status,message,query,country,isp,org,as,mobile,proxy,hosting&lang=zh-CN"
++        )
++        if (json.optString("status") != "success") throw SourceFailure("failed")
++        val type = pickType(hosting = flag(json.opt("hosting")), mobile = flag(json.opt("mobile")))
++        return quality(
++            json.optString("query"), "ip-api.com", type,
++            inferred = type == null,
++            organization = text(json.optString("org")) ?: text(json.optString("isp")),
++            asn = asnOf(json.optString("as")),
++            country = text(json.optString("country")),
++            isProxy = flag(json.opt("proxy")),
++        ) ?: throw SourceFailure("noType")
++    }
++
++    private fun fromIpQuery(): IpQuality {
++        val json = getJson("https://api.ipquery.io/?format=json")
++        val risk = obj(json.opt("risk"))
++        val isp = obj(json.opt("isp"))
++        val type = pickType(
++            hosting = flag(risk.opt("is_datacenter")),
++            mobile = flag(risk.opt("is_mobile")),
++        )
++        return quality(
++            json.optString("ip"), "ipquery.io", type,
++            inferred = type == null,
++            organization = text(isp.opt("org")) ?: text(isp.opt("isp")),
++            asn = asnOf(isp.opt("asn")),
++            country = text(obj(json.opt("location")).opt("country")),
++            isProxy = flag(risk.opt("is_proxy")),
++            isVpn = flag(risk.opt("is_vpn")),
++            isTor = flag(risk.opt("is_tor")),
++        ) ?: throw SourceFailure("noType")
++    }
++
++    private fun fromIpLocate(): IpQuality {
++        val json = getJson("https://iplocate.io/api/lookup/")
++        val privacy = obj(json.opt("privacy"))
++        val company = obj(json.opt("company"))
++        val asn = obj(json.opt("asn"))
++        val type = pickType(
++            hosting = flag(privacy.opt("is_hosting")),
++            declared = declaredType(company.opt("type")) ?: declaredType(asn.opt("type")),
++        )
++        return quality(
++            json.optString("ip"), "iplocate.io", type,
++            inferred = type == null,
++            organization = text(company.opt("name")) ?: text(asn.opt("name")),
++            asn = asnOf(asn.opt("asn")),
++            country = text(json.optString("country")),
++            isProxy = flag(privacy.opt("is_proxy")),
++            isVpn = flag(privacy.opt("is_vpn")),
++            isTor = flag(privacy.opt("is_tor")),
++            isAbuser = flag(privacy.opt("is_abuser")),
++        ) ?: throw SourceFailure("noType")
++    }
++
++    private fun fromIpApiIs(): IpQuality {
++        val json = getJson("https://api.ipapi.is/")
++        val company = obj(json.opt("company"))
++        val asn = obj(json.opt("asn"))
++        val type = pickType(
++            hosting = flag(json.opt("is_datacenter")),
++            mobile = flag(json.opt("is_mobile")),
++            declared = declaredType(company.opt("type")) ?: declaredType(asn.opt("type")),
++        )
++        return quality(
++            json.optString("ip"), "ipapi.is", type,
++            inferred = type == null,
++            organization = text(company.opt("name")) ?: text(asn.opt("org")),
++            asn = asnOf(asn.opt("asn")),
++            country = text(obj(json.opt("location")).opt("country")),
++            isProxy = flag(json.opt("is_proxy")),
++            isVpn = flag(json.opt("is_vpn")),
++            isTor = flag(json.opt("is_tor")),
++            isAbuser = flag(json.opt("is_abuser")),
++        ) ?: throw SourceFailure("noType")
++    }
++
++    private fun fromProxyCheck(): IpQuality {
++        val json = getJson("https://proxycheck.io/v3/?risk=1&vpn=1&asn=1")
++        val status = json.optString("status")
++        if (status == "denied") throw SourceFailure("rateLimited")
++        if (status != "ok" && status != "warning") throw SourceFailure("failed")
++        val ipKey = json.keys().asSequence().firstOrNull { it != "status" } ?: throw SourceFailure("noType")
++        val result = obj(json.opt(ipKey))
++        val network = obj(result.opt("network"))
++        val detections = obj(result.opt("detections"))
++        val networkType = network.optString("type")
++        val type = pickType(
++            hosting = flag(detections.opt("hosting")) || networkType == "Hosting",
++            mobile = networkType == "Wireless",
++            declared = when (networkType) {
++                "Residential" -> "residential"
++                "Business" -> "business"
++                else -> null
++            },
++        )
++        return quality(
++            ipKey, "proxycheck.io", type,
++            inferred = type == null,
++            organization = text(network.opt("organisation")),
++            asn = asnOf(network.opt("asn")),
++            country = text(obj(result.opt("location")).opt("country")),
++            isProxy = flag(detections.opt("proxy")),
++            isVpn = flag(detections.opt("vpn")),
++            isTor = flag(detections.opt("tor")),
++        ) ?: throw SourceFailure("noType")
++    }
++
++    private data class Done(val idx: Int, val quality: IpQuality?)
++
++    /**
++     * 028: 六源并发 + select/onAwait 按完成顺序消费：
++     * - 第一个“非推断”结果立即胜出（先答先赢，不等慢源）；
++     * - 胜者缺国家地区 → 宽限 1.5s 等其他非推断源补国家，补不到就照常返回；
++     * - 推断结果仅作全败兜底；总超时 10s。
++     */
++    private suspend fun doLookup(): IpQuality = coroutineScope {
++        val started = System.currentTimeMillis()
++        val fetchers = listOf(
++            ::fromIdentMe, ::fromIpApiCom, ::fromIpQuery,
++            ::fromIpLocate, ::fromIpApiIs, ::fromProxyCheck,
++        )
++        val jobs = fetchers.mapIndexed { idx, fetcher ->
++            async(Dispatchers.IO) {
++                val t0 = System.currentTimeMillis()
++                val q = runCatching { fetcher() }
++                    .onFailure { Logs.w("ip source failed: ${it.message}") }
++                    .getOrNull()
++                Done(idx, q?.copy(elapsedMs = System.currentTimeMillis() - t0))
++            }
++        }
++        val pending = jobs.toMutableList()
++        var fallback: IpQuality? = null
++        var winner: IpQuality? = null
++
++        while (pending.isNotEmpty() && winner == null) {
++            val done = withTimeoutOrNull(TOTAL_TIMEOUT_MS - (System.currentTimeMillis() - started)) {
++                select<Done> {
++                    pending.forEach { d -> d.onAwait { it } }
++                }
++            } ?: break
++            pending.removeAll { it === jobs[done.idx] }
++            val q = done.quality ?: continue
++            if (q.inferred) {
++                fallback = fallback ?: q
++                continue
++            }
++            if (q.country != null) {
++                winner = q
++                break
++            }
++            // 胜者缺国家：宽限窗口内等其他非推断源补齐
++            winner = q
++            val graceEnd = System.currentTimeMillis() + COUNTRY_GRACE_MS
++            while (pending.isNotEmpty() && winner?.country == null) {
++                val done2 = withTimeoutOrNull(graceEnd - System.currentTimeMillis()) {
++                    select<Done> {
++                        pending.forEach { d -> d.onAwait { it } }
++                    }
++                } ?: break
++                pending.removeAll { it === jobs[done2.idx] }
++                val q2 = done2.quality ?: continue
++                if (q2.inferred) {
++                    fallback = fallback ?: q2
++                    continue
++                }
++                if (q2.country != null && winner != null) {
++                    winner = winner.copy(country = q2.country)
++                }
++            }
++        }
++
++        (winner?.copy(country = winner.country ?: fallback?.country))
++            ?: fallback
++            ?: throw IOException("all ip sources failed")
++    }
++}
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/LogcatFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/LogcatFragment.kt
 index 2f276ee..93929f7 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/LogcatFragment.kt
@@ -711,7 +1705,7 @@ index 2f276ee..93929f7 100644
          when (item.itemId) {
              R.id.action_clear_logcat -> {
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
-index 063514c..91adab7 100644
+index 063514c..45bf4c8 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
 +++ b/app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
 @@ -17,6 +17,10 @@ import androidx.activity.addCallback
@@ -725,7 +1719,15 @@ index 063514c..91adab7 100644
  import androidx.preference.PreferenceDataStore
  import com.google.android.material.dialog.MaterialAlertDialogBuilder
  import com.google.android.material.navigation.NavigationView
-@@ -64,6 +68,35 @@ class MainActivity : ThemedActivity(),
+@@ -53,6 +57,7 @@ import io.nekohasekai.sagernet.ktx.readableMessage
+ import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+ import io.nekohasekai.sagernet.ui.MessageStore
+ import io.nekohasekai.sagernet.ktx.Logs
++import kotlinx.coroutines.delay
+ import moe.matsuri.nb4a.utils.Util
+ 
+ class MainActivity : ThemedActivity(),
+@@ -64,13 +69,39 @@ class MainActivity : ThemedActivity(),
      lateinit var navigation: NavigationView
      private var currentMainFragment: ToolbarFragment? = null
  
@@ -761,7 +1763,14 @@ index 063514c..91adab7 100644
      override fun onCreate(savedInstanceState: Bundle?) {
          super.onCreate(savedInstanceState)
          MessageStore.setCurrentActivity(this)
-@@ -83,14 +116,17 @@ class MainActivity : ThemedActivity(),
+-        val animateInitialControls = savedInstanceState == null
+-
+         binding = LayoutMainBinding.inflate(layoutInflater)
+-        binding.fab.initProgress(binding.fabProgress)
+         if (themeResId !in intArrayOf(
+                 R.style.Theme_SagerNet_Black
+             )
+@@ -83,38 +114,48 @@ class MainActivity : ThemedActivity(),
          }
          navigation.setNavigationItemSelectedListener(this)
  
@@ -782,21 +1791,50 @@ index 063514c..91adab7 100644
                  moveTaskToBack(true)
              } else {
                  displayFragmentWithId(R.id.nav_configuration)
-@@ -105,9 +141,10 @@ class MainActivity : ThemedActivity(),
-         binding.stats.setOnClickListener { if (DataStore.serviceState.connected) binding.stats.testConnection() }
+             }
+         }
+ 
+-        binding.fab.setOnClickListener {
+-            if (DataStore.serviceState.canStop) SagerNet.stopService() else connect.launch(
+-                null
+-            )
+-        }
+-        binding.stats.setOnClickListener { if (DataStore.serviceState.connected) binding.stats.testConnection() }
++        // 017: 启动/停止由底部长条启动栏按钮承担（ConnectBar 内部处理）；
++        // 连接测试入口移到栏内「实时延迟」区。旧 fab/stats 点击绑定移除。
  
          setContentView(binding.root)
 -        currentMainFragment =
 -            supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
 -                ?: currentMainFragment
+-        if (!animateInitialControls) {
+-            syncMainControls(showWhenConnected = false, animate = false)
++        // 019: 延迟区点按 → 主连接 urlTest（修复点击后永远停在“测试中…”：
++        // ConnectBar.onTestConnection 之前无人接线）
++        binding.connectBar.onTestConnection = {
++            runOnDefaultDispatcher {
++                try {
++                    val elapsed = urlTest()
++                    onMainDispatcher { binding.connectBar.showDelay(elapsed) }
++                } catch (e: Exception) {
++                    Logs.w(e)
++                    onMainDispatcher { binding.connectBar.showDelayError() }
++                }
++            }
++        }
 +        if (currentMainFragment == null) {
 +            currentMainFragment =
 +                supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
-+        }
-         if (!animateInitialControls) {
-             syncMainControls(showWhenConnected = false, animate = false)
          }
-@@ -126,6 +163,13 @@ class MainActivity : ThemedActivity(),
++        syncConnectBar()
+         changeState(
+             BaseService.State.Idle,
+             animate = false,
+-            animateControls = animateInitialControls,
+         )
+         connection.connect(this, this)
+         DataStore.configurationStore.registerChangeListener(this)
+@@ -126,6 +167,13 @@ class MainActivity : ThemedActivity(),
  
          refreshNavMenu(DataStore.enableClashAPI)
  
@@ -810,7 +1848,7 @@ index 063514c..91adab7 100644
          // sdk 33 notification
          if (Build.VERSION.SDK_INT >= 33) {
              val checkPermission =
-@@ -156,12 +200,19 @@ class MainActivity : ThemedActivity(),
+@@ -156,20 +204,23 @@ class MainActivity : ThemedActivity(),
          if (DataStore.hideFromRecentApps) {
              applyHideFromRecentApps(DataStore.hideFromRecentApps)
          }
@@ -831,8 +1869,46 @@ index 063514c..91adab7 100644
 +            ?: supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
          if (restoredFragment != null && restoredFragment !== currentMainFragment) {
              currentMainFragment = restoredFragment
-             syncMainControls(
-@@ -370,14 +421,259 @@ class MainActivity : ThemedActivity(),
+-            syncMainControls(
+-                fragment = restoredFragment,
+-                showWhenConnected = DataStore.serviceState == BaseService.State.Connected,
+-                animate = false,
+-            )
+         }
++        syncConnectBar()
+     }
+ 
+     fun applyHideFromRecentApps(hide: Boolean) {
+@@ -205,11 +256,27 @@ class MainActivity : ThemedActivity(),
+         }
+     }
+ 
++    /**
++     * 029: 主连接 urlTest —— 冷启动兼容重试。
++     * x365 等魔改协议首连要叠 DNS+TCP+TLS+传输流+魔改握手，libneko speedtest
++     * 第一次请求失败即返回（无重试），默认 3s 预算下冷启动首测必败。
++     * 这里首试失败延迟 700ms 重试一次（首次失败本身即完成传输预热，与官方
++     * RTT 标准取第二次请求的语义一致），两次都失败才报错。
++     */
+     fun urlTest(): Int {
+         if (!DataStore.serviceState.connected || connection.service == null) {
+             error("not started")
+         }
+-        return connection.service!!.urlTest()
++        return try {
++            connection.service!!.urlTest()
++        } catch (first: Exception) {
++            Logs.w("urlTest cold-start retry: ${first.message}")
++            Thread.sleep(700)
++            if (!DataStore.serviceState.connected || connection.service == null) {
++                throw first
++            }
++            connection.service!!.urlTest()
++        }
+     }
+ 
+     suspend fun importSubscription(uri: Uri) {
+@@ -370,76 +437,282 @@ class MainActivity : ThemedActivity(),
          return displayFragmentWithId(item.itemId)
      }
  
@@ -891,7 +1967,7 @@ index 063514c..91adab7 100644
 +            transaction.commitAllowingStateLoss()
 +
 +            currentMainFragment = fragment
-+            syncMainControls(fragment, showWhenConnected = false, animate = false)
++            syncConnectBar()
 +        }
 +
          binding.drawerLayout.closeDrawers()
@@ -904,8 +1980,25 @@ index 063514c..91adab7 100644
 +            // 冷页面：先让抽屉关完，避免 inflation 冻结动画
 +            pendingCommit = commit
 +        }
-+    }
-+
+     }
+ 
+-    private fun syncMainControls(
+-        fragment: Any? = currentMainFragment
+-            ?: supportFragmentManager.findFragmentById(R.id.fragment_holder),
+-        showWhenConnected: Boolean,
+-        animate: Boolean,
+-    ) {
+-        val showControls = fragment is ConfigurationFragment || DataStore.showBottomBar
+-        binding.stats.useExternalScrollDriver = fragment is ConfigurationFragment
+-        binding.stats.syncMainControls(
+-            showControls,
+-            DataStore.serviceState,
+-            showWhenConnected,
+-            animate,
+-        )
+-        binding.fab.animate().cancel()
+-        if (showControls) {
+-            binding.fab.show()
 +    private val drawerListener = object : DrawerLayout.SimpleDrawerListener() {
 +        override fun onDrawerClosed(drawerView: View) {
 +            val pending = pendingCommit
@@ -978,7 +2071,14 @@ index 063514c..91adab7 100644
 +        } else if (lastId == R.id.nav_traffic) {
 +            // 之前停在仪表盘（不进缓存）：重新打开一次
 +            displayFragmentWithId(R.id.nav_traffic)
-+        } else {
+         } else {
+-            binding.fab.hideProgress()
+-            binding.fabProgress.hide()
+-            binding.fabProgress.visibility = View.INVISIBLE
+-            if (animate && binding.fab.isLaidOut) {
+-                binding.fab.hide()
+-            } else {
+-                binding.fab.visibility = View.INVISIBLE
 +            displayFragmentWithId(R.id.nav_configuration)
 +        }
 +    }
@@ -1015,10 +2115,10 @@ index 063514c..91adab7 100644
 +                    navigation.setLayerType(View.LAYER_TYPE_NONE, null)
 +                } catch (_: Throwable) {
 +                }
-+            }
-+        }
-+    }
-+
+             }
+         }
+     }
+ 
 +    private val prewarmRunnable = object : Runnable {
 +        override fun run() {
 +            if (isFinishing || isDestroyed) return
@@ -1094,11 +2194,18 @@ index 063514c..91adab7 100644
 +                view.visibility = View.GONE
 +            }
 +        }, WARM_FRAME_MS)
++    }
++
++
+     private fun refreshConfigurationProfileState() {
+         val fragment = currentMainFragment
+             ?: supportFragmentManager.findFragmentById(R.id.fragment_holder)
+         (fragment as? ConfigurationFragment)?.refreshProfileState()
      }
  
-     private fun syncMainControls(
-@@ -420,26 +716,18 @@ class MainActivity : ThemedActivity(),
-     }
+-    fun driveBottomBar(scrollDy: Int) {
+-        binding.stats.onListScrolled(scrollDy)
+-    }
  
      fun displayFragmentWithId(@IdRes id: Int): Boolean {
 -        when (id) {
@@ -1135,7 +2242,87 @@ index 063514c..91adab7 100644
          navigation.menu.findItem(id).isChecked = true
          return true
      }
-@@ -544,11 +832,24 @@ class MainActivity : ThemedActivity(),
+@@ -448,25 +721,35 @@ class MainActivity : ThemedActivity(),
+         state: BaseService.State,
+         msg: String? = null,
+         animate: Boolean = false,
+-        animateControls: Boolean = animate,
+     ) {
+         DataStore.serviceState = state
+         refreshConfigurationProfileState()
+ 
+-        binding.fab.changeState(state, DataStore.serviceState, animate)
+-        binding.stats.changeState(state)
+-        syncMainControls(
+-            showWhenConnected = state == BaseService.State.Connected,
+-            animate = animateControls,
+-        )
++        binding.connectBar.changeState(state, animate)
++        // 026/028: VPN 连接瞬间后台预查询出站 IP（绑定当前节点；
++        // 切换节点重连 → 缓存失效自动重查，点开 ⓘ 秒出）
++        if (state == BaseService.State.Connected) {
++            runOnDefaultDispatcher {
++                runCatching { IpQualityLookup.prefetch(DataStore.currentProfile) }
++            }
++            // 027/029: 连接成功自动 ping 一次主连接（延迟区直接出数值，不靠点击）。
++            // 先给 500ms 稳定期再测（x365 魔改协议冷启动握手慢，配合 urlTest 内部重试）。
++            runOnDefaultDispatcher {
++                runCatching {
++                    delay(500)
++                    val elapsed = urlTest()
++                    onMainDispatcher { binding.connectBar.showDelay(elapsed) }
++                }.onFailure {
++                    onMainDispatcher { binding.connectBar.showDelayError() }
++                }
++            }
++        }
+         if (msg != null) snackbar(getString(R.string.vpn_error, msg)).show()
+     }
+ 
+     override fun snackbarInternal(text: CharSequence): Snackbar {
+         return Snackbar.make(binding.coordinator, text, Snackbar.LENGTH_LONG).apply {
+-            if (binding.fab.isShown) {
+-                anchorView = binding.fab
+-            }
++            anchorView = binding.connectBar
+             // TODO
+         }
+     }
+@@ -494,10 +777,21 @@ class MainActivity : ThemedActivity(),
+         if (it) snackbar(R.string.vpn_permission_denied).show()
+     }
+ 
++    /** 017: ConnectBar 启动按钮入口（VPN 授权 + 启动服务）。 */
++    fun launchConnect() {
++        connect.launch(null)
++    }
++
++    /** 021: 底部长条启动栏仅配置页显示。 */
++    private fun syncConnectBar() {
++        binding.connectBar.visibility =
++            if (currentMainFragment is ConfigurationFragment) View.VISIBLE else View.GONE
++    }
++
+     // may NOT called when app is in background
+     // ONLY do UI update here, write DB in bg process
+     override fun cbSpeedUpdate(stats: SpeedDisplayData) {
+-        binding.stats.updateSpeed(stats.txRateProxy, stats.rxRateProxy)
++        binding.connectBar.updateSpeed(stats.txRateProxy, stats.rxRateProxy)
+     }
+ 
+     override suspend fun cbTrafficUpdate(data: TrafficDataBatch) {
+@@ -518,10 +812,6 @@ class MainActivity : ThemedActivity(),
+     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
+         when (key) {
+             Key.SERVICE_MODE -> onBinderDied()
+-            Key.SHOW_BOTTOM_BAR -> syncMainControls(
+-                showWhenConnected = DataStore.showBottomBar,
+-                animate = true,
+-            )
+             Key.PROXY_APPS, Key.BYPASS_MODE, Key.INDIVIDUAL -> {
+                 if (DataStore.serviceState.canStop) {
+                     snackbar(getString(R.string.need_reload)).setAction(R.string.apply) {
+@@ -544,11 +834,24 @@ class MainActivity : ThemedActivity(),
  
      override fun onDestroy() {
          super.onDestroy()
@@ -1160,7 +2347,7 @@ index 063514c..91adab7 100644
      /**
       * 打开左侧抽屉。
       * 顶栏的 ☰ 由 TopBarController 自绘（原先是 Toolbar 的 navigationIcon，
-@@ -577,8 +878,8 @@ class MainActivity : ThemedActivity(),
+@@ -577,8 +880,8 @@ class MainActivity : ThemedActivity(),
          if (super.onKeyDown(keyCode, event)) return true
          if (binding.drawerLayout.isOpen) return false
  
@@ -1171,6 +2358,208 @@ index 063514c..91adab7 100644
          return fragment != null && fragment.onKeyDown(keyCode, event)
      }
  
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
+new file mode 100644
+index 0000000..63d962a
+--- /dev/null
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
+@@ -0,0 +1,196 @@
++package io.nekohasekai.sagernet.ui
++
++import android.app.Dialog
++import android.os.Bundle
++import android.view.View
++import android.widget.TextView
++import androidx.core.content.ContextCompat
++import androidx.fragment.app.DialogFragment
++import com.google.android.material.dialog.MaterialAlertDialogBuilder
++import io.nekohasekai.sagernet.R
++import io.nekohasekai.sagernet.SagerNet
++import io.nekohasekai.sagernet.database.DataStore
++import io.nekohasekai.sagernet.ktx.Logs
++import io.nekohasekai.sagernet.ktx.onMainDispatcher
++import io.nekohasekai.sagernet.ktx.readableMessage
++import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
++
++/**
++ * 017: 出站 IP 查询弹窗 —— 复刻 FlClash v0.8.99 出站 IP 面板。
++ * 026: 打开即读缓存（VPN 连接时已预查询，秒出）；刷新强制重查；
++ * 失败保留已有信息（不再把成功结果冲成全红错误），零缓存才显示错误。
++ */
++class OutboundIpDialogFragment : DialogFragment() {
++
++    companion object {
++        const val DIALOG_TAG = "outbound_ip_dialog"
++    }
++
++    private var loading = false
++
++    private lateinit var ipValue: TextView
++    private lateinit var countryValue: TextView
++    private lateinit var levelValue: TextView
++    private lateinit var typeValue: TextView
++    private lateinit var flagsValue: TextView
++    private lateinit var orgValue: TextView
++    private lateinit var asnValue: TextView
++    private lateinit var sourceValue: TextView
++
++    override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
++        val view = layoutInflater.inflate(R.layout.layout_outbound_ip_dialog, null)
++        ipValue = view.findViewById(R.id.ip_value)
++        countryValue = view.findViewById(R.id.ip_country_value)
++        levelValue = view.findViewById(R.id.ip_level_value)
++        typeValue = view.findViewById(R.id.ip_type_value)
++        flagsValue = view.findViewById(R.id.ip_flags_value)
++        orgValue = view.findViewById(R.id.ip_org_value)
++        asnValue = view.findViewById(R.id.ip_asn_value)
++        sourceValue = view.findViewById(R.id.ip_source_value)
++
++        // 019: 仅 IP 地址 / 组织 / ASN 三行点击复制
++        bindCopy(view.findViewById(R.id.row_ip), ipValue)
++        bindCopy(view.findViewById(R.id.row_org), orgValue)
++        bindCopy(view.findViewById(R.id.row_asn), asnValue)
++
++        val dialog = MaterialAlertDialogBuilder(requireContext())
++            .setTitle(R.string.outbound_ip)
++            .setView(view)
++            .setNeutralButton(R.string.ip_action_refresh, null)
++            .setPositiveButton(android.R.string.ok, null)
++            .create()
++
++        dialog.setOnShowListener {
++            // 刷新不关闭（强制重查）；确定正常关闭
++            dialog.getButton(Dialog.BUTTON_NEUTRAL).setOnClickListener { fetch(force = true) }
++            dialog.getButton(Dialog.BUTTON_POSITIVE).setOnClickListener { dismiss() }
++        }
++
++        fetch(force = false)
++        return dialog
++    }
++
++    private fun bindCopy(row: View?, valueView: TextView) {
++        row ?: return
++        row.setOnClickListener {
++            val text = valueView.text?.toString().orEmpty()
++            if (text.isBlank()) return@setOnClickListener
++            val ok = SagerNet.trySetPrimaryClip(text)
++            android.widget.Toast.makeText(
++                requireContext(),
++                if (ok) R.string.copy_success else R.string.copy_failed,
++                android.widget.Toast.LENGTH_SHORT
++            ).show()
++        }
++    }
++
++    private fun defaultSecondaryColor(): Int {
++        val ta = requireContext().theme.obtainStyledAttributes(
++            intArrayOf(android.R.attr.textColorSecondary)
++        )
++        val color = ta.getColor(0, 0)
++        ta.recycle()
++        return color
++    }
++
++    private fun setLoadingState() {
++        ipValue.setText(R.string.ip_loading)
++        countryValue.setText(R.string.ip_loading)
++        levelValue.setText(R.string.ip_loading)
++        typeValue.setText(R.string.ip_loading)
++        flagsValue.setText(R.string.ip_loading)
++        orgValue.setText(R.string.ip_loading)
++        asnValue.setText(R.string.ip_loading)
++        sourceValue.text = "—"
++        levelValue.setTextColor(defaultSecondaryColor())
++    }
++
++    private fun render(q: IpQualityLookup.IpQuality) {
++        val levelRes = when (q.level) {
++            "risky" -> R.string.ip_level_risky
++            "good" -> R.string.ip_level_good
++            else -> R.string.ip_level_normal
++        }
++        val levelColor = when (q.level) {
++            "risky" -> ContextCompat.getColor(requireContext(), R.color.material_red_500)
++            "good" -> ContextCompat.getColor(requireContext(), R.color.material_green_500)
++            else -> defaultSecondaryColor()
++        }
++        val typeRes = when (q.type) {
++            "hosting" -> R.string.ip_type_hosting
++            "mobile" -> R.string.ip_type_mobile
++            "business" -> R.string.ip_type_business
++            else -> R.string.ip_type_residential
++        }
++        val labelOf = mapOf(
++            "tor" to getString(R.string.ip_flag_tor),
++            "abuser" to getString(R.string.ip_flag_abuser),
++            "vpn" to getString(R.string.ip_flag_vpn),
++            "proxy" to getString(R.string.ip_flag_proxy),
++        )
++        val flagsText = if (q.flags.isEmpty()) {
++            getString(R.string.ip_none)
++        } else {
++            q.flags.mapNotNull { labelOf[it] }.joinToString("、")
++        }
++        ipValue.text = q.ip
++        countryValue.text = q.country?.takeIf { it.isNotBlank() } ?: "—"
++        levelValue.setText(levelRes)
++        levelValue.setTextColor(levelColor)
++        typeValue.setText(typeRes)
++        flagsValue.text = flagsText
++        orgValue.text = q.organization?.takeIf { it.isNotBlank() } ?: "—"
++        asnValue.text = q.asn?.let { "AS$it" } ?: "—"
++        sourceValue.text = q.source
++    }
++
++    private fun renderError(err: String?) {
++        ipValue.setText(R.string.ip_query_failed)
++        countryValue.text = "—"
++        levelValue.text = err ?: ""
++        levelValue.setTextColor(
++            ContextCompat.getColor(requireContext(), R.color.material_red_500)
++        )
++        typeValue.setText(R.string.ip_query_failed)
++        flagsValue.setText(R.string.ip_none)
++        orgValue.text = "—"
++        asnValue.text = "—"
++        sourceValue.text = "—"
++    }
++
++    /**
++     * 028: force=false（打开）→ 同节点缓存秒显（跨节点/无缓存 → 立即“查询中”现查）；
++     * force=true（点刷新）→ 立即显示查询中，失败时回滚同节点缓存（不冲掉成功结果）。
++     */
++    private fun fetch(force: Boolean) {
++        if (loading) return
++        val profileId = DataStore.currentProfile
++        val cache = IpQualityLookup.cacheFor(profileId)
++        if (!force && cache != null) {
++            render(cache.quality)
++            return
++        }
++        // 028: 点刷新立刻进入查询中状态（人性化反馈，不再顶着旧信息干等）
++        loading = true
++        setLoadingState()
++        runOnDefaultDispatcher {
++            runCatching { IpQualityLookup.lookup(profileId) }
++                .onSuccess { q ->
++                    onMainDispatcher {
++                        if (isAdded) render(q)
++                        loading = false
++                    }
++                }
++                .onFailure { e ->
++                    Logs.w(e)
++                    onMainDispatcher {
++                        loading = false
++                        if (!isAdded) return@onMainDispatcher
++                        // 失败：回滚同节点缓存；无缓存才显示错误
++                        val c = IpQualityLookup.cacheFor(profileId)
++                        if (c != null) render(c.quality) else renderError(e.readableMessage)
++                    }
++                }
++        }
++    }
++}
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/RouteFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/RouteFragment.kt
 index 1860794..473ca24 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/RouteFragment.kt
@@ -1187,6 +2576,30 @@ index 1860794..473ca24 100644
      override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
          super.onViewCreated(view, savedInstanceState)
  
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/RouteSettingsActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/RouteSettingsActivity.kt
+index 8c07eba..65af9c0 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/RouteSettingsActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/RouteSettingsActivity.kt
+@@ -292,14 +292,17 @@ class RouteSettingsActivity(
+ 
+     }
+ 
+-    val child by lazy { supportFragmentManager.findFragmentById(R.id.settings) as MyPreferenceFragmentCompat }
++    // 015: 见 GroupSettingsActivity —— fragment 未 attach 时防 NPE。
++    val child: MyPreferenceFragmentCompat?
++        get() = supportFragmentManager.findFragmentById(R.id.settings) as? MyPreferenceFragmentCompat
+ 
+     override fun onCreateOptionsMenu(menu: Menu): Boolean {
+         menuInflater.inflate(R.menu.profile_config_menu, menu)
+         return true
+     }
+ 
+-    override fun onOptionsItemSelected(item: MenuItem) = child.onOptionsItemSelected(item)
++    override fun onOptionsItemSelected(item: MenuItem): Boolean =
++        child?.onOptionsItemSelected(item) ?: super.onOptionsItemSelected(item)
+ 
+     override fun onBackPressed() {
+         if (needSave()) {
 diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/SettingsFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/SettingsFragment.kt
 index c50f127..8d126a5 100644
 --- a/app/src/main/java/io/nekohasekai/sagernet/ui/SettingsFragment.kt
@@ -1413,6 +2826,1163 @@ index 8828735..a1de339 100644
      }
  
      /**
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/profile/PasswordDialogFragment.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/profile/PasswordDialogFragment.kt
+deleted file mode 100644
+index c97589e..0000000
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/profile/PasswordDialogFragment.kt
++++ /dev/null
+@@ -1,99 +0,0 @@
+-package io.nekohasekai.sagernet.ui.profile
+-
+-import android.app.Dialog
+-import android.content.ClipData
+-import android.content.ClipboardManager
+-import android.content.Context
+-import android.os.Bundle
+-import android.view.LayoutInflater
+-import android.view.inputmethod.EditorInfo
+-import android.widget.EditText
+-import android.widget.Toast
+-import androidx.appcompat.app.AlertDialog
+-import androidx.fragment.app.DialogFragment
+-import androidx.preference.EditTextPreference
+-import io.nekohasekai.sagernet.R
+-
+-/**
+- * 密码/uuid 明文编辑弹窗:
+- *  - 无输入框边框 (borderless), 等宽字体, 全内容直显, 长内容自动换行 (仅显示)
+- *  - 按钮行: 取消(左) | 复制(中, 不关闭) | 确认(右)
+- *  - 复制/写回内容均去除显示换行, 保持单行语义
+- *
+- * 修复闪退: 不再使用 setTargetFragment (target 必须属于同一 FragmentManager,
+- * childFragmentManager 与宿主 Fragment 不匹配导致 IllegalStateException)。
+- * 数据改为 arguments 直传: key/title/text, 确认后由宿主 Fragment 写回 DataStore。
+- */
+-class PasswordDialogFragment : DialogFragment() {
+-
+-    companion object {
+-        private const val ARG_KEY = "key"
+-        private const val ARG_TITLE = "title"
+-        private const val ARG_TEXT = "text"
+-
+-        fun newInstance(key: String, title: CharSequence?, text: String): PasswordDialogFragment {
+-            val fragment = PasswordDialogFragment()
+-            fragment.arguments = Bundle().apply {
+-                putString(ARG_KEY, key)
+-                putCharSequence(ARG_TITLE, title)
+-                putString(ARG_TEXT, text)
+-            }
+-            return fragment
+-        }
+-    }
+-
+-    private fun rawText(editText: EditText): String =
+-        (editText.text?.toString() ?: "").replace("\r", "").replace("\n", "")
+-
+-    override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+-        val args = requireArguments()
+-        val key = args.getString(ARG_KEY)!!
+-        val title = args.getCharSequence(ARG_TITLE)
+-        val text = args.getString(ARG_TEXT) ?: ""
+-
+-        val view = LayoutInflater.from(requireContext())
+-            .inflate(R.layout.layout_password_dialog, null, false)
+-        val editText = view.findViewById<EditText>(android.R.id.edit)
+-        editText.inputType = EditorInfo.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+-        editText.typeface = android.graphics.Typeface.MONOSPACE
+-        // 多行显示 (换行仅显示效果), 复制/保存时去除
+-        editText.setSingleLine(false)
+-        editText.maxLines = 8
+-        editText.setHorizontallyScrolling(false)
+-        editText.setText(text)
+-        editText.setSelection(text.length)
+-
+-        fun copyToClipboard() {
+-            val cm = requireContext()
+-                .getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+-            cm.setPrimaryClip(ClipData.newPlainText("password", rawText(editText)))
+-            Toast.makeText(requireContext(), "已复制", Toast.LENGTH_SHORT).show()
+-        }
+-
+-        return AlertDialog.Builder(requireActivity())
+-            .setTitle(title)
+-            .setView(view)
+-            // 按钮行 (同一行): 取消(左/neutral) | 复制(中/negative, 不关闭) | 保存(右/positive)
+-            .setNeutralButton(android.R.string.cancel, null)
+-            .setNegativeButton(R.string.action_copy) { _, _ -> }
+-            .setPositiveButton(R.string.save) { _, _ ->
+-                // 通过 arguments 回传结果, 由宿主 PreferenceFragment 写回 preference
+-                val raw = rawText(editText)
+-                parentFragmentManager.setFragmentResult(
+-                    "password_edit", Bundle().apply {
+-                        putString(ARG_KEY, key)
+-                        putString(ARG_TEXT, raw)
+-                    }
+-                )
+-            }
+-            .create()
+-            .apply {
+-                setOnShowListener {
+-                    // 复制(中)不关闭弹窗
+-                    getButton(AlertDialog.BUTTON_NEGATIVE)?.setOnClickListener {
+-                        copyToClipboard()
+-                    }
+-                }
+-            }
+-    }
+-}
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/ui/profile/ProfileSettingsActivity.kt b/app/src/main/java/io/nekohasekai/sagernet/ui/profile/ProfileSettingsActivity.kt
+index 1a9137e..8985d23 100644
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/profile/ProfileSettingsActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/profile/ProfileSettingsActivity.kt
+@@ -151,7 +151,9 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
+ 
+     }
+ 
+-    val child by lazy { supportFragmentManager.findFragmentById(R.id.settings) as MyPreferenceFragmentCompat }
++    // 015: 见 GroupSettingsActivity —— fragment 未 attach 时防 NPE。
++    val child: MyPreferenceFragmentCompat?
++        get() = supportFragmentManager.findFragmentById(R.id.settings) as? MyPreferenceFragmentCompat
+ 
+     override fun onCreateOptionsMenu(menu: Menu): Boolean {
+         menuInflater.inflate(R.menu.profile_config_menu, menu)
+@@ -173,7 +175,8 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
+         return true
+     }
+ 
+-    override fun onOptionsItemSelected(item: MenuItem) = child.onOptionsItemSelected(item)
++    override fun onOptionsItemSelected(item: MenuItem): Boolean =
++        child?.onOptionsItemSelected(item) ?: super.onOptionsItemSelected(item)
+ 
+     override fun onBackPressed() {
+         if (DataStore.dirty) UnsavedChangesDialogFragment().apply { key() }
+@@ -205,25 +208,10 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
+     }
+ 
+     open fun PreferenceFragmentCompat.displayPreferenceDialog(preference: Preference): Boolean {
+-        // 密码类偏好 (summaryProvider 为圆点摘要) → 自定义明文弹窗: 取消|复制|确认
+-        if (preference is androidx.preference.EditTextPreference &&
+-            preference.summaryProvider === PasswordSummaryProvider
+-        ) {
+-            // 修复闪退: 不用 setTargetFragment (跨 FragmentManager 非法),
+-            // 数据 arguments 直传; 结果经 FragmentManager setFragmentResult 回传
+-            val dialog = PasswordDialogFragment.newInstance(
+-                preference.key, preference.title, preference.text ?: ""
+-            )
+-            dialog.show(childFragmentManager, "password")
+-            childFragmentManager.setFragmentResultListener("password_edit", this) { _, bundle ->
+-                val key = bundle.getString("key")
+-                val text = bundle.getString("text")
+-                if (key != null) {
+-                    findPreference<EditTextPreference>(key)?.let { it.text = text }
+-                }
+-            }
+-            return true
+-        }
++        // 016: 密码类偏好不再走 PasswordDialogFragment 裸显示弹窗（只读、无清空、
++        // 无输入态）。统一交给 CopyableEditTextPreferenceDialog —— 与其他可输入
++        // 参数完全一致：直接编辑 + 取消/清空/复制/保存 + 自动弹键盘。
++        // （该标准弹窗本身就会摘掉圆点 transformationMethod，明文显示。）
+         return false
+     }
+ 
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt b/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
+new file mode 100644
+index 0000000..9874228
+--- /dev/null
++++ b/app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
+@@ -0,0 +1,182 @@
++package io.nekohasekai.sagernet.widget
++
++import android.content.Context
++import android.text.format.Formatter
++import android.util.AttributeSet
++import android.view.MotionEvent
++import android.view.View
++import android.view.ViewGroup
++import android.widget.TextView
++import androidx.appcompat.widget.AppCompatImageView
++import androidx.core.view.ViewCompat
++import androidx.core.view.WindowInsetsCompat
++import androidx.fragment.app.FragmentActivity
++import com.google.android.material.card.MaterialCardView
++import io.nekohasekai.sagernet.R
++import io.nekohasekai.sagernet.SagerNet
++import io.nekohasekai.sagernet.aidl.TrafficData
++import io.nekohasekai.sagernet.bg.BaseService
++import io.nekohasekai.sagernet.database.DataStore
++import io.nekohasekai.sagernet.database.ProfileManager
++import io.nekohasekai.sagernet.database.ProxyEntity
++import io.nekohasekai.sagernet.ktx.dp2px
++import io.nekohasekai.sagernet.ui.MainActivity
++import io.nekohasekai.sagernet.ui.OutboundIpDialogFragment
++
++/**
++ * 017: 底部长条启动栏 —— 替代官方 FAB + StatsBar（实时数据托板）。
++ *
++ * 布局（横向）：ⓘ 出站IP查询 | 上传/下载(上下两行) | 实时延迟(值+标签两行，点按测试) | 启动按钮
++ * - 栏高 64dp ≈ 节点卡片两行；底边距 4dp（滚动到底时与末卡片间距 = 卡片间距）。
++ * - 021: 仅配置页显示（MainActivity.syncConnectBar 控制可见性）；根视图可点击，
++ *   空白区域不再把触摸穿透到下层节点卡片。
++ * - 021: 启动按钮 = 普通 ImageView + 静态状态图标（连接中/停止中显示进度环），
++ *   无 FAB 自绘底色 —— 与栏底色完全统一。
++ * - 延迟值来源：① 点按延迟区 → 主连接 urlTest（MainActivity 接线 onTestConnection）；
++ *   ② ProfileManager 实时广播 → 当前选中节点的测试结果（012 实时回写链路）。
++ */
++class ConnectBar @JvmOverloads constructor(
++    context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0,
++) : MaterialCardView(context, attrs, defStyleAttr) {
++
++    companion object {
++        private const val BASE_BOTTOM_MARGIN_DP = 4
++    }
++
++    private val ipInfo: AppCompatImageView
++    private val txText: TextView
++    private val rxText: TextView
++    private val speedZone: ViewGroup
++    private val delayZone: ViewGroup
++    private val delayValue: TextView
++    private val serviceIcon: ServiceIconView
++
++    private var currentState = BaseService.State.Idle
++
++    /** 连接测试回调（由 MainActivity 注入：主连接 urlTest）。 */
++    var onTestConnection: (() -> Unit)? = null
++
++    private val profileListener = object : ProfileManager.Listener {
++        override suspend fun onAdd(profile: ProxyEntity) = Unit
++        override suspend fun onUpdated(data: List<TrafficData>) = Unit
++        override suspend fun onUpdated(profile: ProxyEntity, noTraffic: Boolean) {
++            if (noTraffic) return
++            if (profile.id != DataStore.currentProfile) return
++            if (profile.status == 1 && profile.ping > 0) {
++                post { showDelay(profile.ping) }
++            }
++        }
++
++        override suspend fun onRemoved(groupId: Long, profileId: Long) = Unit
++    }
++
++    init {
++        inflate(context, R.layout.layout_connect_bar, this)
++        ipInfo = findViewById(R.id.bar_ip_info)
++        txText = findViewById(R.id.bar_tx)
++        rxText = findViewById(R.id.bar_rx)
++        speedZone = findViewById(R.id.bar_speed_zone)
++        delayZone = findViewById(R.id.bar_delay_zone)
++        delayValue = findViewById(R.id.bar_delay_value)
++        serviceIcon = findViewById(R.id.bar_fab)
++
++        // 021: 拦截空白区触摸，防止点击穿透到下层节点卡片
++        isClickable = true
++
++        serviceIcon.setOnClickListener {
++            if (DataStore.serviceState.canStop) {
++                SagerNet.stopService()
++            } else {
++                (context as? MainActivity)?.launchConnect()
++            }
++        }
++
++        val testConnection = {
++            if (DataStore.serviceState.connected) {
++                setTesting()
++                onTestConnection?.invoke()
++            }
++        }
++        val mirrorPress = View.OnTouchListener { _, event ->
++            when (event.actionMasked) {
++                MotionEvent.ACTION_DOWN -> {
++                    isPressed = true
++                    drawableHotspotChanged(event.x, event.y)
++                }
++                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> isPressed = false
++            }
++            false
++        }
++
++        // Both information blocks are one command: run the latency test and use the same
++        // whole-bar pressed feedback. Their hit boxes stay separate, but their behavior does not.
++        delayZone.setOnClickListener { testConnection() }
++        delayZone.setOnTouchListener(mirrorPress)
++        speedZone.setOnClickListener { testConnection() }
++        speedZone.setOnTouchListener(mirrorPress)
++
++        ipInfo.setOnClickListener {
++            val activity = context as? FragmentActivity ?: return@setOnClickListener
++            // 防重复：已有实例则不叠开
++            if (activity.supportFragmentManager
++                    .findFragmentByTag(OutboundIpDialogFragment.DIALOG_TAG) == null
++            ) {
++                OutboundIpDialogFragment()
++                    .show(activity.supportFragmentManager, OutboundIpDialogFragment.DIALOG_TAG)
++            }
++        }
++
++        // 导航栏 inset：底边距 = 4dp + 系统导航条高度（手势条 / 三大金刚都适用）
++        ViewCompat.setOnApplyWindowInsetsListener(this) { v, insets ->
++            val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
++            (v.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
++                val target = dp2px(BASE_BOTTOM_MARGIN_DP) + nav
++                if (lp.bottomMargin != target) {
++                    lp.bottomMargin = target
++                    v.requestLayout()
++                }
++            }
++            insets
++        }
++
++        updateSpeed(0, 0)
++    }
++
++    override fun onAttachedToWindow() {
++        super.onAttachedToWindow()
++        ProfileManager.addListener(profileListener)
++    }
++
++    override fun onDetachedFromWindow() {
++        ProfileManager.removeListener(profileListener)
++        super.onDetachedFromWindow()
++    }
++
++    fun changeState(state: BaseService.State, animate: Boolean = true) {
++        // 024: 官方动画引擎（AVD 队列：斜线/飞机形变动效），无进度环。
++        // 初始状态用 animate=false（静态首帧），与官方 ServiceButton 调用语义一致。
++        serviceIcon.changeState(state, currentState, animate)
++        currentState = state
++        if (state != BaseService.State.Connected) {
++            delayValue.setText(R.string.bar_delay_tap)
++        }
++    }
++
++    @android.annotation.SuppressLint("SetTextI18n")
++    fun updateSpeed(txRate: Long, rxRate: Long) {
++        txText.text = "▲  ${context.getString(R.string.speed, Formatter.formatFileSize(context, txRate))}"
++        rxText.text = "▼  ${context.getString(R.string.speed, Formatter.formatFileSize(context, rxRate))}"
++    }
++
++    fun setTesting() {
++        delayValue.setText(R.string.bar_delay_testing)
++    }
++
++    fun showDelay(ms: Int) {
++        delayValue.text = context.getString(R.string.bar_delay_value, ms)
++    }
++
++    fun showDelayError() {
++        delayValue.setText(R.string.bar_delay_failed)
++    }
++}
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt b/app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt
+new file mode 100644
+index 0000000..f86645b
+--- /dev/null
++++ b/app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt
+@@ -0,0 +1,117 @@
++package io.nekohasekai.sagernet.widget
++
++import android.content.Context
++import android.graphics.Point
++import android.util.AttributeSet
++import android.view.MotionEvent
++import com.simplecityapps.recyclerview_fastscroll.views.FastScrollRecyclerView
++
++/** Uses measured scroll metrics and keeps the thumb anchored to the user's finger. */
++class ExactScrollRecyclerView @JvmOverloads constructor(
++    context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0,
++) : FastScrollRecyclerView(context, attrs, defStyleAttr) {
++
++    private val scrollbarField = FastScrollRecyclerView::class.java.getDeclaredField("mScrollbar").apply {
++        isAccessible = true
++    }
++    private val touchOffsetField by lazy { scrollbarClass().getDeclaredField("mTouchOffset").apply { isAccessible = true } }
++    private val draggingField by lazy { scrollbarClass().getDeclaredField("mIsDragging").apply { isAccessible = true } }
++    private val thumbPositionField by lazy { scrollbarClass().getDeclaredField("mThumbPosition").apply { isAccessible = true } }
++    private val thumbMethod by lazy {
++        scrollbarClass().getMethod(
++            "setThumbPosition",
++            Int::class.javaPrimitiveType,
++            Int::class.javaPrimitiveType,
++        )
++    }
++
++    private var downY = 0
++    private var grabOffset = 0
++    private var trackingTouch = false
++
++    private fun scrollbar(): Any = scrollbarField.get(this)
++
++    private fun scrollbarClass() = scrollbarField.type
++
++    private fun thumbPosition(): Point = thumbPositionField.get(scrollbar()).let { it as Point }
++
++    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
++        val y = event.y.toInt()
++        when (event.actionMasked) {
++            MotionEvent.ACTION_DOWN -> {
++                downY = y
++                val thumb = thumbPosition()
++                val touchInset = (24 * resources.displayMetrics.density).toInt()
++                val x = event.x.toInt()
++                val isRtl = layoutDirection == LAYOUT_DIRECTION_RTL
++                val thumbLeft = if (isRtl) 0 else thumb.x - touchInset
++                val thumbRight = if (isRtl) getScrollBarWidth() + touchInset else thumb.x + getScrollBarWidth() + touchInset
++                trackingTouch = thumb.x >= 0 && thumb.y >= 0 &&
++                    x in thumbLeft..thumbRight &&
++                    y >= thumb.y - touchInset &&
++                    y <= thumb.y + getScrollBarThumbHeight() + touchInset
++                if (trackingTouch) {
++                    grabOffset = (y - thumb.y).coerceIn(0, getScrollBarThumbHeight())
++                }
++            }
++            MotionEvent.ACTION_MOVE -> if (trackingTouch) {
++                // On the first MOVE FastScroller adds (lastY - downY) before starting
++                // the drag. Cancel that one duplicated delta; later moves preserve the
++                // original grab offset because FastScroller no longer adds it while dragging.
++                val bar = scrollbar()
++                val offset = if (draggingField.getBoolean(bar)) {
++                    grabOffset
++                } else {
++                    grabOffset - (y - downY)
++                }
++                touchOffsetField.setInt(bar, offset)
++            }
++        }
++
++        val handled = super.dispatchTouchEvent(event)
++
++        if (trackingTouch && event.actionMasked == MotionEvent.ACTION_MOVE) {
++            val bar = scrollbar()
++            if (draggingField.getBoolean(bar)) {
++                touchOffsetField.setInt(bar, grabOffset)
++                // FastScroller recalculates the thumb from content position during the same
++                // frame. Restore the grab point after that calculation so the thumb stays under
++                // the finger instead of jumping away from it.
++                val thumbY = (y - grabOffset).coerceIn(
++                    paddingTop,
++                    height - paddingBottom - getScrollBarThumbHeight(),
++                )
++                val thumbX = if (layoutDirection == LAYOUT_DIRECTION_RTL) 0 else width - getScrollBarWidth()
++                thumbMethod.invoke(bar, thumbX, thumbY)
++            }
++        }
++
++        if (event.actionMasked == MotionEvent.ACTION_UP ||
++            event.actionMasked == MotionEvent.ACTION_CANCEL
++        ) {
++            trackingTouch = false
++            grabOffset = 0
++        }
++        return handled
++    }
++
++    override fun updateThumbPosition(
++        state: FastScrollRecyclerView.ScrollPositionState,
++        scrollY: Int,
++    ) {
++        val bar = scrollbar()
++        if (draggingField.getBoolean(bar) && trackingTouch) return
++
++        val scrollable = (computeVerticalScrollRange() - computeVerticalScrollExtent())
++            .coerceAtLeast(0)
++        if (scrollable == 0) {
++            thumbMethod.invoke(bar, -1, -1)
++            return
++        }
++        val offset = computeVerticalScrollOffset().coerceIn(0, scrollable)
++        val fraction = offset.toFloat() / scrollable.toFloat()
++        val y = paddingTop + (fraction * getAvailableScrollBarHeight()).toInt()
++        val x = if (layoutDirection == LAYOUT_DIRECTION_RTL) 0 else width - getScrollBarWidth()
++        thumbMethod.invoke(bar, x, y)
++    }
++}
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/widget/FabProgressBehavior.kt b/app/src/main/java/io/nekohasekai/sagernet/widget/FabProgressBehavior.kt
+deleted file mode 100644
+index ae0855e..0000000
+--- a/app/src/main/java/io/nekohasekai/sagernet/widget/FabProgressBehavior.kt
++++ /dev/null
+@@ -1,29 +0,0 @@
+-package io.nekohasekai.sagernet.widget
+-
+-import android.content.Context
+-import android.util.AttributeSet
+-import android.view.View
+-import androidx.coordinatorlayout.widget.CoordinatorLayout
+-import com.google.android.material.progressindicator.CircularProgressIndicator
+-
+-class FabProgressBehavior(context: Context, attrs: AttributeSet?) :
+-    CoordinatorLayout.Behavior<CircularProgressIndicator>(context, attrs) {
+-    override fun layoutDependsOn(
+-        parent: CoordinatorLayout,
+-        child: CircularProgressIndicator,
+-        dependency: View,
+-    ): Boolean {
+-        return dependency.id == (child.layoutParams as CoordinatorLayout.LayoutParams).anchorId
+-    }
+-
+-    override fun onLayoutChild(
+-        parent: CoordinatorLayout, child: CircularProgressIndicator,
+-        layoutDirection: Int,
+-    ): Boolean {
+-        val size = parent.getDependencies(child).single().measuredHeight + child.trackThickness
+-        return if (child.indicatorSize != size) {
+-            child.indicatorSize = size
+-            true
+-        } else false
+-    }
+-}
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/widget/ServiceButton.kt b/app/src/main/java/io/nekohasekai/sagernet/widget/ServiceButton.kt
+deleted file mode 100644
+index 73404c4..0000000
+--- a/app/src/main/java/io/nekohasekai/sagernet/widget/ServiceButton.kt
++++ /dev/null
+@@ -1,150 +0,0 @@
+-package io.nekohasekai.sagernet.widget
+-
+-import android.content.Context
+-import android.graphics.drawable.Drawable
+-import android.os.Build
+-import android.util.AttributeSet
+-import android.view.PointerIcon
+-import android.view.View
+-import androidx.annotation.DrawableRes
+-import androidx.appcompat.widget.TooltipCompat
+-import androidx.dynamicanimation.animation.DynamicAnimation
+-import androidx.lifecycle.LifecycleOwner
+-import androidx.lifecycle.lifecycleScope
+-import androidx.vectordrawable.graphics.drawable.Animatable2Compat
+-import androidx.vectordrawable.graphics.drawable.AnimatedVectorDrawableCompat
+-import com.google.android.material.floatingactionbutton.FloatingActionButton
+-import com.google.android.material.progressindicator.BaseProgressIndicator
+-import io.nekohasekai.sagernet.R
+-import io.nekohasekai.sagernet.bg.BaseService
+-import kotlinx.coroutines.Job
+-import kotlinx.coroutines.delay
+-import java.util.*
+-
+-class ServiceButton @JvmOverloads constructor(
+-    context: Context,
+-    attrs: AttributeSet? = null,
+-    defStyleAttr: Int = 0
+-) :
+-    FloatingActionButton(context, attrs, defStyleAttr), DynamicAnimation.OnAnimationEndListener {
+-
+-    private val callback = object : Animatable2Compat.AnimationCallback() {
+-        override fun onAnimationEnd(drawable: Drawable) {
+-            super.onAnimationEnd(drawable)
+-            var next = animationQueue.peek() ?: return
+-            if (next.icon.current == drawable) {
+-                animationQueue.pop()
+-                next = animationQueue.peek() ?: return
+-            }
+-            next.start()
+-        }
+-    }
+-
+-    private inner class AnimatedState(
+-        @DrawableRes resId: Int,
+-        private val onStart: BaseProgressIndicator<*>.() -> Unit = { hideProgress() }
+-    ) {
+-        val icon: AnimatedVectorDrawableCompat =
+-            AnimatedVectorDrawableCompat.create(context, resId)!!.apply {
+-                registerAnimationCallback(this@ServiceButton.callback)
+-            }
+-
+-        fun start() {
+-            setImageDrawable(icon)
+-            icon.start()
+-            progress.onStart()
+-        }
+-
+-        fun stop() = icon.stop()
+-    }
+-
+-    private val iconStopped by lazy { AnimatedState(R.drawable.ic_service_stopped) }
+-    private val iconConnecting by lazy {
+-        AnimatedState(R.drawable.ic_service_connecting) {
+-            hideProgress()
+-            delayedAnimation = (context as LifecycleOwner).lifecycleScope.launchWhenStarted {
+-                delay(context.resources.getInteger(android.R.integer.config_mediumAnimTime) + 1000L)
+-                isIndeterminate = true
+-                show()
+-            }
+-        }
+-    }
+-    private val iconConnected by lazy {
+-        AnimatedState(R.drawable.ic_service_connected) {
+-            delayedAnimation?.cancel()
+-            setProgressCompat(1, true)
+-        }
+-    }
+-    private val iconStopping by lazy { AnimatedState(R.drawable.ic_service_stopping) }
+-    private val animationQueue = ArrayDeque<AnimatedState>()
+-
+-    private var checked = false
+-    private var delayedAnimation: Job? = null
+-    private lateinit var progress: BaseProgressIndicator<*>
+-    fun initProgress(progress: BaseProgressIndicator<*>) {
+-        this.progress = progress
+-        progress.progressDrawable?.addSpringAnimationEndListener(this)
+-    }
+-
+-    override fun onAnimationEnd(
+-        animation: DynamicAnimation<out DynamicAnimation<*>>?, canceled: Boolean, value: Float,
+-        velocity: Float
+-    ) {
+-        if (!canceled) progress.hide()
+-    }
+-
+-    fun hideProgress() {
+-        delayedAnimation?.cancel()
+-        progress.hide()
+-    }
+-
+-    override fun onCreateDrawableState(extraSpace: Int): IntArray {
+-        val drawableState = super.onCreateDrawableState(extraSpace + 1)
+-        if (checked) View.mergeDrawableStates(
+-            drawableState,
+-            intArrayOf(android.R.attr.state_checked)
+-        )
+-        return drawableState
+-    }
+-
+-    fun changeState(state: BaseService.State, previousState: BaseService.State, animate: Boolean) {
+-        when (state) {
+-            BaseService.State.Connecting -> changeState(iconConnecting, animate)
+-            BaseService.State.Connected -> changeState(iconConnected, animate)
+-            BaseService.State.Stopping -> {
+-                changeState(iconStopping, animate && previousState == BaseService.State.Connected)
+-            }
+-            else -> changeState(iconStopped, animate)
+-        }
+-        checked = state == BaseService.State.Connected
+-        refreshDrawableState()
+-        val description = context.getText(if (state.canStop) R.string.stop else R.string.connect)
+-        contentDescription = description
+-        TooltipCompat.setTooltipText(this, description)
+-        val enabled = state.canStop || state == BaseService.State.Stopped
+-        isEnabled = enabled
+-        if (Build.VERSION.SDK_INT >= 24) pointerIcon = PointerIcon.getSystemIcon(
+-            context,
+-            if (enabled) PointerIcon.TYPE_HAND else PointerIcon.TYPE_WAIT
+-        )
+-    }
+-
+-    private fun changeState(icon: AnimatedState, animate: Boolean) {
+-        fun counters(a: AnimatedState, b: AnimatedState): Boolean =
+-            a == iconStopped && b == iconConnecting ||
+-                    a == iconConnecting && b == iconStopped ||
+-                    a == iconConnected && b == iconStopping ||
+-                    a == iconStopping && b == iconConnected
+-        if (animate) {
+-            if (animationQueue.size < 2 || !counters(animationQueue.last, icon)) {
+-                animationQueue.add(icon)
+-                if (animationQueue.size == 1) icon.start()
+-            } else animationQueue.removeLast()
+-        } else {
+-            animationQueue.peekFirst()?.stop()
+-            animationQueue.clear()
+-            icon.start()    // force ensureAnimatorSet to be called so that stop() will work
+-            icon.stop()
+-        }
+-    }
+-}
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/widget/ServiceIconView.kt b/app/src/main/java/io/nekohasekai/sagernet/widget/ServiceIconView.kt
+new file mode 100644
+index 0000000..eabfb9f
+--- /dev/null
++++ b/app/src/main/java/io/nekohasekai/sagernet/widget/ServiceIconView.kt
+@@ -0,0 +1,86 @@
++package io.nekohasekai.sagernet.widget
++
++import android.content.Context
++import android.graphics.drawable.Drawable
++import android.util.AttributeSet
++import androidx.appcompat.widget.AppCompatImageView
++import androidx.vectordrawable.graphics.drawable.Animatable2Compat
++import androidx.vectordrawable.graphics.drawable.AnimatedVectorDrawableCompat
++import io.nekohasekai.sagernet.R
++import io.nekohasekai.sagernet.bg.BaseService
++import java.util.ArrayDeque
++
++/**
++ * 024: 官方 ServiceButton 动画引擎的纯图标版 —— 保留 AVD 动画队列
++ * （斜线划出/飞机形变，连接↔停止切换动画），去掉 FAB 自绘底色与
++ * 进度环（源码遗留的“转圈”显示问题）。底色交给外层统一触摸背景。
++ */
++class ServiceIconView @JvmOverloads constructor(
++    context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0,
++) : AppCompatImageView(context, attrs, defStyleAttr) {
++
++    private val callback = object : Animatable2Compat.AnimationCallback() {
++        override fun onAnimationEnd(drawable: Drawable) {
++            super.onAnimationEnd(drawable)
++            var next = animationQueue.peek() ?: return
++            if (next.icon.current == drawable) {
++                animationQueue.pop()
++                next = animationQueue.peek() ?: return
++            }
++            next.start()
++        }
++    }
++
++    private inner class AnimatedState(@Suppress("SameParameterValue") resId: Int) {
++        val icon: AnimatedVectorDrawableCompat =
++            AnimatedVectorDrawableCompat.create(context, resId)!!.apply {
++                registerAnimationCallback(this@ServiceIconView.callback)
++            }
++
++        fun start() {
++            setImageDrawable(icon)
++            icon.start()
++        }
++
++        fun stop() = icon.stop()
++    }
++
++    private val iconStopped by lazy { AnimatedState(R.drawable.ic_service_stopped) }
++    private val iconConnecting by lazy { AnimatedState(R.drawable.ic_service_connecting) }
++    private val iconConnected by lazy { AnimatedState(R.drawable.ic_service_connected) }
++    private val iconStopping by lazy { AnimatedState(R.drawable.ic_service_stopping) }
++    private val animationQueue = ArrayDeque<AnimatedState>()
++
++    fun changeState(state: BaseService.State, previousState: BaseService.State, animate: Boolean) {
++        when (state) {
++            BaseService.State.Connecting -> changeState(iconConnecting, animate)
++            BaseService.State.Connected -> changeState(iconConnected, animate)
++            BaseService.State.Stopping -> {
++                changeState(iconStopping, animate && previousState == BaseService.State.Connected)
++            }
++
++            else -> changeState(iconStopped, animate)
++        }
++        val description = context.getText(if (state.canStop) R.string.stop else R.string.connect)
++        contentDescription = description
++    }
++
++    private fun changeState(icon: AnimatedState, animate: Boolean) {
++        fun counters(a: AnimatedState, b: AnimatedState): Boolean =
++            a == iconStopped && b == iconConnecting ||
++                    a == iconConnecting && b == iconStopped ||
++                    a == iconConnected && b == iconStopping ||
++                    a == iconStopping && b == iconConnected
++        if (animate) {
++            if (animationQueue.size < 2 || !counters(animationQueue.last, icon)) {
++                animationQueue.add(icon)
++                if (animationQueue.size == 1) icon.start()
++            } else animationQueue.removeLast()
++        } else {
++            animationQueue.peekFirst()?.stop()
++            animationQueue.clear()
++            icon.start() // force ensureAnimatorSet to be called so that stop() will work
++            icon.stop()
++        }
++    }
++}
+diff --git a/app/src/main/java/io/nekohasekai/sagernet/widget/StatsBar.kt b/app/src/main/java/io/nekohasekai/sagernet/widget/StatsBar.kt
+deleted file mode 100644
+index 728a4cc..0000000
+--- a/app/src/main/java/io/nekohasekai/sagernet/widget/StatsBar.kt
++++ /dev/null
+@@ -1,346 +0,0 @@
+-package io.nekohasekai.sagernet.widget
+-
+-import android.annotation.SuppressLint
+-import android.content.Context
+-import android.text.format.Formatter
+-import android.util.AttributeSet
+-import android.view.View
+-import android.widget.TextView
+-import androidx.appcompat.widget.TooltipCompat
+-import androidx.coordinatorlayout.widget.CoordinatorLayout
+-import androidx.lifecycle.lifecycleScope
+-import androidx.lifecycle.whenStarted
+-import com.google.android.material.bottomappbar.BottomAppBar
+-import io.nekohasekai.sagernet.R
+-import io.nekohasekai.sagernet.bg.BaseService
+-import io.nekohasekai.sagernet.database.DataStore
+-import io.nekohasekai.sagernet.ktx.*
+-import io.nekohasekai.sagernet.ui.MainActivity
+-import kotlin.math.abs
+-import kotlinx.coroutines.Dispatchers
+-import kotlinx.coroutines.Job
+-import kotlinx.coroutines.delay
+-import kotlinx.coroutines.launch
+-
+-class StatsBar @JvmOverloads constructor(
+-    context: Context, attrs: AttributeSet? = null,
+-    defStyleAttr: Int = R.attr.bottomAppBarStyle,
+-) : BottomAppBar(context, attrs, defStyleAttr) {
+-    companion object {
+-        private const val INITIAL_HIDE_DELAY_MS = 100L
+-        private const val SCROLL_TOGGLE_THRESHOLD_DP = 8f
+-    }
+-
+-    private enum class Transition {
+-        ShowImmediate,
+-        ShowAnimated,
+-        HideImmediate,
+-        HideAfterStart,
+-    }
+-
+-    private lateinit var statusText: TextView
+-    private lateinit var txText: TextView
+-    private lateinit var rxText: TextView
+-    @Suppress("unused")
+-    private lateinit var behavior: YourBehavior
+-    private var currentState = BaseService.State.Idle
+-    private var pendingTransition: Transition? = Transition.HideImmediate
+-    private var transitionJob: Job? = null
+-
+-    private var scrollHidden = false
+-    private var scrollDirection = 0 // 1 = hide (dy>0), -1 = show (dy<0), 0 = none
+-    private var scrollAccumulatedDy = 0
+-    private val scrollToggleThresholdPx =
+-        (SCROLL_TOGGLE_THRESHOLD_DP * resources.displayMetrics.density).toInt().coerceAtLeast(8)
+-
+-    var useExternalScrollDriver = false
+-        set(value) {
+-            if (field == value) return
+-            field = value
+-            syncScrollHiddenFromView()
+-            resetScrollDriverState()
+-            updateHideOnScroll()
+-        }
+-
+-    var allowShow = false
+-        set(value) {
+-            field = value
+-            updateHideOnScroll()
+-        }
+-
+-    init {
+-        alpha = 0f
+-    }
+-
+-    override fun getBehavior(): YourBehavior {
+-        if (!this::behavior.isInitialized) behavior = YourBehavior()
+-        return behavior
+-    }
+-
+-    inner class YourBehavior : Behavior() {
+-
+-        override fun onStartNestedScroll(
+-            coordinatorLayout: CoordinatorLayout,
+-            child: BottomAppBar,
+-            directTarget: View,
+-            target: View,
+-            nestedScrollAxes: Int,
+-            type: Int,
+-        ): Boolean {
+-            if (useExternalScrollDriver) return false
+-            return super.onStartNestedScroll(
+-                coordinatorLayout,
+-                child,
+-                directTarget,
+-                target,
+-                nestedScrollAxes,
+-                type,
+-            )
+-        }
+-
+-        override fun slideUp(child: BottomAppBar) {
+-            if (!allowShow) return
+-            super.slideUp(child)
+-        }
+-    }
+-
+-    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+-        super.onLayout(changed, left, top, right, bottom)
+-        val transition = pendingTransition
+-        if (transition != null) {
+-            pendingTransition = null
+-            applyTransition(transition)
+-        } else if (alpha == 0f) {
+-            alpha = 1f
+-        }
+-    }
+-
+-    override fun setOnClickListener(l: OnClickListener?) {
+-        statusText = findViewById(R.id.status)
+-        txText = findViewById(R.id.tx)
+-        rxText = findViewById(R.id.rx)
+-        super.setOnClickListener(l)
+-    }
+-
+-    private fun setStatus(text: CharSequence) {
+-        statusText.text = text
+-        TooltipCompat.setTooltipText(this, text)
+-    }
+-
+-    private fun updateHideOnScroll() {
+-        hideOnScroll =
+-            !useExternalScrollDriver && allowShow && currentState == BaseService.State.Connected
+-    }
+-
+-    private fun shouldShow(): Boolean {
+-        return allowShow && currentState == BaseService.State.Connected
+-    }
+-
+-    private fun resetScrollDriverState() {
+-        scrollDirection = 0
+-        scrollAccumulatedDy = 0
+-    }
+-
+-    private fun syncScrollHiddenFromView() {
+-        if (!isLaidOut || height <= 0) return
+-        scrollHidden = translationY >= height / 2f
+-    }
+-
+-    fun onListScrolled(dy: Int) {
+-        if (!useExternalScrollDriver || !shouldShow() || dy == 0) return
+-
+-        val direction = if (dy > 0) 1 else -1
+-        if (direction != scrollDirection) {
+-            scrollDirection = direction
+-            scrollAccumulatedDy = 0
+-        }
+-        scrollAccumulatedDy += dy
+-
+-        val wantHidden = scrollAccumulatedDy > 0
+-        if (wantHidden == scrollHidden) {
+-            if (abs(scrollAccumulatedDy) > scrollToggleThresholdPx) {
+-                scrollAccumulatedDy = direction * scrollToggleThresholdPx
+-            }
+-            return
+-        }
+-        if (abs(scrollAccumulatedDy) < scrollToggleThresholdPx) return
+-
+-        scrollHidden = wantHidden
+-        scrollAccumulatedDy = 0
+-        if (wantHidden) performHide() else performShow()
+-    }
+-
+-    fun syncMainControls(
+-        showControls: Boolean,
+-        state: BaseService.State,
+-        showWhenConnected: Boolean,
+-        animate: Boolean,
+-    ) {
+-        currentState = state
+-        allowShow = showControls
+-        when {
+-            !showControls || state != BaseService.State.Connected -> {
+-                applyTransition(
+-                    if (animate && showControls) Transition.HideAfterStart else Transition.HideImmediate
+-                )
+-            }
+-
+-            showWhenConnected -> applyTransition(
+-                if (animate) Transition.ShowAnimated else Transition.ShowImmediate
+-            )
+-            alpha == 0f && isLaidOut -> alpha = 1f
+-        }
+-    }
+-
+-    private fun applyTransition(transition: Transition) {
+-        if (transition == Transition.HideImmediate && hasPendingDelayedHide()) return
+-        cancelPendingTransition()
+-        if (!isLaidOut || height == 0) {
+-            pendingTransition = transition
+-            alpha = if (transition == Transition.HideImmediate && !allowShow) 0f else 1f
+-            return
+-        }
+-        pendingTransition = null
+-        when (transition) {
+-            Transition.ShowImmediate -> commitVisible(animated = false)
+-            Transition.ShowAnimated -> commitVisible(animated = true)
+-            Transition.HideImmediate -> commitHidden(animated = false)
+-            Transition.HideAfterStart -> commitHidden(animated = true)
+-        }
+-    }
+-
+-    private fun commitVisible(animated: Boolean) {
+-        alpha = 1f
+-        scrollHidden = false
+-        resetScrollDriverState()
+-        if (animated) {
+-            performShow()
+-        } else {
+-            getBehavior().slideUp(this)
+-            animate().cancel()
+-            translationY = 0f
+-        }
+-    }
+-
+-    private fun commitHidden(animated: Boolean) {
+-        alpha = 1f
+-        scrollHidden = true
+-        resetScrollDriverState()
+-        if (!animated) {
+-            syncHiddenPosition()
+-            return
+-        }
+-        val activity = context as? MainActivity
+-        if (activity == null) {
+-            post {
+-                if (shouldShow()) {
+-                    commitVisible(animated = false)
+-                } else if (isLaidOut && height > 0) {
+-                    performHide()
+-                } else {
+-                    pendingTransition = Transition.HideAfterStart
+-                }
+-            }
+-            return
+-        }
+-        transitionJob = activity.lifecycleScope.launch(Dispatchers.Main) {
+-            delay(INITIAL_HIDE_DELAY_MS)
+-            activity.whenStarted {
+-                transitionJob = null
+-                if (shouldShow()) {
+-                    commitVisible(animated = false)
+-                } else if (isLaidOut && height > 0) {
+-                    performHide()
+-                } else {
+-                    pendingTransition = Transition.HideAfterStart
+-                }
+-            }
+-        }
+-    }
+-
+-    private fun syncHiddenPosition() {
+-        getBehavior().slideDown(this)
+-        animate().cancel()
+-        translationY = height.toFloat()
+-        alpha = 1f
+-    }
+-
+-    private fun cancelPendingTransition() {
+-        transitionJob?.cancel()
+-        transitionJob = null
+-    }
+-
+-    private fun hasPendingDelayedHide(): Boolean {
+-        return pendingTransition == Transition.HideAfterStart || transitionJob != null
+-    }
+-
+-    fun changeState(state: BaseService.State) {
+-        currentState = state
+-        updateHideOnScroll()
+-        if (state == BaseService.State.Connected) {
+-            setStatus(app.getText(R.string.vpn_connected))
+-        } else {
+-            updateSpeed(0, 0)
+-            setStatus(
+-                context.getText(
+-                    when (state) {
+-                        BaseService.State.Connecting -> R.string.connecting
+-                        BaseService.State.Stopping -> R.string.stopping
+-                        else -> R.string.not_connected
+-                    }
+-                )
+-            )
+-        }
+-    }
+-
+-    @SuppressLint("SetTextI18n")
+-    fun updateSpeed(txRate: Long, rxRate: Long) {
+-        txText.text = "▲  ${
+-            context.getString(
+-                R.string.speed, Formatter.formatFileSize(context, txRate)
+-            )
+-        }"
+-        rxText.text = "▼  ${
+-            context.getString(
+-                R.string.speed, Formatter.formatFileSize(context, rxRate)
+-            )
+-        }"
+-    }
+-
+-    fun testConnection() {
+-        val activity = context as MainActivity
+-        isEnabled = false
+-        setStatus(app.getText(R.string.connection_test_testing))
+-        runOnDefaultDispatcher {
+-            try {
+-                val elapsed = activity.urlTest()
+-                onMainDispatcher {
+-                    isEnabled = true
+-                    setStatus(
+-                        app.getString(
+-                            if (DataStore.connectionTestURL.startsWith("https://")) {
+-                                R.string.connection_test_available
+-                            } else {
+-                                R.string.connection_test_available_http
+-                            }, elapsed
+-                        )
+-                    )
+-                }
+-
+-            } catch (e: Exception) {
+-                Logs.w(e.toString())
+-                onMainDispatcher {
+-                    isEnabled = true
+-                    setStatus(app.getText(R.string.connection_test_testing))
+-
+-                    activity.snackbar(
+-                        app.getString(
+-                            R.string.connection_test_error, e.readableMessage
+-                        )
+-                    ).show()
+-                }
+-            }
+-        }
+-    }
+-
+-}
+diff --git a/app/src/main/res/drawable/bg_ip_flag.xml b/app/src/main/res/drawable/bg_ip_flag.xml
+new file mode 100644
+index 0000000..b650420
+--- /dev/null
++++ b/app/src/main/res/drawable/bg_ip_flag.xml
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- 017: 命中标记小徽章（圆角描边） -->
++<shape xmlns:android="http://schemas.android.com/apk/res/android">
++    <corners android:radius="6dp" />
++    <stroke
++        android:width="1dp"
++        android:color="#4DFFFFFF" />
++</shape>
+diff --git a/app/src/main/res/drawable/bg_touch_rounded.xml b/app/src/main/res/drawable/bg_touch_rounded.xml
+new file mode 100644
+index 0000000..2a1e0c0
+--- /dev/null
++++ b/app/src/main/res/drawable/bg_touch_rounded.xml
+@@ -0,0 +1,11 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- 023: 启动栏统一触摸底色 —— 圆角矩形 ripple（按各信息块占位自适应） -->
++<ripple xmlns:android="http://schemas.android.com/apk/res/android"
++    android:color="?android:attr/colorControlHighlight">
++    <item>
++        <shape android:shape="rectangle">
++            <corners android:radius="12dp" />
++            <solid android:color="@android:color/transparent" />
++        </shape>
++    </item>
++</ripple>
+diff --git a/app/src/main/res/drawable/ic_outbound_ip.xml b/app/src/main/res/drawable/ic_outbound_ip.xml
+new file mode 100644
+index 0000000..1efe7ea
+--- /dev/null
++++ b/app/src/main/res/drawable/ic_outbound_ip.xml
+@@ -0,0 +1,14 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- 017: ⓘ 出站 IP 查询按钮图标（圆圈 + i） -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp"
++    android:height="24dp"
++    android:viewportWidth="24"
++    android:viewportHeight="24">
++    <path
++        android:fillColor="#FFFFFFFF"
++        android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM12,20c-4.41,0 -8,-3.59 -8,-8s3.59,-8 8,-8 8,3.59 8,8 -3.59,8 -8,8z" />
++    <path
++        android:fillColor="#FFFFFFFF"
++        android:pathData="M11,7h2v2h-2zM11,11h2v6h-2z" />
++</vector>
 diff --git a/app/src/main/res/layout/layout_appbar.xml b/app/src/main/res/layout/layout_appbar.xml
 index a8df256..9177647 100644
 --- a/app/src/main/res/layout/layout_appbar.xml
@@ -1434,6 +4004,120 @@ index a8df256..9177647 100644
 -</com.google.android.material.appbar.AppBarLayout>
 \ No newline at end of file
 +</com.google.android.material.appbar.AppBarLayout>
+diff --git a/app/src/main/res/layout/layout_connect_bar.xml b/app/src/main/res/layout/layout_connect_bar.xml
+new file mode 100644
+index 0000000..ed5c617
+--- /dev/null
++++ b/app/src/main/res/layout/layout_connect_bar.xml
+@@ -0,0 +1,108 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- 017: 底部长条启动栏内容。背景/圆角由外层 ConnectBar(MaterialCardView) 承担。
++     高度 64dp ≈ 节点卡片「地址行 + 协议/延迟行」两行的高度；
++     左右 2dp 边距与节点卡片对齐（layout_profile.xml margin=2dp）。 -->
++<merge xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:app="http://schemas.android.com/apk/res-auto"
++    xmlns:tools="http://schemas.android.com/tools"
++    tools:parentTag="com.google.android.material.card.MaterialCardView"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent">
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="match_parent"
++        android:gravity="center_vertical"
++        android:orientation="horizontal"
++        android:paddingStart="10dp"
++        android:paddingEnd="10dp"
++        android:paddingTop="8dp"
++        android:paddingBottom="8dp">
++
++        <!-- ⓘ 出站 IP 查询（竖直居中，占满两行） -->
++        <androidx.appcompat.widget.AppCompatImageView
++            android:id="@+id/bar_ip_info"
++            android:layout_width="36dp"
++            android:layout_height="36dp"
++            android:layout_gravity="center_vertical"
++            android:scaleType="fitCenter"
++            android:background="@drawable/bg_touch_rounded"
++            android:contentDescription="@string/outbound_ip"
++            app:srcCompat="@drawable/ic_outbound_ip"
++            app:tint="@color/white" />
++
++        <!-- [2] 上传/下载：固定冗余宽度（容纳 ▲ 999 MB/s 级别文案，
++             网速变化时框宽恒定不抖动） -->
++        <LinearLayout
++            android:id="@+id/bar_speed_zone"
++            android:layout_width="88dp"
++            android:layout_height="wrap_content"
++            android:layout_marginStart="6dp"
++            android:orientation="vertical">
++
++            <TextView
++                android:id="@+id/bar_tx"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:ellipsize="end"
++                android:singleLine="true"
++                android:textColor="@color/white"
++                android:textSize="12sp"
++                tools:text="▲ 0 B/s" />
++
++            <TextView
++                android:id="@+id/bar_rx"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:ellipsize="end"
++                android:singleLine="true"
++                android:textColor="@color/white"
++                android:textSize="12sp"
++                tools:text="▼ 0 B/s" />
++        </LinearLayout>
++
++        <!-- [3] 实时延迟：值在上、标签在下；固定宽度 —— 文案切换时区域宽度不变 -->
++        <LinearLayout
++            android:id="@+id/bar_delay_zone"
++            android:layout_width="76dp"
++            android:layout_height="match_parent"
++            android:layout_marginEnd="4dp"
++            android:gravity="center_vertical"
++            android:orientation="vertical"
++            android:paddingStart="10dp"
++            android:paddingEnd="4dp">
++
++            <TextView
++                android:id="@+id/bar_delay_value"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:ellipsize="end"
++                android:singleLine="true"
++                android:text="@string/bar_delay_tap"
++                android:textColor="@color/white"
++                android:textSize="12sp" />
++
++            <TextView
++                android:id="@+id/bar_delay_label"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:alpha="0.72"
++                android:singleLine="true"
++                android:text="@string/bar_delay_label"
++                android:textColor="@color/white"
++                android:textSize="11sp" />
++        </LinearLayout>
++
++        <!-- [4] 启动/关闭：官方 AVD 动画引擎（斜线划出/飞机形变），无自绘底色。
++             进度环已移除（源码遗留“转圈”显示问题） -->
++        <io.nekohasekai.sagernet.widget.ServiceIconView
++            android:id="@+id/bar_fab"
++            android:layout_width="36dp"
++            android:layout_height="36dp"
++            android:background="@drawable/bg_touch_rounded"
++            android:contentDescription="@string/connect"
++            android:scaleType="fitCenter"
++            app:srcCompat="@drawable/ic_service_idle" />
++
++    </LinearLayout>
++</merge>
 diff --git a/app/src/main/res/layout/layout_group_item.xml b/app/src/main/res/layout/layout_group_item.xml
 index a274d5d..7e32499 100644
 --- a/app/src/main/res/layout/layout_group_item.xml
@@ -1510,6 +4194,436 @@ index 0d39b53..053e428 100644
          app:tabRippleColor="@android:color/transparent"
          app:tabSelectedTextColor="?tabSelectedTextColor"
          app:tabTextColor="?tabTextColor"
+diff --git a/app/src/main/res/layout/layout_main.xml b/app/src/main/res/layout/layout_main.xml
+index 8509252..e5d6f7b 100644
+--- a/app/src/main/res/layout/layout_main.xml
++++ b/app/src/main/res/layout/layout_main.xml
+@@ -19,84 +19,18 @@
+             android:layout_width="match_parent"
+             android:layout_height="match_parent" />
+ 
+-        <!-- We double trackThickness as half of it will be invisible -->
+-        <com.google.android.material.progressindicator.CircularProgressIndicator
+-            android:id="@+id/fabProgress"
++        <!-- 017: 官方 FAB + 实时数据托板（fabProgress/fab/stats）整体移除，
++             替换为底部常驻长条启动栏：ⓘ出站IP | 上传/下载 | 实时延迟 | 启动按钮 -->
++        <io.nekohasekai.sagernet.widget.ConnectBar
++            android:id="@+id/connect_bar"
+             android:layout_width="wrap_content"
+-            android:layout_height="wrap_content"
+-            android:max="1"
+-            android:visibility="invisible"
+-            app:indicatorColor="?primaryOrTextSecondary"
+-            app:layout_anchor="@+id/fab"
+-            app:layout_anchorGravity="center"
+-            app:layout_behavior="io.nekohasekai.sagernet.widget.FabProgressBehavior"
+-            app:trackCornerRadius="@dimen/mtrl_progress_track_thickness"
+-            app:trackThickness="8dp" />
+-
+-        <io.nekohasekai.sagernet.widget.ServiceButton
+-            android:id="@+id/fab"
+-            android:layout_width="wrap_content"
+-            android:layout_height="wrap_content"
++            android:layout_height="64dp"
++            android:layout_gravity="bottom|center_horizontal"
++            android:layout_marginBottom="4dp"
+             android:elevation="6dp"
+-            android:nextFocusDown="@+id/stats"
+-            app:backgroundTint="?colorPrimary"
+-            app:layout_anchor="@id/stats"
+-            app:pressedTranslationZ="6dp"
+-            app:srcCompat="@drawable/ic_service_idle" />
+-
+-        <io.nekohasekai.sagernet.widget.StatsBar
+-            android:id="@+id/stats"
+-            android:layout_width="match_parent"
+-            android:layout_height="wrap_content"
+-            android:layout_gravity="bottom"
+-            android:nextFocusUp="@+id/fab"
+-            app:backgroundTint="?colorPrimary"
+-            app:contentInsetStart="0dp"
+-            app:hideOnScroll="true">
+-
+-            <LinearLayout
+-                android:layout_width="match_parent"
+-                android:layout_height="wrap_content"
+-                android:background="?android:attr/selectableItemBackground"
+-                android:orientation="vertical"
+-                android:padding="16dp">
+-
+-                <TextView
+-                    android:id="@+id/tx"
+-                    android:layout_width="wrap_content"
+-                    android:layout_height="wrap_content"
+-                    android:layout_columnWeight="1"
+-                    android:layout_gravity="fill_horizontal"
+-                    android:ellipsize="marquee"
+-                    android:singleLine="true"
+-                    android:textColor="@color/white"
+-                    android:textSize="14sp" />
+-
+-                <TextView
+-                    android:id="@+id/rx"
+-                    android:layout_width="wrap_content"
+-                    android:layout_height="wrap_content"
+-                    android:layout_columnWeight="1"
+-                    android:layout_gravity="fill_horizontal"
+-                    android:ellipsize="marquee"
+-                    android:singleLine="true"
+-                    android:textColor="@color/white"
+-                    android:textSize="14sp" />
+-
+-                <TextView
+-                    android:id="@+id/status"
+-                    android:layout_width="wrap_content"
+-                    android:layout_height="wrap_content"
+-                    android:layout_gravity="fill_horizontal"
+-                    android:ellipsize="end"
+-                    android:maxLines="1"
+-                    android:textColor="@color/white"
+-                    android:textSize="16sp"
+-                    tools:text="@string/connection_test_available" />
+-
+-            </LinearLayout>
+-
+-        </io.nekohasekai.sagernet.widget.StatsBar>
++            app:cardBackgroundColor="?attr/colorPrimary"
++            app:cardCornerRadius="18dp"
++            app:cardElevation="4dp" />
+ 
+     </androidx.coordinatorlayout.widget.CoordinatorLayout>
+ 
+diff --git a/app/src/main/res/layout/layout_outbound_ip_dialog.xml b/app/src/main/res/layout/layout_outbound_ip_dialog.xml
+new file mode 100644
+index 0000000..906852a
+--- /dev/null
++++ b/app/src/main/res/layout/layout_outbound_ip_dialog.xml
+@@ -0,0 +1,292 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- 017: 出站 IP 查询弹窗（复刻 FlClash 0.8.99 出站 IP 面板；仅保留「基础信息 + 网络」） -->
++<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:tools="http://schemas.android.com/tools"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:scrollbars="vertical">
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:orientation="vertical"
++        android:paddingStart="24dp"
++        android:paddingEnd="24dp"
++        android:paddingTop="8dp"
++        android:paddingBottom="4dp">
++
++        <!-- ── 基础信息 ── -->
++        <TextView
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="8dp"
++            android:text="@string/ip_info_basic"
++            android:textAppearance="?android:attr/textAppearanceMedium"
++            android:textColor="?android:attr/textColorSecondary" />
++
++        <LinearLayout
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="8dp"
++            android:orientation="vertical">
++
++            <LinearLayout
++                android:id="@+id/row_ip"
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:background="?attr/selectableItemBackground"
++                android:gravity="center_vertical"
++                android:orientation="horizontal"
++                android:paddingTop="10dp"
++                android:paddingBottom="10dp">
++
++                <TextView
++                    android:layout_width="0dp"
++                    android:layout_height="wrap_content"
++                    android:layout_weight="1"
++                    android:text="@string/ip_address"
++                    android:textAppearance="?android:attr/textAppearanceMedium" />
++
++                <TextView
++                    android:id="@+id/ip_value"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:gravity="end"
++                    android:textAppearance="?android:attr/textAppearanceMedium"
++                    android:textColor="?android:attr/textColorSecondary"
++                    tools:text="138.199.25.98" />
++            </LinearLayout>
++
++            <View
++                android:layout_width="match_parent"
++                android:layout_height="1dp"
++                android:background="?android:attr/listDivider" />
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:gravity="center_vertical"
++                android:orientation="horizontal"
++                android:paddingTop="10dp"
++                android:paddingBottom="10dp">
++
++                <TextView
++                    android:layout_width="0dp"
++                    android:layout_height="wrap_content"
++                    android:layout_weight="1"
++                    android:text="@string/ip_country"
++                    android:textAppearance="?android:attr/textAppearanceMedium" />
++
++                <TextView
++                    android:id="@+id/ip_country_value"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:gravity="end"
++                    android:textAppearance="?android:attr/textAppearanceMedium"
++                    android:textColor="?android:attr/textColorSecondary"
++                    tools:text="中国香港" />
++            </LinearLayout>
++
++            <View
++                android:layout_width="match_parent"
++                android:layout_height="1dp"
++                android:background="?android:attr/listDivider" />
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:gravity="center_vertical"
++                android:orientation="horizontal"
++                android:paddingTop="10dp"
++                android:paddingBottom="10dp">
++
++                <TextView
++                    android:layout_width="0dp"
++                    android:layout_height="wrap_content"
++                    android:layout_weight="1"
++                    android:text="@string/ip_level"
++                    android:textAppearance="?android:attr/textAppearanceMedium" />
++
++                <TextView
++                    android:id="@+id/ip_level_value"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:gravity="end"
++                    android:textAppearance="?android:attr/textAppearanceMedium"
++                    android:textColor="?android:attr/textColorSecondary"
++                    tools:text="普通" />
++            </LinearLayout>
++
++            <View
++                android:layout_width="match_parent"
++                android:layout_height="1dp"
++                android:background="?android:attr/listDivider" />
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:gravity="center_vertical"
++                android:orientation="horizontal"
++                android:paddingTop="10dp"
++                android:paddingBottom="10dp">
++
++                <TextView
++                    android:layout_width="0dp"
++                    android:layout_height="wrap_content"
++                    android:layout_weight="1"
++                    android:text="@string/ip_type"
++                    android:textAppearance="?android:attr/textAppearanceMedium" />
++
++                <TextView
++                    android:id="@+id/ip_type_value"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:gravity="end"
++                    android:textAppearance="?android:attr/textAppearanceMedium"
++                    android:textColor="?android:attr/textColorSecondary"
++                    tools:text="机房" />
++            </LinearLayout>
++
++            <View
++                android:layout_width="match_parent"
++                android:layout_height="1dp"
++                android:background="?android:attr/listDivider" />
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:gravity="center_vertical"
++                android:orientation="horizontal"
++                android:paddingTop="10dp"
++                android:paddingBottom="10dp">
++
++                <TextView
++                    android:layout_width="0dp"
++                    android:layout_height="wrap_content"
++                    android:layout_weight="1"
++                    android:text="@string/ip_flags"
++                    android:textAppearance="?android:attr/textAppearanceMedium" />
++
++                <TextView
++                    android:id="@+id/ip_flags_value"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:background="@drawable/bg_ip_flag"
++                    android:gravity="end"
++                    android:paddingStart="10dp"
++                    android:paddingEnd="10dp"
++                    android:paddingTop="2dp"
++                    android:paddingBottom="2dp"
++                    android:textAppearance="?android:attr/textAppearanceSmall"
++                    android:textColor="?android:attr/textColorSecondary"
++                    tools:text="代理" />
++            </LinearLayout>
++        </LinearLayout>
++
++        <!-- ── 网络 ── -->
++        <TextView
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="20dp"
++            android:text="@string/ip_info_network"
++            android:textAppearance="?android:attr/textAppearanceMedium"
++            android:textColor="?android:attr/textColorSecondary" />
++
++        <LinearLayout
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="8dp"
++            android:orientation="vertical">
++
++            <LinearLayout
++                android:id="@+id/row_org"
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:background="?attr/selectableItemBackground"
++                android:gravity="center_vertical"
++                android:orientation="horizontal"
++                android:paddingTop="10dp"
++                android:paddingBottom="10dp">
++
++                <TextView
++                    android:layout_width="0dp"
++                    android:layout_height="wrap_content"
++                    android:layout_weight="1"
++                    android:text="@string/ip_org"
++                    android:textAppearance="?android:attr/textAppearanceMedium" />
++
++                <TextView
++                    android:id="@+id/ip_org_value"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:gravity="end"
++                    android:textAppearance="?android:attr/textAppearanceMedium"
++                    android:textColor="?android:attr/textColorSecondary"
++                    tools:text="Cdn77 SGP" />
++            </LinearLayout>
++
++            <View
++                android:layout_width="match_parent"
++                android:layout_height="1dp"
++                android:background="?android:attr/listDivider" />
++
++            <LinearLayout
++                android:id="@+id/row_asn"
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:background="?attr/selectableItemBackground"
++                android:gravity="center_vertical"
++                android:orientation="horizontal"
++                android:paddingTop="10dp"
++                android:paddingBottom="10dp">
++
++                <TextView
++                    android:layout_width="0dp"
++                    android:layout_height="wrap_content"
++                    android:layout_weight="1"
++                    android:text="@string/ip_asn"
++                    android:textAppearance="?android:attr/textAppearanceMedium" />
++
++                <TextView
++                    android:id="@+id/ip_asn_value"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:gravity="end"
++                    android:textAppearance="?android:attr/textAppearanceMedium"
++                    android:textColor="?android:attr/textColorSecondary"
++                    tools:text="AS60068" />
++            </LinearLayout>
++
++            <View
++                android:layout_width="match_parent"
++                android:layout_height="1dp"
++                android:background="?android:attr/listDivider" />
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:gravity="center_vertical"
++                android:orientation="horizontal"
++                android:paddingTop="10dp"
++                android:paddingBottom="10dp">
++
++                <TextView
++                    android:layout_width="0dp"
++                    android:layout_height="wrap_content"
++                    android:layout_weight="1"
++                    android:text="@string/ip_source"
++                    android:textAppearance="?android:attr/textAppearanceMedium" />
++
++                <TextView
++                    android:id="@+id/ip_source_value"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:gravity="end"
++                    android:text="@string/ip_source_ipapicom"
++                    android:textAppearance="?android:attr/textAppearanceMedium"
++                    android:textColor="?android:attr/textColorSecondary" />
++            </LinearLayout>
++        </LinearLayout>
++
++    </LinearLayout>
++</ScrollView>
+diff --git a/app/src/main/res/layout/layout_profile_list.xml b/app/src/main/res/layout/layout_profile_list.xml
+index 9f8a4b5..e975b8f 100644
+--- a/app/src/main/res/layout/layout_profile_list.xml
++++ b/app/src/main/res/layout/layout_profile_list.xml
+@@ -1,5 +1,5 @@
+ <?xml version="1.0" encoding="utf-8"?>
+-<com.simplecityapps.recyclerview_fastscroll.views.FastScrollRecyclerView xmlns:android="http://schemas.android.com/apk/res/android"
++<io.nekohasekai.sagernet.widget.ExactScrollRecyclerView xmlns:android="http://schemas.android.com/apk/res/android"
+     xmlns:app="http://schemas.android.com/apk/res-auto"
+     xmlns:tools="http://schemas.android.com/tools"
+     android:id="@+id/configuration_list"
+diff --git a/app/src/main/res/layout/layout_route.xml b/app/src/main/res/layout/layout_route.xml
+index 971231f..0ca1bbb 100644
+--- a/app/src/main/res/layout/layout_route.xml
++++ b/app/src/main/res/layout/layout_route.xml
+@@ -14,7 +14,7 @@
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content" />
+ 
+-        <com.simplecityapps.recyclerview_fastscroll.views.FastScrollRecyclerView
++        <io.nekohasekai.sagernet.widget.ExactScrollRecyclerView
+             android:id="@+id/route_list"
+             android:layout_width="match_parent"
+             android:layout_height="match_parent"
+@@ -24,7 +24,7 @@
+             app:fastScrollThumbColor="?colorPrimary"
+             app:fastScrollThumbInactiveColor="?colorPrimary">
+ 
+-        </com.simplecityapps.recyclerview_fastscroll.views.FastScrollRecyclerView>
++        </io.nekohasekai.sagernet.widget.ExactScrollRecyclerView>
+ 
+     </LinearLayout>
+ 
 diff --git a/app/src/main/res/layout/layout_tools.xml b/app/src/main/res/layout/layout_tools.xml
 index 08c0c50..b25a897 100644
 --- a/app/src/main/res/layout/layout_tools.xml
@@ -1529,3 +4643,189 @@ index 08c0c50..b25a897 100644
          app:tabSelectedTextColor="?tabSelectedTextColor"
          app:tabTextColor="?tabTextColor"
          app:tabUnboundedRipple="false" />
+diff --git a/app/src/main/res/values-fa/strings.xml b/app/src/main/res/values-fa/strings.xml
+index c59a591..cf227f4 100644
+--- a/app/src/main/res/values-fa/strings.xml
++++ b/app/src/main/res/values-fa/strings.xml
+@@ -501,7 +501,6 @@
+     <string name="domain_strategy_for_remote">راهبرد دامنه برای ارتباط از راه دور</string>
+     <string name="domain_strategy_for_direct">راهبرد دامنه برای ارتباط مستقیم</string>
+     <string name="domain_strategy_for_server">راهبرد دامنه برای نشانی‌های سرور</string>
+-    <string name="show_bottom_bar">نمایش نوار پایین مانند SagerNet</string>
+     <string name="utls_fingerprint">اثر انگشت uTLS</string>
+     <string name="custom_outbound_json">خروجی سفارشی JSON</string>
+     <string name="custom_config_json">پراکسی سفارشی JSON</string>
+diff --git a/app/src/main/res/values-ja/strings.xml b/app/src/main/res/values-ja/strings.xml
+index d614b09..e702550 100644
+--- a/app/src/main/res/values-ja/strings.xml
++++ b/app/src/main/res/values-ja/strings.xml
+@@ -471,7 +471,6 @@
+     <string name="domain_strategy_for_remote">リモートのドメイン戦略</string>
+     <string name="domain_strategy_for_direct">ダイレクトのドメイン戦略</string>
+     <string name="domain_strategy_for_server">サーバーアドレスのドメイン戦略</string>
+-    <string name="show_bottom_bar">SagerNet のようなボトムバーを表示</string>
+     <string name="utls_fingerprint">uTLS フィンガープリント</string>
+     <string name="custom_outbound_json">カスタムアウトバウンド JSON</string>
+     <string name="custom_config_json">カスタム設定 JSON</string>
+diff --git a/app/src/main/res/values-ko/strings.xml b/app/src/main/res/values-ko/strings.xml
+index 1cf8fd4..a6c125b 100644
+--- a/app/src/main/res/values-ko/strings.xml
++++ b/app/src/main/res/values-ko/strings.xml
+@@ -465,7 +465,6 @@
+     <string name="domain_strategy_for_remote">원격용 도메인 전략</string>
+     <string name="domain_strategy_for_direct">직접용 도메인 전략</string>
+     <string name="domain_strategy_for_server">서버 주소용 도메인 전략</string>
+-    <string name="show_bottom_bar">SagerNet처럼 하단 바 표시</string>
+     <string name="utls_fingerprint">uTLS 지문</string>
+     <string name="custom_outbound_json">사용자 지정 아웃바운드 JSON</string>
+     <string name="custom_config_json">사용자 지정 구성 JSON</string>
+diff --git a/app/src/main/res/values-ru/strings.xml b/app/src/main/res/values-ru/strings.xml
+index 4fc87af..2259baf 100644
+--- a/app/src/main/res/values-ru/strings.xml
++++ b/app/src/main/res/values-ru/strings.xml
+@@ -415,7 +415,6 @@
+ <string name="share">Поделиться</string>
+ <string name="share_qr_nfc">QR-код</string>
+ <string name="share_subscription">Поделиться подпиской</string>
+-<string name="show_bottom_bar">Показать нижнюю панель, как в SagerNet</string>
+ <string name="show_direct_speed">Показать прямую скорость</string>
+ <string name="show_direct_speed_sum">Также в уведомлении показывать скорость трафика без прокси</string>
+ <string name="show_group_in_notification">Показывать название группы в уведомлении</string>
+diff --git a/app/src/main/res/values-uk/strings.xml b/app/src/main/res/values-uk/strings.xml
+index 528e309..4cc12fe 100644
+--- a/app/src/main/res/values-uk/strings.xml
++++ b/app/src/main/res/values-uk/strings.xml
+@@ -475,7 +475,6 @@
+     <string name="domain_strategy_for_remote">Стратегія доменів для віддаленого</string>
+     <string name="domain_strategy_for_direct">Стратегія доменів для прямого</string>
+     <string name="domain_strategy_for_server">Стратегія доменів для адреси сервера</string>
+-    <string name="show_bottom_bar">Показувати нижню панель, як у SagerNet</string>
+     <string name="utls_fingerprint">Відбиток uTLS</string>
+     <string name="custom_outbound_json">Власний JSON вихідного з\'єднання</string>
+     <string name="custom_config_json">Власний JSON конфігурації</string>
+diff --git a/app/src/main/res/values-zh-rCN/strings.xml b/app/src/main/res/values-zh-rCN/strings.xml
+index 25ce900..288fc72 100644
+--- a/app/src/main/res/values-zh-rCN/strings.xml
++++ b/app/src/main/res/values-zh-rCN/strings.xml
+@@ -204,7 +204,6 @@
+     <string name="kcp_mtu">mKCP MTU</string>
+     <string name="kcp_tti">mKCP TTI</string>
+     <string name="kcp_cwnd_multiplier">拥塞窗口倍数</string>
+-    <string name="show_bottom_bar">像 SagerNet 一样显示底栏</string>
+     <string name="utls_fingerprint">uTLS 指纹</string>
+     <string name="grpc_service_name">gRPC 服务名称</string>
+     <string name="alpn">应用层协议协商</string>
+@@ -616,4 +615,37 @@
+     <string name="filter_local">本地</string>
+     <string name="sort_ascending">升序</string>
+     <string name="sort_descending">降序</string>
++    <string name="bar_delay_label">实时延迟</string>
++    <string name="bar_delay_tap">… ms</string>
++    <string name="bar_delay_testing">测试中…</string>
++    <string name="bar_delay_value">%d ms</string>
++    <string name="bar_delay_failed">测试失败</string>
++    <string name="outbound_ip">出站 IP</string>
++    <string name="ip_info_basic">基础信息</string>
++    <string name="ip_info_network">网络</string>
++    <string name="ip_address">IP 地址</string>
++    <string name="ip_level">等级</string>
++    <string name="ip_type">类型</string>
++    <string name="ip_flags">命中标记</string>
++    <string name="ip_org">组织</string>
++    <string name="ip_asn">ASN</string>
++    <string name="ip_source">采用来源</string>
++    <string name="ip_source_ipapicom">ip-api.com</string>
++    <string name="ip_level_good">优</string>
++    <string name="ip_level_normal">普通</string>
++    <string name="ip_type_residential">住宅</string>
++    <string name="ip_type_mobile">移动网络</string>
++    <string name="ip_type_hosting">机房</string>
++    <string name="ip_flag_proxy">代理</string>
++    <string name="ip_none">无</string>
++    <string name="ip_loading">查询中…</string>
++    <string name="ip_query_failed">类型查询失败</string>
++    <string name="ip_action_refresh">刷新</string>
++    <string name="group_deleted_undo">已删除分组 %s</string>
++    <string name="ip_country">国家地区</string>
++    <string name="ip_level_risky">风险</string>
++    <string name="ip_type_business">商业</string>
++    <string name="ip_flag_tor">Tor</string>
++    <string name="ip_flag_vpn">VPN</string>
++    <string name="ip_flag_abuser">滥用记录</string>
+ </resources>
+diff --git a/app/src/main/res/values-zh-rTW/strings.xml b/app/src/main/res/values-zh-rTW/strings.xml
+index 9d8c1ce..3669be7 100644
+--- a/app/src/main/res/values-zh-rTW/strings.xml
++++ b/app/src/main/res/values-zh-rTW/strings.xml
+@@ -489,7 +489,6 @@
+     <string name="domain_strategy_for_remote">域名策略（遠端）</string>
+     <string name="domain_strategy_for_direct">域名策略（直連）</string>
+     <string name="domain_strategy_for_server">域名策略（伺服器地址）</string>
+-    <string name="show_bottom_bar">像 SagerNet 一樣顯示底欄</string>
+     <string name="utls_fingerprint">uTLS 指紋</string>
+     <string name="custom_outbound_json">自定義出站 JSON</string>
+     <string name="custom_config_json">自定義配置 JSON</string>
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index c81eb4d..3b142ea 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -590,7 +590,6 @@
+     <string name="domain_strategy_for_remote">Domain strategy for Remote</string>
+     <string name="domain_strategy_for_direct">Domain strategy for Direct</string>
+     <string name="domain_strategy_for_server">Domain strategy for Server address</string>
+-    <string name="show_bottom_bar">Show bottom bar like SagerNet</string>
+     <string name="utls_fingerprint">uTLS fingerprint</string>
+     <string name="custom_outbound_json">Custom outbound JSON</string>
+     <string name="custom_config_json">Custom config JSON</string>
+@@ -722,4 +721,37 @@
+     <string name="filter_local">Local</string>
+     <string name="sort_ascending">Ascending</string>
+     <string name="sort_descending">Descending</string>
++    <string name="bar_delay_label">Delay</string>
++    <string name="bar_delay_tap">… ms</string>
++    <string name="bar_delay_testing">Testing…</string>
++    <string name="bar_delay_value">%d ms</string>
++    <string name="bar_delay_failed">Test failed</string>
++    <string name="outbound_ip">Outbound IP</string>
++    <string name="ip_info_basic">Basic info</string>
++    <string name="ip_info_network">Network</string>
++    <string name="ip_address">IP address</string>
++    <string name="ip_level">Level</string>
++    <string name="ip_type">Type</string>
++    <string name="ip_flags">Flags</string>
++    <string name="ip_org">Organization</string>
++    <string name="ip_asn">ASN</string>
++    <string name="ip_source">Source</string>
++    <string name="ip_source_ipapicom">ip-api.com</string>
++    <string name="ip_level_good">Good</string>
++    <string name="ip_level_normal">Normal</string>
++    <string name="ip_type_residential">Residential</string>
++    <string name="ip_type_mobile">Mobile network</string>
++    <string name="ip_type_hosting">Hosting</string>
++    <string name="ip_flag_proxy">Proxy</string>
++    <string name="ip_none">None</string>
++    <string name="ip_loading">Looking up…</string>
++    <string name="ip_query_failed">Type lookup failed</string>
++    <string name="ip_action_refresh">Refresh</string>
++    <string name="group_deleted_undo">Group %s deleted</string>
++    <string name="ip_country">Country / Region</string>
++    <string name="ip_level_risky">Risky</string>
++    <string name="ip_type_business">Business</string>
++    <string name="ip_flag_tor">Tor</string>
++    <string name="ip_flag_vpn">VPN</string>
++    <string name="ip_flag_abuser">Abuse record</string>
+ </resources>
+diff --git a/app/src/main/res/xml/global_preferences.xml b/app/src/main/res/xml/global_preferences.xml
+index a413532..977fd8e 100644
+--- a/app/src/main/res/xml/global_preferences.xml
++++ b/app/src/main/res/xml/global_preferences.xml
+@@ -314,9 +314,6 @@
+             app:key="appTLSVersion"
+             app:title="@string/app_tls_version"
+             app:useSimpleSummaryProvider="true" />
+-        <SwitchPreference
+-            app:key="showBottomBar"
+-            app:title="@string/show_bottom_bar" />
+         <Preference
+             app:icon="@drawable/baseline_undo_24"
+             app:key="resetSettings"

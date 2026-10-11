@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Neko-UI 源码断言器：011–031 修复/功能锚点（从 CI workflow 抽出，语义 1:1）。
+# Neko-UI 源码断言器：A01 基线上的 011–033 修复/功能锚点（CI 同款）。
 #
 # 用法:
 #   bash scripts/assert_source.sh <上游源码目录>

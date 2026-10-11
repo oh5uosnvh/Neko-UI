@@ -1,6 +1,9 @@
 # 文件 → 补丁 → 功能映射（A01 → 最终修订）
 
-## 已改动文件（补丁 001–029 覆盖）
+> **唯一基线**：A01 tag = `f167ebc88e9a733e65380e13dab39726eba917b2`。
+> 当前最终修订为 033；完整应用范围是 001–033。
+
+## 已改动文件（补丁 001–033 覆盖）
 
 | 文件 | 补丁 | 功能 |
 |---|---|---|
@@ -27,7 +30,7 @@
 | `bg/proto/UrlTest.kt` | 013 | 接收每轮专用阻塞线程池，不再占用 Dispatchers.Default |
 | `ui/ConfigurationFragment.kt` | 013 | urlTest 创建 newFixedThreadPool(concurrent∈[1,16])；test.cancel 关池 |
 | `ui/ConfigurationFragment.kt` | 031 | 显示开关即时生效修补：configurationStore 监听 + 分组页 reloadProfiles 传播（onResume 在 show/hide 导航下不触发的缺口） |
-| `widget/ExactScrollRecyclerView.kt` | 032 | 精确滚动度量滑块（修复路由页滑块卡中部/配置页触摸滑块上跳）；layout_route/layout_profile_list 换用 |
+| `widget/ExactScrollRecyclerView.kt` | 032/033 | 精确滚动度量；配置页/路由页统一滚动条；拖动保持抓取点、不再脱离触点；layout_route/layout_profile_list 换用 |
 | `ui/ConfigurationFragment.kt` | 014 | 清理不可用/去重接 undoManager“还原”snackbar（可见卡可还原，隐藏卡立即删）+ isUndoReady 兜底 |
 | `ui/GroupSettingsActivity.kt` | 015 | child 空安全（as?）+ 菜单事件护栏——修高频点击 NPE fatal |
 | `ui/profile/ProfileSettingsActivity.kt` | 015 | 同上 |
@@ -44,7 +47,7 @@
 | `ui/IpQualityLookup.kt` | 025 | FlClash 0.8.99 六源对冲查询（ident.me/ip-api/ipquery/iplocate/ipapi.is/proxycheck），字段/等级/命中标记全对齐 |
 | `ui/IpQualityLookup.kt` | 026/028 | 连接即预查询（`prefetch(forProfile)`，026 发起、028 绑定 profileId）；缓存按节点隔离（`cacheFor(profileId)`）；select 回归完成序=先答先赢；`COUNTRY_GRACE_MS` 国家跨源宽限 |
 | `ui/MainActivity.kt` | 026/027/029 | 连接成功自动 ping（`connectBar.showDelay(elapsed)` 手动+自动 2 处）+ urlTest 冷启动 700ms 重试 + 自动 ping 前 500ms 稳定期 |
-| `widget/ConnectBar.kt`、`layout_connect_bar.xml`、`layout_main.xml` | 026/027 | 去弹性空隙（`layout_weight` 移除）、栏宽收窄为内容宽并居中；速度区固定 `88dp`；未连接延迟占位「… ms」 |
+| `widget/ConnectBar.kt`、`layout_connect_bar.xml`、`layout_main.xml` | 026/027/033 | 去弹性空隙；速度区固定 `88dp`；速度区与实时延迟区统一触发延迟测试和整栏按压底色 |
 | `nb4a.properties` | 不打包 | 发版时更新 `PRE_VERSION_NAME`（sbNN） |
 
 ## 基线自带（A01 已有、补丁不触碰——升级上游随基线走）

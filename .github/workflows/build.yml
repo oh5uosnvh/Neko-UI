@@ -1,6 +1,6 @@
 name: Build from patches
 
-# NekoBoxF = upstream NekoBoxForAndroid  +  Neko-UI 29 UI patches
+# NekoBoxF = immutable upstream A01  +  Neko-UI 33 UI patches
 #            +  Nekobox-MG protocol mods (x365 / xhttp / shanlian / vt / fastup / oppa)
 #
 # The protocol mods are NOT baked into the upstream checkout: this workflow
@@ -17,7 +17,7 @@ on:
       upstream_ref:
         description: '上游分支/标签/commit'
         required: true
-        default: 'A01'
+        default: 'f167ebc88e9a733e65380e13dab39726eba917b2'
       mods_ref:
         description: 'Nekobox-MG ref (协议魔改源码, 空=HEAD)'
         required: false
@@ -133,6 +133,12 @@ jobs:
           cd upstream
           git checkout "$REF"
           git submodule update --init --recursive --jobs 8
+          ACTUAL_A01="f167ebc88e9a733e65380e13dab39726eba917b2"
+          if [ "$REPO" = "oh5uosnvh/NekoBoxForAndroid" ] && [ "$REF" = "$ACTUAL_A01" ]; then
+            test "$(git rev-parse HEAD)" = "$ACTUAL_A01" || {
+              echo "::error::requested A01 did not resolve to the immutable expected commit"; exit 1;
+            }
+          fi
           git log --oneline -1
 
       - name: Clone Nekobox-MG (protocol mods)
@@ -203,12 +209,12 @@ jobs:
           cmp libcore/protocol/xhttp/cipher.go ../mods/Neko-xhttp/libcore/protocol/xhttp/cipher.go
           echo "x365 + Blackstone mods applied:"; git -C . diff --stat -- libcore app | tail -3
 
-      - name: Apply mod patches (29)
+      - name: Apply Neko-UI patches (33)
         run: |
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
 
-      - name: Assert 011-029 patch anchors (scripts/assert_source.sh)
+      - name: Assert A01 final 011-033 anchors (scripts/assert_source.sh)
         run: |
           bash "$GITHUB_WORKSPACE/scripts/assert_source.sh" upstream
 
