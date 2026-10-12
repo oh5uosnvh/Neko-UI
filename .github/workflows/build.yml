@@ -456,6 +456,16 @@ jobs:
           echo "FINAL_32=$APK_DIR/$F32" >> "$GITHUB_ENV"
           echo "SUMS=$APK_DIR/$SUMS"    >> "$GITHUB_ENV"
 
+      - name: Upload Snell application regression report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Snell-application-tests
+          path: |
+            upstream/app/build/test-results/testPreviewDebugUnitTest/
+            upstream/app/build/reports/tests/testPreviewDebugUnitTest/
+          if-no-files-found: warn
+
       - name: Upload arm64-v8a artifact
         uses: actions/upload-artifact@v4
         with:
