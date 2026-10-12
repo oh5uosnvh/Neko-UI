@@ -219,6 +219,7 @@ jobs:
           python3 mods/compat/apply_protocol_compat.py upstream
           python3 mods/compat/finish_protocol_compat.py upstream
           python3 mods/compat/repair_snell.py upstream
+          python3 mods/compat/fix_import_group_counts.py upstream
 
       - name: Assert final UI/function anchors (scripts/assert_source.sh)
         run: |
@@ -412,7 +413,7 @@ jobs:
           echo "ndk.dir=${ANDROID_NDK_HOME}" >> local.properties
           ./run init action gradle
           set -a; . ../mods/keystore/keystore.properties; set +a
-          ./gradlew app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.fmt.snell.SnellCompatibilityTest'
+          ./gradlew app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.fmt.snell.SnellCompatibilityTest' --tests 'io.nekohasekai.sagernet.fmt.snell.GroupImportNotificationTest'
           ./gradlew app:assemblePreviewRelease
           OUT=app/build/outputs/apk
           N64=$(find "$OUT" -name '*arm64-v8a*.apk' | wc -l)
