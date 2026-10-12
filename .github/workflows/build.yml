@@ -214,6 +214,11 @@ jobs:
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
 
+      - name: Apply protocol compatibility and Blackstone editor
+        run: |
+          python3 mods/compat/apply_protocol_compat.py upstream
+          python3 mods/compat/finish_protocol_compat.py upstream
+
       - name: Assert final UI/function anchors (scripts/assert_source.sh)
         run: |
           bash "$GITHUB_WORKSPACE/scripts/assert_source.sh" upstream
@@ -227,7 +232,7 @@ jobs:
       - name: Install Golang
         uses: actions/setup-go@v5
         with:
-          go-version: '^1.25'
+          go-version: '1.26.4'
 
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
@@ -288,6 +293,9 @@ jobs:
           set_kv COMMIT_OPPA_MOD         "$OPPA"
           echo "--- $F ---"; cat "$F"
 
+      - name: Prepare pinned YF Snell and Blackstone core
+        run: python3 mods/compat/prepare_yf_core.py upstream
+
       - name: LibCore cache key
         id: libcore-key
         run: |
@@ -309,6 +317,7 @@ jobs:
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
           GOSUMDB: off
+          GOFLAGS: -mod=mod
         run: |
           cd upstream
           go version
@@ -321,8 +330,8 @@ jobs:
         run: |
           set -euo pipefail
           cd upstream/libcore
-          go test ./protocol/x365 -run 'TestPrepareX365Transport|TestEncodeMatchesLiveCapture' -count=1 -v
-          go test ./protocol/xhttp -run 'TestBlackstoneRotatedMagicAndKey' -count=1 -v
+          go test -mod=mod ./protocol/x365 ./protocol/xhttp ./protocol/yfbridge -count=1 -v
+          go test -mod=mod github.com/metacubex/mihomo/transport/snell -count=1
 
       - name: Check libcore.aar ABI coverage
         run: |
@@ -415,6 +424,15 @@ jobs:
           echo "APK_ARM64=$APK_ARM64" >> "$GITHUB_ENV"
           echo "APK_ARM32=$APK_ARM32" >> "$GITHUB_ENV"
           ls -la "$APK_DIR"
+
+      - name: Verify new protocol linkage and visible Blackstone editor
+        run: |
+          set -euo pipefail
+          python3 mods/compat/assert_compat.py upstream
+          unzip -p "$APK_ARM64" lib/arm64-v8a/libgojni.so > "$RUNNER_TEMP/compat-libgojni.so"
+          for marker in snell-yf xhttp-yf '#x365'; do
+            strings "$RUNNER_TEMP/compat-libgojni.so" | grep -F "$marker" > /dev/null
+          done
 
       - name: Verify both APKs (libgojni markers + dex anchors)
         run: |
