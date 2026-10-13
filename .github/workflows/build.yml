@@ -405,6 +405,9 @@ jobs:
           echo "geoip=$GEOIP geosite=$GEOSITE"
           grep -n "VERSION_GEOIP=\|VERSION_GEOSITE=" buildScript/lib/assets.sh
 
+      - name: Pin release application ID
+        run: python3 scripts/fix_application_id.py upstream
+
       - name: Patch build config (release lint gate + dual ABI)
         run: |
           set -euo pipefail
