@@ -53,7 +53,7 @@ jobs:
           cp mods/Neko-xhttp/libcore/protocol/xhttp/*.go validation/libcore/protocol/xhttp/
           cp mods/compat/files/libcore/protocol/x365/*.go validation/libcore/protocol/x365/
           cp mods/compat/files/libcore/protocol/yfbridge/*.go validation/libcore/protocol/yfbridge/
-          (cd validation/libcore && go mod init libcore && go mod edit -go=1.24.7 -require=github.com/sagernet/sing-box@v1.0.0 -replace=github.com/sagernet/sing-box=../../sing-box -replace=github.com/sagernet/sing-vmess=github.com/starifly/sing-vmess@v0.2.8-mod.1)
+          (cd validation/libcore && go mod init libcore && go mod edit -go=1.24.7 -require=github.com/sagernet/sing-box@v1.0.0 -require=github.com/sagernet/sing@v0.7.18 -replace=github.com/sagernet/sing-box=../../sing-box -replace=github.com/sagernet/sing-vmess=github.com/starifly/sing-vmess@v0.2.8-mod.1 -replace=github.com/sagernet/sing-snell=github.com/reF1nd/sing-snell@v0.0.0-20260808134633-c120d40d0d5b)
           python3 mods/compat/prepare_yf_core.py validation
       - name: Test private-input handling without real credentials
         run: |
