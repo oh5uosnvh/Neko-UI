@@ -12,4 +12,8 @@ text, count = re.subn(r"(?m)^PACKAGE_NAME\s*=.*$", "PACKAGE_NAME=" + APPLICATION
 if count != 1:
     raise SystemExit("Expected exactly one PACKAGE_NAME in nb4a.properties")
 p.write_text(text)
-print("Pinned release application ID:", APPLICATION_ID)
+for resource in (root / 'app/src/main/res').glob('values*/strings.xml'):
+    value = resource.read_text()
+    value = re.sub(r'(<string\s+name="app_name"[^>]*>).*?(</string>)', r'\g<1>Neko\g<2>', value)
+    resource.write_text(value)
+print("Pinned release application ID:", APPLICATION_ID, "label: Neko")

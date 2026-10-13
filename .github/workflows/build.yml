@@ -438,7 +438,7 @@ jobs:
       - name: Verify new protocol linkage and visible Blackstone editor
         run: |
           set -euo pipefail
-          python3 mods/compat/assert_compat.py upstream
+          python3 scripts/assert_final_protocols.py upstream
           unzip -p "$APK_ARM64" lib/arm64-v8a/libgojni.so > "$RUNNER_TEMP/compat-libgojni.so"
           for marker in xhttp-yf '#x365'; do
             strings "$RUNNER_TEMP/compat-libgojni.so" | grep -F "$marker" > /dev/null
