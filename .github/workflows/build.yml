@@ -66,6 +66,8 @@ jobs:
           URL="https://github.com/oh5uosnvh/Nekobox-MG.git"
           [ -n "$GH_PAT" ] && URL="https://x-access-token:${GH_PAT}@github.com/oh5uosnvh/Nekobox-MG.git"
           git clone --depth 1 "$URL" mods
+          # Final Neko uses the completed non-Snell MG overlay by default.
+          if [ -z "$MODS_REF" ]; then MODS_REF="agent/compatibility"; fi
           if [ -n "$MODS_REF" ]; then
             git -C mods fetch --depth 1 origin "$MODS_REF"
             git -C mods checkout --detach FETCH_HEAD
@@ -150,6 +152,8 @@ jobs:
           URL="https://github.com/oh5uosnvh/Nekobox-MG.git"
           [ -n "$GH_PAT" ] && URL="https://x-access-token:${GH_PAT}@github.com/oh5uosnvh/Nekobox-MG.git"
           git clone --depth 1 "$URL" mods
+          # Final Neko uses the completed non-Snell MG overlay by default.
+          if [ -z "$MODS_REF" ]; then MODS_REF="agent/compatibility"; fi
           if [ -n "$MODS_REF" ]; then
             git -C mods fetch --depth 1 origin "$MODS_REF"
             git -C mods checkout --detach FETCH_HEAD
