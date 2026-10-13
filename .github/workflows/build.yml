@@ -220,6 +220,8 @@ jobs:
         run: |
           python3 "$GITHUB_WORKSPACE/scripts/apply_final_stability.py" upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_final_protocols.py" upstream mods
+          python3 "$GITHUB_WORKSPACE/scripts/apply_group_shortcut.py" upstream
+          python3 "$GITHUB_WORKSPACE/scripts/audit_group_shortcut.py" upstream
 
       - name: Assert A01 final UI and crash-fix anchors
         run: |
@@ -415,6 +417,7 @@ jobs:
           echo "ndk.dir=${ANDROID_NDK_HOME}" >> local.properties
           ./run init action gradle
           set -a; . ../mods/keystore/keystore.properties; set +a
+          ./gradlew app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.ui.GroupShortcutRegressionTest' --tests 'io.nekohasekai.sagernet.ui.GroupDatabaseMigrationTest'
           ./gradlew app:assemblePreviewRelease
           OUT=app/build/outputs/apk
           N64=$(find "$OUT" -name '*arm64-v8a*.apk' | wc -l)
@@ -448,6 +451,16 @@ jobs:
           echo "FINAL_64=$APK_DIR/$F64" >> "$GITHUB_ENV"
           echo "FINAL_32=$APK_DIR/$F32" >> "$GITHUB_ENV"
           echo "SUMS=$APK_DIR/$SUMS"    >> "$GITHUB_ENV"
+
+      - name: Upload group UI and database regression report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Group-UI-regression-tests
+          path: |
+            upstream/app/build/test-results/testPreviewDebugUnitTest/
+            upstream/app/build/reports/tests/testPreviewDebugUnitTest/
+          if-no-files-found: warn
 
       - name: Upload arm64-v8a artifact
         uses: actions/upload-artifact@v4
