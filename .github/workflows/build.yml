@@ -220,6 +220,7 @@ jobs:
           python3 mods/compat/finish_protocol_compat.py upstream
           python3 mods/compat/repair_snell.py upstream
           python3 mods/compat/fix_import_group_counts.py upstream
+          python3 mods/compat/restore_subscription_names.py upstream
 
       - name: Assert final UI/function anchors (scripts/assert_source.sh)
         run: |
