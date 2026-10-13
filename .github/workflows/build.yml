@@ -156,6 +156,11 @@ jobs:
           fi
           echo "mods @ $(git -C mods log --oneline -1)"
 
+      - name: Require authorized OIX DNS-Auth input
+        env:
+          OIX_DNS_AUTH_SEED: ${{ secrets.OIX_DNS_AUTH_SEED }}
+        run: python3 mods/compat/prepare_oix_dns_auth.py --check
+
       - name: Apply Nekobox-MG protocol mods
         run: |
           set -euo pipefail
@@ -299,16 +304,17 @@ jobs:
       - name: Prepare pinned YF Snell and Blackstone core
         run: python3 mods/compat/prepare_yf_core.py upstream
 
+      - name: Prepare authorized private OIX release input
+        env:
+          OIX_DNS_AUTH_SEED: ${{ secrets.OIX_DNS_AUTH_SEED }}
+        run: python3 mods/compat/prepare_oix_dns_auth.py upstream
+
       - name: LibCore cache key
         id: libcore-key
-        run: |
-          cd upstream
-          # Source overlays are not git-tracked. Hash the actual bytes being
-          # built, including newly overlaid protocol files and symlink targets.
-          K=$( { find libcore buildScript -type f -print0 | sort -z | xargs -0 sha256sum; git rev-parse HEAD; } | sha256sum | cut -d' ' -f1 )
-          echo "key=libcore-$K" >> "$GITHUB_OUTPUT"
+        run: echo 'key=disabled-private-oix-build' >> "$GITHUB_OUTPUT"
 
       - name: LibCore cache
+        if: false
         id: libcore-cache
         uses: actions/cache@v4
         with:
@@ -335,6 +341,11 @@ jobs:
           cd upstream/libcore
           go test -mod=mod ./protocol/x365 ./protocol/xhttp ./protocol/yfbridge -count=1 -v
           go test -mod=mod github.com/metacubex/mihomo/transport/snell -count=1
+
+      - name: Verify authorized OIX input in every native ABI
+        env:
+          OIX_DNS_AUTH_SEED: ${{ secrets.OIX_DNS_AUTH_SEED }}
+        run: python3 mods/compat/prepare_oix_dns_auth.py --verify upstream/app/libs/libcore.aar aar
 
       - name: Check libcore.aar ABI coverage
         run: |
@@ -437,6 +448,13 @@ jobs:
           for marker in snell-yf xhttp-yf '#x365'; do
             strings "$RUNNER_TEMP/compat-libgojni.so" | grep -F "$marker" > /dev/null
           done
+
+      - name: Verify authorized OIX input in both final APKs
+        env:
+          OIX_DNS_AUTH_SEED: ${{ secrets.OIX_DNS_AUTH_SEED }}
+        run: |
+          python3 mods/compat/prepare_oix_dns_auth.py --verify "$APK_ARM64" apk
+          python3 mods/compat/prepare_oix_dns_auth.py --verify "$APK_ARM32" apk
 
       - name: Verify both APKs (libgojni markers + dex anchors)
         run: |
