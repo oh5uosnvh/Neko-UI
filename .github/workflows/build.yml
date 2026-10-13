@@ -1,7 +1,7 @@
 name: Build from patches
 
-# NekoBoxF = immutable upstream A01  +  Neko-UI 33 UI patches
-#            +  Nekobox-MG protocol mods (x365 / xhttp / shanlian / vt / fastup / oppa)
+# Neko = immutable upstream A01 + latest Neko-UI 33 UI patches
+#       + Nekobox-MG X365/xhttp/ViewTurbo/other non-Snell protocol mods
 #
 # The protocol mods are NOT baked into the upstream checkout: this workflow
 # pulls Nekobox-MG at a pinned ref and injects its patched integration layer so
@@ -21,7 +21,7 @@ on:
       mods_ref:
         description: 'Nekobox-MG ref (协议魔改源码, 空=HEAD)'
         required: false
-        default: ''
+        default: 'agent/compatibility'
       anytls_commit:
         description: 'sing-anytls-shanlian commit (空=HEAD)'
         required: false
@@ -29,7 +29,7 @@ on:
       vt_commit:
         description: 'sing-shadowsocks2-vt commit (空=HEAD)'
         required: false
-        default: ''
+        default: 'agent/vt-dual-marker'
       fastup_commit:
         description: 'fastup-mod commit (空=HEAD)'
         required: false
@@ -66,6 +66,7 @@ jobs:
           URL="https://github.com/oh5uosnvh/Nekobox-MG.git"
           [ -n "$GH_PAT" ] && URL="https://x-access-token:${GH_PAT}@github.com/oh5uosnvh/Nekobox-MG.git"
           git clone --depth 1 "$URL" mods
+          if [ -z "$MODS_REF" ]; then MODS_REF="agent/compatibility"; fi
           if [ -n "$MODS_REF" ]; then
             git -C mods fetch --depth 1 origin "$MODS_REF"
             git -C mods checkout --detach FETCH_HEAD
@@ -150,6 +151,7 @@ jobs:
           URL="https://github.com/oh5uosnvh/Nekobox-MG.git"
           [ -n "$GH_PAT" ] && URL="https://x-access-token:${GH_PAT}@github.com/oh5uosnvh/Nekobox-MG.git"
           git clone --depth 1 "$URL" mods
+          if [ -z "$MODS_REF" ]; then MODS_REF="agent/compatibility"; fi
           if [ -n "$MODS_REF" ]; then
             git -C mods fetch --depth 1 origin "$MODS_REF"
             git -C mods checkout --detach FETCH_HEAD
@@ -214,9 +216,17 @@ jobs:
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
 
-      - name: Assert A01 final 011-033 anchors (scripts/assert_source.sh)
+      - name: Apply final Neko stability and requested protocol fixes
+        run: |
+          python3 "$GITHUB_WORKSPACE/scripts/apply_final_stability.py" upstream
+          python3 "$GITHUB_WORKSPACE/scripts/apply_final_protocols.py" upstream mods
+
+      - name: Assert A01 final UI and crash-fix anchors
         run: |
           bash "$GITHUB_WORKSPACE/scripts/assert_source.sh" upstream
+          grep -q 'MIGRATION_8_9_SAFE' upstream/app/src/main/java/io/nekohasekai/sagernet/database/SagerDatabase.kt
+          grep -q 'if (pos !in configurationIdList.indices)' upstream/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+          ! grep -q 'repair_snell.py\|snell-yf\|RegisterSnellOutbound' upstream/app/src/main/java/io/nekohasekai/sagernet/database/SagerDatabase.kt upstream/libcore/box_include.go || true
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -367,6 +377,9 @@ jobs:
           echo "geoip=$GEOIP geosite=$GEOSITE"
           grep -n "VERSION_GEOIP=\|VERSION_GEOSITE=" buildScript/lib/assets.sh
 
+      - name: Pin Neko package and label
+        run: python3 "$GITHUB_WORKSPACE/scripts/fix_application_id.py" upstream
+
       - name: Patch build config (release lint gate + dual ABI)
         run: |
           set -euo pipefail
@@ -425,8 +438,8 @@ jobs:
         run: |
           set -euo pipefail
           cd "$APK_DIR"
-          F64="NekoBoxF-mod-r${{ github.run_number }}-arm64-v8a.apk"
-          F32="NekoBoxF-mod-r${{ github.run_number }}-armeabi-v7a.apk"
+          F64="Neko-mod-r${{ github.run_number }}-arm64-v8a.apk"
+          F32="Neko-mod-r${{ github.run_number }}-armeabi-v7a.apk"
           mv "$APK_ARM64" "$F64"
           mv "$APK_ARM32" "$F32"
           SUMS="SHA256SUMS-r${{ github.run_number }}.txt"
@@ -439,7 +452,7 @@ jobs:
       - name: Upload arm64-v8a artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NekoBoxF-patched-arm64
+          name: Neko-arm64
           path: ${{ env.FINAL_64 }}
           if-no-files-found: error
           retention-days: 30
@@ -447,7 +460,7 @@ jobs:
       - name: Upload armeabi-v7a artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NekoBoxF-patched-armv7
+          name: Neko-armv7
           path: ${{ env.FINAL_32 }}
           if-no-files-found: error
           retention-days: 30
@@ -455,7 +468,7 @@ jobs:
       - name: Upload SHA256SUMS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NekoBoxF-patched-SHA256SUMS
+          name: Neko-SHA256SUMS
           path: ${{ env.SUMS }}
           if-no-files-found: error
           retention-days: 30
@@ -463,7 +476,7 @@ jobs:
       - name: Build summary
         run: |
           {
-            echo "## NekoBoxF r${{ github.run_number }}（双架构）"
+            echo "## Neko r${{ github.run_number }}（A01 双架构）"
             echo ""
             echo '| 文件 | SHA256（前 16 位） |'
             echo '|---|---|'
@@ -471,5 +484,5 @@ jobs:
               printf '| `%s` | `%s…` |\n' "${f#*mod-}" "${h:0:16}"
             done < "$SUMS"
             echo ""
-            echo '完整 SHA256 见 artifact `NekoBoxF-patched-SHA256SUMS`。'
+            echo '完整 SHA256 见 artifact `Neko-SHA256SUMS`。'
           } >> "$GITHUB_STEP_SUMMARY"
