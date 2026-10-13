@@ -10,6 +10,11 @@ name: Build from patches
 on:
   workflow_dispatch:
     inputs:
+      validation_only:
+        description: '仅验证协议链路，不使用真实认证输入，不构建 APK'
+        type: boolean
+        required: false
+        default: false
       upstream_repo:
         description: '上游源码仓库 (owner/name)'
         required: true
@@ -47,10 +52,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  protocol-validation:
+    if: ${{ inputs.validation_only }}
+    uses: ./.github/workflows/oix-validation.yml
+    with:
+      mods_ref: ${{ inputs.mods_ref }}
+    secrets:
+      GH_PAT: ${{ secrets.GH_PAT }}
+
   # ---------------------------------------------------------------- wire test
   # Compiles Nekobox-MG's x365 package and runs the byte-exact vectors captured
   # from the official 1.0.63 client. Fails in ~30s instead of ~20min.
   wire-test:
+    if: ${{ !inputs.validation_only }}
     name: x365 wire-format tests
     runs-on: ubuntu-latest
     steps:
@@ -112,6 +126,7 @@ jobs:
 
   # -------------------------------------------------------------------- build
   build:
+    if: ${{ !inputs.validation_only }}
     name: Build patched APK
     runs-on: ubuntu-latest
     needs: wire-test

@@ -1,0 +1,83 @@
+name: OIX compatibility validation (no release credentials)
+
+on:
+  workflow_call:
+    inputs:
+      mods_ref:
+        type: string
+        required: true
+    secrets:
+      GH_PAT:
+        required: true
+  workflow_dispatch:
+    inputs:
+      mods_ref:
+        description: 'Immutable Nekobox-MG compatibility commit'
+        required: true
+        default: '257bb7e363a489173e651d9750d7703234c62d62'
+
+permissions:
+  contents: read
+
+jobs:
+  protocol-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOFLAGS: -mod=mod
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.4'
+          cache: false
+      - name: Clone pinned compatibility sources
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          MODS_REF: ${{ inputs.mods_ref }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_PAT"
+          git -c http.extraHeader="Authorization: Basic $(printf 'x-access-token:%s' "$GH_PAT" | base64 -w0)" clone --no-checkout https://github.com/oh5uosnvh/Nekobox-MG.git mods
+          git -C mods checkout --detach "$MODS_REF"
+          test "$(git -C mods rev-parse HEAD)" = "$MODS_REF"
+          git clone --filter=blob:none --no-checkout https://github.com/starifly/sing-box.git sing-box
+          git -C sing-box fetch --depth 1 origin 0b7a2fc2f2c33f754e5fe5a1bb3e0a4f610b6aa9
+          git -C sing-box checkout --detach 0b7a2fc2f2c33f754e5fe5a1bb3e0a4f610b6aa9
+      - name: Assemble isolated protocol test module
+        run: |
+          set -euo pipefail
+          mkdir -p validation/libcore/protocol/x365 validation/libcore/protocol/xhttp validation/libcore/protocol/yfbridge
+          cp mods/Neko-365/libcore/protocol/x365/*.go validation/libcore/protocol/x365/
+          cp mods/Neko-xhttp/libcore/protocol/xhttp/*.go validation/libcore/protocol/xhttp/
+          cp mods/compat/files/libcore/protocol/x365/*.go validation/libcore/protocol/x365/
+          cp mods/compat/files/libcore/protocol/yfbridge/*.go validation/libcore/protocol/yfbridge/
+          (cd validation/libcore && go mod init libcore && go mod edit -go=1.24.7 -require=github.com/sagernet/sing-box@v1.0.0 -replace=github.com/sagernet/sing-box=../../sing-box -replace=github.com/sagernet/sing-vmess=github.com/starifly/sing-vmess@v0.2.8-mod.1)
+          python3 mods/compat/prepare_yf_core.py validation
+      - name: Test private-input handling without real credentials
+        run: |
+          set -euo pipefail
+          (cd mods/compat && python3 -m unittest -v test_prepare_oix_dns_auth)
+          env -u OIX_DNS_AUTH_SEED python3 mods/compat/prepare_oix_dns_auth.py --check && exit 1 || test "$?" -eq 1
+          test ! -e validation/libcore/protocol/yfbridge/private_oix_seed_generated.go
+      - name: Run authenticated DNS ECH and other protocol regressions
+        run: |
+          set -euo pipefail
+          cd validation/libcore
+          go test ./protocol/x365 ./protocol/xhttp ./protocol/yfbridge -count=1 -v 2>&1 | tee ../../protocol-validation.log
+          go vet ./protocol/x365 ./protocol/xhttp ./protocol/yfbridge
+          go test github.com/metacubex/mihomo/transport/snell -count=1 -v 2>&1 | tee ../../snell-transport-validation.log
+      - name: Publish validation evidence only (no APK)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OIX-protocol-validation-evidence
+          path: |
+            protocol-validation.log
+            snell-transport-validation.log
+          if-no-files-found: warn
+      - name: Explain release boundary
+        run: |
+          echo 'Synthetic local authentication vectors passed. This run does not authorize real airport access or publish an APK.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Release build still requires an issuer-authorized OIX_DNS_AUTH_SEED.' >> "$GITHUB_STEP_SUMMARY"
