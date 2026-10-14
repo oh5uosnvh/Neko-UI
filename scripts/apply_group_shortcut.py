@@ -163,6 +163,30 @@ edit(cfg,'''                proxyGroup = SagerDatabase.groupDao.getById(groupId)
                 reloadProfiles()''', '''                proxyGroup = SagerDatabase.groupDao.getById(groupId) ?: return
                 reloadProfiles()''')
 
+# Old builds could leave PROFILE_GROUP pointing to a deleted row. Also, the
+# ungrouped row may be absent after an interrupted delete. Never use !! while
+# reconstructing the group page: recreate a valid fallback group instead.
+edit('app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt',
+'''            if (groups.size > 1 && SagerDatabase.proxyDao.countByGroup(groups.find { it.ungrouped }!!.id) == 0L) groups.removeAll { it.ungrouped }''',
+'''            val ungrouped = groups.firstOrNull { it.ungrouped }
+            if (groups.size > 1 && ungrouped != null && SagerDatabase.proxyDao.countByGroup(ungrouped.id) == 0L) {
+                groups.removeAll { it.ungrouped }
+            }''')
+edit('app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt',
+'''            val groups = SagerDatabase.groupDao.allGroups().toMutableList()
+            val ungrouped = groups.firstOrNull { it.ungrouped }''',
+'''            val groups = SagerDatabase.groupDao.allGroups().toMutableList()
+            if (groups.isEmpty()) {
+                SagerDatabase.groupDao.createGroup(ProxyGroup(ungrouped = true))
+                groups.addAll(SagerDatabase.groupDao.allGroups())
+            }
+            val ungrouped = groups.firstOrNull { it.ungrouped }''')
+edit('app/src/main/java/io/nekohasekai/sagernet/database/DataStore.kt',
+'''        if (currentSelected > 0L) return currentSelected
+        val groups = SagerDatabase.groupDao.allGroups()''',
+'''        if (currentSelected > 0L && SagerDatabase.groupDao.getById(currentSelected) != null) return currentSelected
+        val groups = SagerDatabase.groupDao.allGroups()''')
+
 # Commit group + nodes together. An exception between two independent deletes
 # must not leave a half-deleted group behind after restarting the application.
 edit('app/src/main/java/io/nekohasekai/sagernet/database/GroupManager.kt',

@@ -17,6 +17,9 @@ assert 'val scrollX = tabLayout.scrollX' in cfg
 assert 'if (generation != removalGeneration' in cfg
 assert 'SagerDatabase.groupDao.allGroups().firstOrNull()?.let' not in cfg
 assert 'proxyGroup = SagerDatabase.groupDao.getById(groupId)!!' not in cfg
+assert 'val ungrouped = groups.firstOrNull { it.ungrouped }' in (r/'app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt').read_text()
+data=(r/'app/src/main/java/io/nekohasekai/sagernet/database/DataStore.kt').read_text()
+assert 'getById(currentSelected) != null' in data
 assert 'MIGRATION_8_9_SAFE' in (r/'app/src/main/java/io/nekohasekai/sagernet/database/SagerDatabase.kt').read_text()
 for path in ['app/src/main/java/io/nekohasekai/sagernet/database/ProxyEntity.kt','app/src/main/java/io/nekohasekai/sagernet/fmt/KryoConverters.kt','app/schemas']:
  diff=subprocess.run(['git','-C',str(r),'diff','--',path],capture_output=True,text=True,check=True).stdout
