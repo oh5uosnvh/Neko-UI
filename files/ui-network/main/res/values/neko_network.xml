@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="neko_picker_groups" type="id" />
+    <string name="neko_clear">Clear</string>
+    <string name="neko_group_cleared">Cleared %1$s</string>
+    <string name="neko_network_check">Network check</string>
+    <string name="neko_hide_ip">Hide IP address</string>
+    <string name="neko_handshake_idle">Handshake — ms</string>
+    <string name="neko_handshake_testing">Testing handshake…</string>
+    <string name="neko_handshake_failed">Handshake failed</string>
+    <string name="neko_handshake_ms">Handshake %1$dms</string>
+</resources>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="neko_clear">清空</string>
+    <string name="neko_group_cleared">已清空“%1$s”</string>
+    <string name="neko_network_check">网络检测</string>
+    <string name="neko_hide_ip">隐藏 IP 地址</string>
+    <string name="neko_handshake_idle">握手耗时 — ms</string>
+    <string name="neko_handshake_testing">握手耗时 测试中…</string>
+    <string name="neko_handshake_failed">握手耗时 测试失败</string>
+    <string name="neko_handshake_ms">握手耗时 %1$dms</string>
+</resources>

@@ -18,7 +18,7 @@ REQUIRED_DEX = [
     b"applyFirstFill", b"syncOrderFromDb",
     b"drawerWarmRunnable", b"applyGroupCounts", b"armFallback",
     b"ConnectBar", b"OutboundIpDialogFragment", b"deleteGroupWithUndo",
-    b"bindCopy", b"restoreGroupAt", b"ServiceIconView", b"IpQualityLookup",
+    b"bindCopy", b"restoreGroupAt", b"ServiceButton", b"IpQualityLookup",
     b"prefetch",
 ]
 FORBIDDEN_DEX = [

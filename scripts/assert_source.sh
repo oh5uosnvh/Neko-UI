@@ -6,6 +6,7 @@
 # CI 在 "Apply mod patches" 之后调用（传 upstream）；本地对已应用补丁的源码树同样可跑。
 # 任何一项失败即打印 ::error:: 并 exit 1（CI 构建终止）。
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 UP="${1:-.}"
 cd "$UP"
@@ -72,71 +73,13 @@ test ! -f app/src/main/java/io/nekohasekai/sagernet/ui/profile/PasswordDialogFra
   || fail "016 dead PasswordDialogFragment still exists"
 echo "016 preference editor unify present"
 
-# ------------------------------------------------ 017+019/021/023/024/026/027/028/029 启动栏体系
-M=app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
-test -f app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt \
-  || fail "017 ConnectBar missing"
-test -f app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt \
-  || fail "017 OutboundIpDialogFragment missing"
-grep -q 'connect_bar' app/src/main/res/layout/layout_main.xml \
-  || fail "017 layout not rewired"
-! grep -q 'io.nekohasekai.sagernet.widget.StatsBar' app/src/main/res/layout/layout_main.xml \
-  || fail "017 old StatsBar still in layout"
-! grep -q 'binding\.fab\|binding\.stats' "$M" \
-  || fail "017 MainActivity still binds fab/stats"
-! grep -q 'showBottomBar' app/src/main/java/io/nekohasekai/sagernet/Constants.kt \
-  || fail "017 showBottomBar pref not removed"
-grep -q 'connectBar.onTestConnection' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
-  || fail "019 delay zone not wired (would stick on testing)"
-grep -q 'syncConnectBar' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
-  || fail "021 config-only visibility missing"
-grep -q 'bg_touch_rounded' app/src/main/res/layout/layout_connect_bar.xml \
-  || fail "023 unified rounded touch bg missing"
-! grep -q '延迟 %d ms' app/src/main/res/values-zh-rCN/strings.xml \
-  || fail "023 delay prefix not removed"
-test -f app/src/main/java/io/nekohasekai/sagernet/widget/ServiceIconView.kt \
-  || fail "024 ServiceIconView missing"
-! grep -q 'bar_fab_progress' app/src/main/res/layout/layout_connect_bar.xml \
-  || fail "024 progress ring should be gone"
-grep -q 'serviceIcon.changeState(state, currentState, animate)' app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt \
-  || fail "024 animated engine not wired"
-! grep -q 'layout_weight="1"' app/src/main/res/layout/layout_connect_bar.xml \
-  || fail "026 elastic spacer should be gone"
-grep -q 'layout_width="wrap_content"' app/src/main/res/layout/layout_main.xml \
-  || fail "026 bar width not wrapped to content"
-grep -q 'IpQualityLookup.prefetch(DataStore.currentProfile)' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
-  || fail "026/028 prefetch on connect missing (profile-bound)"
-grep -q 'fun prefetch(forProfile: Long)' app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt \
-  || fail "026/028 profile-bound prefetch missing"
-grep -q 'select<Done>' app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt \
-  || fail "028 first-answer-wins select missing"
-grep -q 'COUNTRY_GRACE_MS' app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt \
-  || fail "028 country grace missing"
-grep -q 'urlTest cold-start retry' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
-  || fail "029 cold-start retry missing"
-grep -q 'delay(500)' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
-  || fail "029 auto-ping settle delay missing"
-grep -q 'IpQualityLookup.cacheFor(profileId)' app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt \
-  || fail "028 profile-bound cache fallback missing"
-grep -q 'setLoadingState()' app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt \
-  || fail "028 instant loading state missing"
-[ "$(grep -c 'connectBar.showDelay(elapsed)' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt)" = "2" ] \
-  || fail "027 auto-ping on connect missing (need manual+auto)"
-grep -q 'bar_delay_tap">… ms' app/src/main/res/values-zh-rCN/strings.xml \
-  || fail "027 delay idle placeholder wrong"
-grep -q 'android:layout_width="88dp"' app/src/main/res/layout/layout_connect_bar.xml \
-  || fail "027 speed zone fixed width missing"
-! grep -q '点击测试' app/src/main/res/values-zh-rCN/strings.xml \
-  || fail "027 old tap-to-test text still present"
-! test -f app/src/main/java/io/nekohasekai/sagernet/widget/ServiceButton.kt \
-  || fail "021 ServiceButton should be gone"
-echo "017+019+021 bottom connect bar present"
-
+# Current requested UI supersedes the historical compact 017-029 bar.
+python3 "$SCRIPT_DIR/audit_ui_network.py" "$PWD"
 # ------------------------------------------------ 018 分组标签菜单 + 删除还原
 F=app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
 grep -q 'deleteGroupWithUndo' "$F" \
   || fail "018 group undo delete missing"
-grep -q 'R.string.jump_to_group' "$F" \
+grep -q 'R.string.jump_to_group' app/src/main/java/io/nekohasekai/sagernet/ui/GroupTabMenu.kt \
   || fail "018 tab long-press menu missing"
 grep -q 'group_deleted_undo' "$F" \
   || fail "018 undo snackbar string missing"
@@ -178,8 +121,7 @@ grep -q 'lastAppliedAlwaysShowAddress' "$F" \
 C=app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
 grep -q 'speedZone.setOnClickListener' "$C" \
   || fail "030 speed-zone test tap missing"
-grep -q 'isPressed = true' "$C" \
-  || fail "030 whole-bar press mirror missing"
+
 grep -q 'displayPrefListener' "$F" \
   || fail "031 display pref listener missing"
 grep -q 'page.adapter?.reloadProfiles()' "$F" \
@@ -192,8 +134,8 @@ grep -q 'grabOffset' "$E" || fail "033 scrollbar grab offset missing"
 grep -q 'trackingTouch' "$E" || fail "033 scrollbar touch tracking missing"
 grep -q 'getScrollBarThumbHeight' "$E" || fail "033 scrollbar hit bounds missing"
 # Both zones must call one shared test action, not separate behavior.
-grep -q 'val testConnection = {' "$C" || fail "033 shared test action missing"
-grep -q 'delayZone.setOnTouchListener(mirrorPress)' "$C" || fail "033 delay press mirror missing"
-grep -q 'speedZone.setOnTouchListener(mirrorPress)' "$C" || fail "033 speed press mirror missing"
+grep -q 'speedZone.performClick()' "$C" || fail "shared speed/delay test action missing"
+
+
 
 echo "== 源码断言全部通过（011–033）=="

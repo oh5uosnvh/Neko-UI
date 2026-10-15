@@ -222,6 +222,8 @@ jobs:
           python3 "$GITHUB_WORKSPACE/scripts/apply_final_protocols.py" upstream mods
           python3 "$GITHUB_WORKSPACE/scripts/apply_group_shortcut.py" upstream
           python3 "$GITHUB_WORKSPACE/scripts/audit_group_shortcut.py" upstream
+          python3 "$GITHUB_WORKSPACE/scripts/apply_ui_network.py" upstream
+          python3 "$GITHUB_WORKSPACE/scripts/audit_ui_network.py" upstream
 
       - name: Assert A01 final UI and crash-fix anchors
         run: |
@@ -423,12 +425,13 @@ jobs:
           BUILD_PLUGIN: none
           GOSUMDB: off
         run: |
+          set -euo pipefail
           cd upstream
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
           echo "ndk.dir=${ANDROID_NDK_HOME}" >> local.properties
           ./run init action gradle
           set -a; . ../mods/keystore/keystore.properties; set +a
-          ./gradlew app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.ui.GroupShortcutRegressionTest' --tests 'io.nekohasekai.sagernet.ui.GroupDatabaseMigrationTest'
+          ./gradlew app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.ui.GroupShortcutRegressionTest' --tests 'io.nekohasekai.sagernet.ui.GroupDatabaseMigrationTest' --tests 'io.nekohasekai.sagernet.ui.NetworkUiRegressionTest'
           ./gradlew app:assemblePreviewRelease
           OUT=app/build/outputs/apk
           N64=$(find "$OUT" -name '*arm64-v8a*.apk' | wc -l)
