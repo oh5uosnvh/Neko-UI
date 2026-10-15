@@ -12,7 +12,13 @@ object NetworkPrivacy {
     fun flag(country: String?): String {
         val name = country?.trim().orEmpty()
         if (name.isEmpty()) return "🌐"
-        val aliases = mapOf("香港" to "HK", "中国香港" to "HK", "台湾" to "TW", "中国台湾" to "TW", "澳门" to "MO", "中国澳门" to "MO")
+        val aliases = mapOf(
+            "香港" to "HK", "中国香港" to "HK", "Hong Kong" to "HK", "Hong Kong SAR China" to "HK",
+            "台湾" to "TW", "中国台湾" to "TW", "Taiwan" to "TW", "Taiwan, China" to "TW",
+            "澳门" to "MO", "中国澳门" to "MO", "Macao" to "MO", "Macau" to "MO",
+            "中国" to "CN", "China" to "CN", "日本" to "JP", "Japan" to "JP",
+            "美国" to "US", "United States" to "US", "新加坡" to "SG", "Singapore" to "SG"
+        )
         val code = aliases[name] ?: Locale.getISOCountries().firstOrNull { code ->
             code.equals(name, true) || listOf(Locale.ENGLISH, Locale.SIMPLIFIED_CHINESE, Locale.TRADITIONAL_CHINESE, Locale.getDefault()).any {
                 Locale("", code).getDisplayCountry(it).equals(name, true)

@@ -116,11 +116,13 @@ edit(main,anchor,'''    private fun runHandshakeTests() {
     private fun refreshNetworkCard() {
         networkJob?.cancel()
         val profileId = DataStore.currentProfile
+        val wasConnected = DataStore.serviceState.connected
+        IpQualityLookup.invalidate()
         binding.connectBar.renderNetwork()
         networkJob = lifecycleScope.launch {
             try {
                 IpQualityLookup.prefetch(profileId)
-                if (DataStore.currentProfile == profileId) binding.connectBar.renderNetwork()
+                if (DataStore.currentProfile == profileId && DataStore.serviceState.connected == wasConnected) binding.connectBar.renderNetwork()
             } catch (e: CancellationException) { throw e }
         }
     }
@@ -142,7 +144,8 @@ s=s[:a]+'''        val previousState = lastObservedState
             }
         } else if (state != BaseService.State.Connected && previousState != state) {
             handshakeJob?.cancel()
-            refreshNetworkCard()
+            networkJob?.cancel()
+            if (state == BaseService.State.Stopped || state == BaseService.State.Idle) refreshNetworkCard()
         }
 '''+s[b:];p.write_text(s)
 edit(main,'''        binding.connectBar.visibility =
@@ -179,6 +182,9 @@ edit(dialog,'''            val text = valueView.text?.toString().orEmpty()''',''
             val text = valueView.text?.toString().orEmpty()''')
 edit(dialog,'        ipValue.setText(R.string.ip_loading)','''        rawIp = null
         if (NetworkPrivacy.hidden(requireContext())) ipValue.text = "*****" else ipValue.setText(R.string.ip_loading)''')
+edit('app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt', '    private const val CACHE_FRESH_MS', '''    fun invalidate() { cache = null }
+
+    private const val CACHE_FRESH_MS''')
 # GroupClearAction uses only application DB operations; no schema changes.
 shutil.copytree(files,r/'app/src',dirs_exist_ok=True)
 print('PASS: compact menu, shared undo clear, official FAB without spinner, network privacy card, selection picker')
