@@ -255,7 +255,8 @@ jobs:
               | python3 -c 'import sys,json; print(json.load(sys.stdin)["sha"])'
           }
           ANYTLS=$(resolve oh5uosnvh/sing-anytls-shanlian "${{ github.event.inputs.anytls_commit }}")
-          VT=$(resolve oh5uosnvh/sing-shadowsocks2-vt "${{ github.event.inputs.vt_commit }}")
+          # The VT module is taken from the pinned Nekobox-MG source below.
+          VT="in-tree-viewturbo"
           FASTUP=$(resolve oh5uosnvh/fastup-mod "${{ github.event.inputs.fastup_commit }}")
           OPPA=$(resolve oh5uosnvh/oppa-mod "${{ github.event.inputs.oppa_commit }}")
           echo "anytls=${ANYTLS}" >> "$GITHUB_OUTPUT"
@@ -287,6 +288,16 @@ jobs:
           set_kv COMMIT_FASTUP_MOD       "$FASTUP"
           set_kv COMMIT_OPPA_MOD         "$OPPA"
           echo "--- $F ---"; cat "$F"
+
+      - name: Stage tested ViewTurbo user-auth module
+        run: |
+          set -euo pipefail
+          python3 mods/Neko-gjgx/stage_viewturbo.py upstream
+          cd sing-shadowsocks2-vt
+          go test ./... -count=1
+          go vet ./...
+          cmp shadowaead/method.go ../mods/Neko-viewTurbo/shadowaead/method.go
+          cmp shadowaead/vt_auth.go ../mods/Neko-viewTurbo/shadowaead/vt_auth.go
 
       - name: LibCore cache key
         id: libcore-key
