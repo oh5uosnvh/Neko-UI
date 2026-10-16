@@ -21,7 +21,7 @@ on:
       mods_ref:
         description: 'Nekobox-MG ref (协议魔改源码, 空=HEAD)'
         required: false
-        default: 'agent/compatibility'
+        default: '257e180d0e89c403daa1756b1cb4c170becaa096'
       anytls_commit:
         description: 'sing-anytls-shanlian commit (空=HEAD)'
         required: false

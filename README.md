@@ -3,7 +3,9 @@
 NekoBoxF 的 UI 定制补丁与构建管线。唯一基线是上游 `A01` tag 的不可变提交
 `f167ebc88e9a733e65380e13dab39726eba917b2`，共 33 个补丁按序应用即得最终成品。
 
-**当前最终基线：A01（f167ebc）** · APK 见 [Releases](../../releases)
+**当前稳定发布：Neko A02（r98）** · [下载 A02](https://github.com/oh5uosnvh/Neko-UI/releases/tag/A02) · [来源与验证清单](docs/A02.md)
+
+稳定维护分支为 `release/A02`，应用名 **Neko**。下文的 33 补丁表是历史底层补丁索引，不代表最终叠加结果；旧长条栏/进度环已由官方 StatsBar 和飞机按钮替代，以 [A02 文档](docs/A02.md) 为准。A02 使用已通过 23 项测试的 r98 原始双架构包，正式发布仅更名，不重编译。
 
 ## 功能规格（8 项）
 
