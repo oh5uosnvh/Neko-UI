@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <merge xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
     <LinearLayout android:id="@+id/tray_content" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:minHeight="88dp" android:background="?android:attr/selectableItemBackground"
+        android:minHeight="88dp"
         android:clickable="true" android:focusable="true"
         android:orientation="horizontal" android:gravity="center_vertical"
-        android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingTop="16dp" android:paddingBottom="12dp">
+        android:paddingStart="16dp" android:paddingEnd="6dp" android:paddingTop="16dp" android:paddingBottom="12dp">
         <LinearLayout android:id="@+id/bar_speed_zone" android:layout_width="0dp" android:layout_weight="1"
             android:layout_height="wrap_content" android:orientation="vertical" android:paddingEnd="8dp">
             <TextView android:id="@+id/tx" android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -17,25 +17,21 @@
                     android:singleLine="true" android:ellipsize="end" android:gravity="center_vertical"/>
             </LinearLayout>
         </LinearLayout>
-        <LinearLayout android:id="@+id/bar_network_card" android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:orientation="vertical" android:gravity="end|center_vertical">
-            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center_vertical">
-                <TextView android:id="@+id/bar_ip_flag" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="🌐" android:textSize="16sp" android:importantForAccessibility="no"/>
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp" android:text="@string/neko_network_check" android:textSize="14sp"
-                    android:singleLine="true" android:textColor="@color/white"/>
-                <androidx.appcompat.widget.AppCompatImageView android:id="@+id/bar_ip_info"
-                    android:layout_width="40dp" android:layout_height="40dp"
-                    android:paddingStart="20dp" android:paddingEnd="0dp" android:paddingTop="10dp" android:paddingBottom="10dp"
-                    android:scaleType="fitCenter" android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/outbound_ip"
-                    app:srcCompat="@drawable/ic_outbound_ip_edge" app:tint="@color/white"/>
-            </LinearLayout>
+        <io.nekohasekai.sagernet.widget.TrayNetworkLayout android:id="@+id/bar_network_card"
+            android:layout_width="wrap_content" android:layout_height="wrap_content">
+            <TextView android:id="@+id/bar_ip_flag" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="🌐" android:textSize="16sp" android:importantForAccessibility="no"/>
+            <TextView android:id="@+id/bar_network_title" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="@string/neko_network_check" android:textSize="16sp" android:singleLine="true" android:textColor="@color/white"/>
+            <androidx.appcompat.widget.AppCompatImageView android:id="@+id/bar_ip_info"
+                android:layout_width="40dp" android:layout_height="40dp" android:padding="10dp"
+                android:scaleType="fitCenter" android:background="@drawable/tray_info_feedback"
+                android:contentDescription="@string/outbound_ip"
+                app:srcCompat="@drawable/ic_outbound_ip_edge" app:tint="@color/white"/>
             <TextView android:id="@+id/bar_ip_value" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="—" android:textColor="@color/white" android:textSize="16sp"
-                android:maxWidth="180dp" android:gravity="end" android:textAlignment="viewEnd"
+                android:gravity="start" android:textAlignment="viewStart"
                 android:maxLines="1" android:ellipsize="end" android:fontFamily="sans-serif"/>
-        </LinearLayout>
+        </io.nekohasekai.sagernet.widget.TrayNetworkLayout>
     </LinearLayout>
 </merge>

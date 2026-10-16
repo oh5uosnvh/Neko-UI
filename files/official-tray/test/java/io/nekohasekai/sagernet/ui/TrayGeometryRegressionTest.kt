@@ -63,18 +63,20 @@ class TrayGeometryRegressionTest {
         TrayTapTargets.bind(root,{tests++},{info++})
         root.measure(View.MeasureSpec.makeMeasureSpec(dp(360),View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(dp(200),View.MeasureSpec.AT_MOST))
         root.layout(0,0,root.measuredWidth,root.measuredHeight)
-        assertEquals(dp(16),content.width-network.right)
+        assertEquals(dp(6),content.width-network.right)
         assertEquals("Left edge must keep official 16dp padding",dp(16),content.paddingLeft)
-        assertEquals("IP address ends at network block edge",network.width,ip.right)
+        assertEquals("IP ends at visible icon edge",network.width-dp(10),ip.right)
+        assertEquals("Flag and IP must share their start",root.findViewById<View>(R.id.bar_ip_flag).left,ip.left)
         assertEquals(0f,(network.layoutParams as LinearLayout.LayoutParams).weight,0.01f)
         root.performClick(); content.performClick()
         listOf(R.id.bar_speed_zone,R.id.bar_delay_zone,R.id.bar_network_card).forEach {
             assertFalse(root.findViewById<View>(it).isClickable)
             assertNull(root.findViewById<View>(it).background)
         }
-        assertNotNull(content.background)
-        assertEquals(2,tests);assertEquals(0,info)
+        assertNull(content.background)
+        assertFalse(content.isClickable)
+        assertEquals(1,tests);assertEquals(0,info)
         root.findViewById<View>(R.id.bar_ip_info).performClick()
-        assertEquals(2,tests);assertEquals(1,info)
+        assertEquals(1,tests);assertEquals(1,info)
     }
 }

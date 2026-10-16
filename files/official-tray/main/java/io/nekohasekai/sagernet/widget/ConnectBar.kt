@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.widget
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.graphics.Canvas
 import android.util.AttributeSet
 import android.view.View
 import android.widget.TextView
@@ -18,7 +19,14 @@ class ConnectBar @JvmOverloads constructor(context: Context, attrs: AttributeSet
     private val ipValue: TextView
     private val flagValue: TextView
     var onTestConnection: (() -> Unit)? = null
+    private val surfaceFeedback by lazy { TraySurfaceFeedback(this) }
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        surfaceFeedback.draw(canvas)
+    }
+    override fun drawableStateChanged() { super.drawableStateChanged(); invalidate() }
     init {
+        setWillNotDraw(false)
         inflate(context, R.layout.layout_connect_bar, this)
         ipValue = findViewById(R.id.bar_ip_value); flagValue = findViewById(R.id.bar_ip_flag)
         // Also initializes StatsBar's official tx/rx/status bindings.
