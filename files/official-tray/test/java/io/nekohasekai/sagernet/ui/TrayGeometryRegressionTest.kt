@@ -26,19 +26,19 @@ class TrayGeometryRegressionTest {
     private fun activity(): Activity = Robolectric.buildActivity(Activity::class.java).setup().get().apply { setTheme(R.style.Theme_SagerNet) }
     @Test fun actualMainLayoutHasOfficialBottomPlacementAndNoExposedStrip() {
         val activity=activity()
+        val root=CoordinatorLayout(activity)
         val parser=activity.resources.getLayout(R.layout.layout_main)
         var params: CoordinatorLayout.LayoutParams?=null
         parser.use {
             while (it.next()!=org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
                 if (it.eventType==org.xmlpull.v1.XmlPullParser.START_TAG && it.name.endsWith("ConnectBar")) {
-                    params=CoordinatorLayout.LayoutParams(activity,android.util.Xml.asAttributeSet(it)); break
+                    params=root.generateLayoutParams(android.util.Xml.asAttributeSet(it)); break
                 }
             }
         }
         val lp=requireNotNull(params)
         assertEquals("Legacy 4dp margin must not survive",0,lp.bottomMargin)
         assertEquals(Gravity.BOTTOM,lp.gravity)
-        val root=CoordinatorLayout(activity)
         val tray=StatsBar(activity)
         listOf(R.id.tx,R.id.rx,R.id.status).forEach { id -> tray.addView(TextView(activity).apply { this.id=id }) }
         tray.setOnClickListener { }
