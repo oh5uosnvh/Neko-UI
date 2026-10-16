@@ -50,6 +50,7 @@ class TraySurfaceFeedbackTest {
             val now=android.os.SystemClock.uptimeMillis()
             val event=MotionEvent.obtain(now,now,action,x,y,0)
             root.dispatchTouchEvent(event);event.recycle()
+            if (action==MotionEvent.ACTION_UP) org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200))
         }
         touch(10f,(root.height-2).toFloat(),MotionEvent.ACTION_DOWN)
         org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(150))

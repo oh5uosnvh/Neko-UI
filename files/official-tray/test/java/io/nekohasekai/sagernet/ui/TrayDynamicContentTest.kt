@@ -80,6 +80,7 @@ class TrayDynamicContentTest {
         assertNull(content.background)
         val up=MotionEvent.obtain(now,now+200,MotionEvent.ACTION_UP,10f,content.height/2f,0)
         root.dispatchTouchEvent(up);up.recycle()
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200))
         assertFalse(root.isPressed)
     }
 }
