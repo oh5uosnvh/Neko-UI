@@ -1,0 +1,1457 @@
+proxies:
+- name: OPPA fixture 1
+  type: oppa
+  server: node1.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 2
+  type: oppa
+  server: node2.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 3
+  type: oppa
+  server: node3.example.invalid
+  port: 4443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 4
+  type: oppa
+  server: node4.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 5
+  type: oppa
+  server: node5.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 6
+  type: oppa
+  server: node6.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 7
+  type: oppa
+  server: node7.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 8
+  type: oppa
+  server: node8.example.invalid
+  port: 4443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 9
+  type: oppa
+  server: node9.example.invalid
+  port: 4443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 10
+  type: oppa
+  server: node10.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 11
+  type: oppa
+  server: node11.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 12
+  type: oppa
+  server: node12.example.invalid
+  port: 6688
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 13
+  type: oppa
+  server: node13.example.invalid
+  port: 6688
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 14
+  type: oppa
+  server: node14.example.invalid
+  port: 6688
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 15
+  type: oppa
+  server: node15.example.invalid
+  port: 6688
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 16
+  type: oppa
+  server: node16.example.invalid
+  port: 6688
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 17
+  type: oppa
+  server: node17.example.invalid
+  port: 6688
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 18
+  type: oppa
+  server: node18.example.invalid
+  port: 6688
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 19
+  type: oppa
+  server: node19.example.invalid
+  port: 6688
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 20
+  type: oppa
+  server: node20.example.invalid
+  port: 6688
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 21
+  type: oppa
+  server: node21.example.invalid
+  port: 6688
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 22
+  type: oppa
+  server: node22.example.invalid
+  port: 8480
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 23
+  type: oppa
+  server: node23.example.invalid
+  port: 8850
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 24
+  type: oppa
+  server: node24.example.invalid
+  port: 4380
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 25
+  type: oppa
+  server: node25.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 26
+  type: oppa
+  server: node26.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 27
+  type: oppa
+  server: node27.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 28
+  type: oppa
+  server: node28.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 29
+  type: oppa
+  server: node29.example.invalid
+  port: 4380
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 30
+  type: oppa
+  server: node30.example.invalid
+  port: 4380
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 31
+  type: oppa
+  server: node31.example.invalid
+  port: 4381
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 32
+  type: oppa
+  server: node32.example.invalid
+  port: 4382
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 33
+  type: oppa
+  server: node33.example.invalid
+  port: 4383
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 34
+  type: oppa
+  server: node34.example.invalid
+  port: 4384
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 35
+  type: oppa
+  server: node35.example.invalid
+  port: 4385
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 36
+  type: oppa
+  server: node36.example.invalid
+  port: 4386
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 37
+  type: oppa
+  server: node37.example.invalid
+  port: 8043
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 38
+  type: oppa
+  server: node38.example.invalid
+  port: 8044
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 39
+  type: oppa
+  server: node39.example.invalid
+  port: 8043
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 40
+  type: oppa
+  server: node40.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 41
+  type: oppa
+  server: node41.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 42
+  type: oppa
+  server: node42.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 43
+  type: oppa
+  server: node43.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 44
+  type: oppa
+  server: node44.example.invalid
+  port: 8043
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 45
+  type: oppa
+  server: node45.example.invalid
+  port: 8044
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 46
+  type: oppa
+  server: node46.example.invalid
+  port: 8045
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 47
+  type: oppa
+  server: node47.example.invalid
+  port: 8046
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 48
+  type: oppa
+  server: node48.example.invalid
+  port: 8047
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 49
+  type: oppa
+  server: node49.example.invalid
+  port: 8048
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 50
+  type: oppa
+  server: node50.example.invalid
+  port: 8049
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 51
+  type: oppa
+  server: node51.example.invalid
+  port: 8050
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 52
+  type: oppa
+  server: node52.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 53
+  type: oppa
+  server: node53.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 54
+  type: oppa
+  server: node54.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 55
+  type: oppa
+  server: node55.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 56
+  type: oppa
+  server: node56.example.invalid
+  port: 4443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 57
+  type: oppa
+  server: node57.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 58
+  type: oppa
+  server: node58.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 59
+  type: oppa
+  server: node59.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 60
+  type: oppa
+  server: node60.example.invalid
+  port: 4443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 61
+  type: oppa
+  server: node61.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 62
+  type: oppa
+  server: node62.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 63
+  type: oppa
+  server: node63.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 64
+  type: oppa
+  server: node64.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 65
+  type: oppa
+  server: node65.example.invalid
+  port: 8860
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 66
+  type: oppa
+  server: node66.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 67
+  type: oppa
+  server: node67.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 68
+  type: oppa
+  server: node68.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 69
+  type: oppa
+  server: node69.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 70
+  type: oppa
+  server: node70.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 71
+  type: oppa
+  server: node71.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 72
+  type: oppa
+  server: node72.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 73
+  type: oppa
+  server: node73.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 74
+  type: oppa
+  server: node74.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 75
+  type: oppa
+  server: node75.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 76
+  type: oppa
+  server: node76.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 77
+  type: oppa
+  server: node77.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 78
+  type: oppa
+  server: node78.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 79
+  type: oppa
+  server: node79.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 80
+  type: oppa
+  server: node80.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 81
+  type: oppa
+  server: node81.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 82
+  type: oppa
+  server: node82.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 83
+  type: oppa
+  server: node83.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 84
+  type: oppa
+  server: node84.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 85
+  type: oppa
+  server: node85.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 86
+  type: oppa
+  server: node86.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 87
+  type: oppa
+  server: node87.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 88
+  type: oppa
+  server: node88.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 89
+  type: oppa
+  server: node89.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 90
+  type: oppa
+  server: node90.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 91
+  type: oppa
+  server: node91.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 92
+  type: oppa
+  server: node92.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 93
+  type: oppa
+  server: node93.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 94
+  type: oppa
+  server: node94.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 95
+  type: oppa
+  server: node95.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 96
+  type: oppa
+  server: node96.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 97
+  type: oppa
+  server: node97.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 98
+  type: oppa
+  server: node98.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 99
+  type: oppa
+  server: node99.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 100
+  type: oppa
+  server: node100.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 101
+  type: oppa
+  server: node101.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 102
+  type: oppa
+  server: node102.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 103
+  type: oppa
+  server: node103.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 104
+  type: oppa
+  server: node104.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 105
+  type: oppa
+  server: node105.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 106
+  type: oppa
+  server: node106.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 107
+  type: oppa
+  server: node107.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 108
+  type: oppa
+  server: node108.example.invalid
+  port: 4443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 109
+  type: oppa
+  server: node109.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 110
+  type: oppa
+  server: node110.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 111
+  type: oppa
+  server: node111.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 112
+  type: oppa
+  server: node112.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 113
+  type: oppa
+  server: node113.example.invalid
+  port: 4443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 114
+  type: oppa
+  server: node114.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 115
+  type: oppa
+  server: node115.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 116
+  type: oppa
+  server: node116.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 117
+  type: oppa
+  server: node117.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 118
+  type: oppa
+  server: node118.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 119
+  type: oppa
+  server: node119.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 120
+  type: oppa
+  server: node120.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 121
+  type: oppa
+  server: node121.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 122
+  type: oppa
+  server: node122.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 123
+  type: oppa
+  server: node123.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 124
+  type: oppa
+  server: node124.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 125
+  type: oppa
+  server: node125.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 126
+  type: oppa
+  server: node126.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 127
+  type: oppa
+  server: node127.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 128
+  type: oppa
+  server: node128.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 129
+  type: oppa
+  server: node129.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 130
+  type: oppa
+  server: node130.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 131
+  type: oppa
+  server: node131.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 132
+  type: oppa
+  server: node132.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 133
+  type: oppa
+  server: node133.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 134
+  type: oppa
+  server: node134.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 135
+  type: oppa
+  server: node135.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 136
+  type: oppa
+  server: node136.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 137
+  type: oppa
+  server: node137.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 138
+  type: oppa
+  server: node138.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 139
+  type: oppa
+  server: node139.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 140
+  type: oppa
+  server: node140.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 141
+  type: oppa
+  server: node141.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 142
+  type: oppa
+  server: node142.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 143
+  type: oppa
+  server: node143.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 144
+  type: oppa
+  server: node144.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 145
+  type: oppa
+  server: node145.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 146
+  type: oppa
+  server: node146.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 147
+  type: oppa
+  server: node147.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 148
+  type: oppa
+  server: node148.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 149
+  type: oppa
+  server: node149.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 150
+  type: oppa
+  server: node150.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 151
+  type: oppa
+  server: node151.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 152
+  type: oppa
+  server: node152.example.invalid
+  port: 4443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 153
+  type: oppa
+  server: node153.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 154
+  type: oppa
+  server: node154.example.invalid
+  port: 4443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 155
+  type: oppa
+  server: node155.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 156
+  type: oppa
+  server: node156.example.invalid
+  port: 4443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 157
+  type: oppa
+  server: node157.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 158
+  type: oppa
+  server: node158.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 159
+  type: oppa
+  server: node159.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 160
+  type: oppa
+  server: node160.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 161
+  type: oppa
+  server: node161.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 162
+  type: oppa
+  server: node162.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 163
+  type: oppa
+  server: node163.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 164
+  type: oppa
+  server: node164.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 165
+  type: oppa
+  server: node165.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 166
+  type: oppa
+  server: node166.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 167
+  type: oppa
+  server: node167.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 168
+  type: oppa
+  server: node168.example.invalid
+  port: 4443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 169
+  type: oppa
+  server: node169.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 170
+  type: oppa
+  server: node170.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 171
+  type: oppa
+  server: node171.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 172
+  type: oppa
+  server: node172.example.invalid
+  port: 5566
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 173
+  type: oppa
+  server: node173.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 174
+  type: oppa
+  server: node174.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 175
+  type: oppa
+  server: node175.example.invalid
+  port: 443
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  skip-cert-verify: true
+- name: OPPA fixture 176
+  type: oppa
+  server: node176.example.invalid
+  port: 5560
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 177
+  type: oppa
+  server: node177.example.invalid
+  port: 6880
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 178
+  type: oppa
+  server: node178.example.invalid
+  port: 8660
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 179
+  type: oppa
+  server: node179.example.invalid
+  port: 8661
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 180
+  type: oppa
+  server: node180.example.invalid
+  port: 6677
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 181
+  type: oppa
+  server: node181.example.invalid
+  port: 8660
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid
+- name: OPPA fixture 182
+  type: oppa
+  server: node182.example.invalid
+  port: 6655
+  password: TestOnly-Not-A-Real-Credential
+  udp: true
+  preconnect: 8
+  sni: tls.example.invalid

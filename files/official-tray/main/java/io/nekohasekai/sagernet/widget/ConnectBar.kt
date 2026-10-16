@@ -20,13 +20,12 @@ class ConnectBar @JvmOverloads constructor(context: Context, attrs: AttributeSet
     private val flagValue: TextView
     var onTestConnection: (() -> Unit)? = null
     private val surfaceFeedback by lazy { TraySurfaceFeedback(this) }
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        surfaceFeedback.draw(canvas)
+    override fun draw(canvas: Canvas) {
+        surfaceFeedback.syncShape()
+        super.draw(canvas)
     }
-    override fun drawableStateChanged() { super.drawableStateChanged(); invalidate() }
     init {
-        setWillNotDraw(false)
+        surfaceFeedback.syncShape()
         inflate(context, R.layout.layout_connect_bar, this)
         ipValue = findViewById(R.id.bar_ip_value); flagValue = findViewById(R.id.bar_ip_flag)
         // Also initializes StatsBar's official tx/rx/status bindings.

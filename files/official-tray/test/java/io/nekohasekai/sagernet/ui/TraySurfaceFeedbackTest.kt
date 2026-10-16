@@ -37,15 +37,14 @@ class TraySurfaceFeedbackTest {
         root.measure(View.MeasureSpec.makeMeasureSpec(1080,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(2000,View.MeasureSpec.AT_MOST))
         root.layout(0,0,root.measuredWidth,root.measuredHeight)
         val feedback=TraySurfaceFeedback(root)
-        fun pixel(): Int {
-            val bitmap=Bitmap.createBitmap(root.width,root.height,Bitmap.Config.ARGB_8888)
-            feedback.draw(Canvas(bitmap))
-            return bitmap.getPixel(root.width/2,root.height-2) ushr 24
-        }
-        assertEquals(0,pixel())
-        root.isPressed=true
-        assertTrue("bottom inset must receive visible feedback",pixel()>0)
-        root.isPressed=false
+        feedback.syncShape()
+        val ripple=root.foreground as android.graphics.drawable.RippleDrawable
+        root.draw(Canvas(Bitmap.createBitmap(root.width,root.height,Bitmap.Config.ARGB_8888)))
+        assertEquals(root.height,ripple.bounds.bottom)
+        assertNotNull(ripple.findDrawableByLayerId(android.R.id.mask))
+        val attrs=a.obtainStyledAttributes(intArrayOf(android.R.attr.selectableItemBackground))
+        val official=attrs.getDrawable(0);attrs.recycle()
+        assertEquals("same drawable implementation as official XML",official!!::class.java,ripple::class.java)
         fun touch(x:Float,y:Float,action:Int) {
             val now=android.os.SystemClock.uptimeMillis()
             val event=MotionEvent.obtain(now,now,action,x,y,0)
