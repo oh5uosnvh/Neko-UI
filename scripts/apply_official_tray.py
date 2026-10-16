@@ -23,6 +23,7 @@ edit('app/src/main/res/layout/layout_main.xml',
     'app:fabAlignmentMode="center" app:hideOnScroll="false"',
     'app:fabAlignmentMode="center" app:hideOnScroll="true"')
 edit(main,'binding.connectBar.changeState(state, animate)','''binding.connectBar.changeState(state)
+        io.nekohasekai.sagernet.widget.TrayStatusText.apply(binding.connectBar, state)
         syncConnectBar(animate)''')
 p=r/main;s=p.read_text();a=s.index('    private fun syncConnectBar() {');b=s.index('\n    // may NOT called',a)
 s=s[:a]+'''    private fun syncConnectBar(animate: Boolean = false) {

@@ -1,24 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <merge xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+    <LinearLayout android:id="@+id/tray_content" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:minHeight="88dp" android:background="?android:attr/selectableItemBackground"
+        android:clickable="true" android:focusable="true"
         android:orientation="horizontal" android:gravity="center_vertical"
         android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingTop="16dp" android:paddingBottom="12dp">
         <LinearLayout android:id="@+id/bar_speed_zone" android:layout_width="0dp" android:layout_weight="1"
-            android:layout_height="wrap_content" android:orientation="vertical" android:paddingEnd="8dp"
-            android:background="@drawable/bg_touch_rounded">
+            android:layout_height="wrap_content" android:orientation="vertical" android:paddingEnd="8dp">
             <TextView android:id="@+id/tx" android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:textColor="@color/white" android:textSize="14sp" android:maxLines="1" android:ellipsize="end"/>
             <TextView android:id="@+id/rx" android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:textColor="@color/white" android:textSize="14sp" android:maxLines="1" android:ellipsize="end"/>
             <LinearLayout android:id="@+id/bar_delay_zone" android:layout_width="match_parent" android:layout_height="wrap_content">
                 <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:text="@string/neko_handshake_idle" android:textColor="@color/white" android:textSize="14sp" android:maxLines="2"/>
+                    android:text="@string/neko_handshake_idle" android:textColor="@color/white" android:textSize="14sp"
+                    android:singleLine="true" android:ellipsize="end" android:gravity="center_vertical"/>
             </LinearLayout>
         </LinearLayout>
         <LinearLayout android:id="@+id/bar_network_card" android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:orientation="vertical" android:gravity="end|center_vertical"
-            android:background="@drawable/bg_touch_rounded"
-            android:clickable="true" android:focusable="true">
+            android:layout_height="wrap_content" android:orientation="vertical" android:gravity="end|center_vertical">
             <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center_vertical">
                 <TextView android:id="@+id/bar_ip_flag" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:text="🌐" android:textSize="16sp" android:importantForAccessibility="no"/>
@@ -26,9 +26,11 @@
                     android:layout_marginStart="6dp" android:text="@string/neko_network_check" android:textSize="14sp"
                     android:singleLine="true" android:textColor="@color/white"/>
                 <androidx.appcompat.widget.AppCompatImageView android:id="@+id/bar_ip_info"
-                    android:layout_width="40dp" android:layout_height="40dp" android:padding="10dp"
-                    android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="@string/outbound_ip"
-                    app:srcCompat="@drawable/ic_outbound_ip" app:tint="@color/white"/>
+                    android:layout_width="40dp" android:layout_height="40dp"
+                    android:paddingStart="20dp" android:paddingEnd="0dp" android:paddingTop="10dp" android:paddingBottom="10dp"
+                    android:scaleType="fitCenter" android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/outbound_ip"
+                    app:srcCompat="@drawable/ic_outbound_ip_edge" app:tint="@color/white"/>
             </LinearLayout>
             <TextView android:id="@+id/bar_ip_value" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="—" android:textColor="@color/white" android:textSize="16sp"

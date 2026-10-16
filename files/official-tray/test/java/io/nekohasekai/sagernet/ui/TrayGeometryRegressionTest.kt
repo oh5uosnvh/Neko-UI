@@ -67,10 +67,14 @@ class TrayGeometryRegressionTest {
         assertEquals("Left edge must keep official 16dp padding",dp(16),content.paddingLeft)
         assertEquals("IP address ends at network block edge",network.width,ip.right)
         assertEquals(0f,(network.layoutParams as LinearLayout.LayoutParams).weight,0.01f)
-        root.performClick()
-        listOf(R.id.bar_speed_zone,R.id.bar_delay_zone,R.id.bar_network_card).forEach { root.findViewById<View>(it).performClick() }
-        assertEquals(4,tests);assertEquals(0,info)
+        root.performClick(); content.performClick()
+        listOf(R.id.bar_speed_zone,R.id.bar_delay_zone,R.id.bar_network_card).forEach {
+            assertFalse(root.findViewById<View>(it).isClickable)
+            assertNull(root.findViewById<View>(it).background)
+        }
+        assertNotNull(content.background)
+        assertEquals(2,tests);assertEquals(0,info)
         root.findViewById<View>(R.id.bar_ip_info).performClick()
-        assertEquals(4,tests);assertEquals(1,info)
+        assertEquals(2,tests);assertEquals(1,info)
     }
 }

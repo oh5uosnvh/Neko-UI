@@ -432,7 +432,7 @@ jobs:
           echo "ndk.dir=${ANDROID_NDK_HOME}" >> local.properties
           ./run init action gradle
           set -a; . ../mods/keystore/keystore.properties; set +a
-          ./gradlew app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.ui.GroupShortcutRegressionTest' --tests 'io.nekohasekai.sagernet.ui.GroupDatabaseMigrationTest' --tests 'io.nekohasekai.sagernet.ui.NetworkUiRegressionTest' --tests 'io.nekohasekai.sagernet.ui.OfficialTrayRegressionTest' --tests 'io.nekohasekai.sagernet.ui.TrayGeometryRegressionTest'
+          ./gradlew app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.ui.GroupShortcutRegressionTest' --tests 'io.nekohasekai.sagernet.ui.GroupDatabaseMigrationTest' --tests 'io.nekohasekai.sagernet.ui.NetworkUiRegressionTest' --tests 'io.nekohasekai.sagernet.ui.OfficialTrayRegressionTest' --tests 'io.nekohasekai.sagernet.ui.TrayGeometryRegressionTest' --tests 'io.nekohasekai.sagernet.ui.TrayDynamicContentTest'
           ./gradlew app:assemblePreviewRelease
           OUT=app/build/outputs/apk
           N64=$(find "$OUT" -name '*arm64-v8a*.apk' | wc -l)

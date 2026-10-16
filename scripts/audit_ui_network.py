@@ -29,6 +29,8 @@ taps=text('java/io/nekohasekai/sagernet/widget/TrayTapTargets.kt')
 assert 'TrayTapTargets.bind(this,' in text('java/io/nekohasekai/sagernet/widget/ConnectBar.kt')
 assert 'bar_network_card).setOnClickListener { openNetworkDialog() }' not in text('java/io/nekohasekai/sagernet/widget/ConnectBar.kt')
 assert 'R.id.bar_network_card).forEach' in taps
+assert 'content.setOnClickListener(test)' in taps and 'background = null' in taps
+assert 'TrayStatusText.apply(binding.connectBar, state)' in main
 assert 'R.id.bar_ip_info).setOnClickListener { onInfo() }' in taps
 assert 'repeat(2)' in main and 'handshakeJob?.cancel()' in main
 assert 'DataStore.currentProfile == profileId' in main
