@@ -22,12 +22,10 @@ class ConnectBar @JvmOverloads constructor(context: Context, attrs: AttributeSet
         inflate(context, R.layout.layout_connect_bar, this)
         ipValue = findViewById(R.id.bar_ip_value); flagValue = findViewById(R.id.bar_ip_flag)
         // Also initializes StatsBar's official tx/rx/status bindings.
-        val test = View.OnClickListener { if (DataStore.serviceState.connected) onTestConnection?.invoke() }
-        setOnClickListener(test)
-        findViewById<View>(R.id.bar_speed_zone).setOnClickListener(test)
-        findViewById<View>(R.id.bar_delay_zone).setOnClickListener(test)
-        findViewById<View>(R.id.bar_network_card).setOnClickListener { openNetworkDialog() }
-        findViewById<View>(R.id.bar_ip_info).setOnClickListener { openNetworkDialog() }
+        TrayTapTargets.bind(this,
+            onTest = { if (DataStore.serviceState.connected) onTestConnection?.invoke() },
+            onInfo = { openNetworkDialog() },
+        )
         updateSpeed(0,0); renderNetwork()
     }
     private fun openNetworkDialog() {

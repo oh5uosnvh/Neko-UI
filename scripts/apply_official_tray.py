@@ -15,6 +15,13 @@ s=subprocess.check_output(['git','-C',str(r),'show','f167ebc88e9a733e65380e13dab
 s=s.replace('class StatsBar @JvmOverloads','open class StatsBar @JvmOverloads')
 (r/rel).write_text(s)
 shutil.copytree(kit/'files/official-tray',r/'app/src',dirs_exist_ok=True)
+# Match the official BottomAppBar placement exactly: no legacy compact-bar margin.
+edit('app/src/main/res/layout/layout_main.xml',
+    'android:layout_gravity="bottom" android:layout_marginBottom="4dp"',
+    'android:layout_gravity="bottom" android:nextFocusUp="@id/fab"')
+edit('app/src/main/res/layout/layout_main.xml',
+    'app:fabAlignmentMode="center" app:hideOnScroll="false"',
+    'app:fabAlignmentMode="center" app:hideOnScroll="true"')
 edit(main,'binding.connectBar.changeState(state, animate)','''binding.connectBar.changeState(state)
         syncConnectBar(animate)''')
 p=r/main;s=p.read_text();a=s.index('    private fun syncConnectBar() {');b=s.index('\n    // may NOT called',a)

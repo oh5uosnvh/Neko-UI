@@ -21,6 +21,15 @@ assert 'isIndeterminate' not in button and 'BaseProgressIndicator' not in button
 layout=text('res/layout/layout_main.xml')
 assert 'widget.ServiceButton' in layout and 'layout_anchor="@id/connect_bar"' in layout
 assert 'CircularProgressIndicator' not in layout
+ns='{http://schemas.android.com/apk/res/android}'
+tray=next(e for e in ET.fromstring(layout).iter() if e.tag.endswith('.ConnectBar'))
+assert tray.get(ns+'layout_marginBottom') is None, 'legacy tray bottom margin'
+assert tray.get(ns+'layout_margin') is None, 'legacy tray margin'
+taps=text('java/io/nekohasekai/sagernet/widget/TrayTapTargets.kt')
+assert 'TrayTapTargets.bind(this,' in text('java/io/nekohasekai/sagernet/widget/ConnectBar.kt')
+assert 'bar_network_card).setOnClickListener { openNetworkDialog() }' not in text('java/io/nekohasekai/sagernet/widget/ConnectBar.kt')
+assert 'R.id.bar_network_card).forEach' in taps
+assert 'R.id.bar_ip_info).setOnClickListener { onInfo() }' in taps
 assert 'repeat(2)' in main and 'handshakeJob?.cancel()' in main
 assert 'DataStore.currentProfile == profileId' in main
 assert 'binding.fab.changeState' in main and 'refreshNetworkCard()' in main

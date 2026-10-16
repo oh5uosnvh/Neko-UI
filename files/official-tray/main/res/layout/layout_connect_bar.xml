@@ -15,9 +15,9 @@
                     android:text="@string/neko_handshake_idle" android:textColor="@color/white" android:textSize="14sp" android:maxLines="2"/>
             </LinearLayout>
         </LinearLayout>
-        <LinearLayout android:id="@+id/bar_network_card" android:layout_width="0dp" android:layout_weight="1"
-            android:layout_height="wrap_content" android:orientation="vertical" android:gravity="center_vertical"
-            android:paddingStart="12dp" android:background="@drawable/bg_touch_rounded"
+        <LinearLayout android:id="@+id/bar_network_card" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:orientation="vertical" android:gravity="end|center_vertical"
+            android:background="@drawable/bg_touch_rounded"
             android:clickable="true" android:focusable="true">
             <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center_vertical">
                 <TextView android:id="@+id/bar_ip_flag" android:layout_width="wrap_content" android:layout_height="wrap_content"
@@ -30,8 +30,9 @@
                     android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="@string/outbound_ip"
                     app:srcCompat="@drawable/ic_outbound_ip" app:tint="@color/white"/>
             </LinearLayout>
-            <TextView android:id="@+id/bar_ip_value" android:layout_width="match_parent" android:layout_height="wrap_content"
+            <TextView android:id="@+id/bar_ip_value" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="—" android:textColor="@color/white" android:textSize="16sp"
+                android:maxWidth="180dp" android:gravity="end" android:textAlignment="viewEnd"
                 android:maxLines="1" android:ellipsize="end" android:fontFamily="sans-serif"/>
         </LinearLayout>
     </LinearLayout>
