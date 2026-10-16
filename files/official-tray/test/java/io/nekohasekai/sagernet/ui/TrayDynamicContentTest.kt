@@ -55,13 +55,16 @@ class TrayDynamicContentTest {
     @Test fun visibleInfoCircleEndsAtExactlySameEdgeAsIpAndPressFeedbackSpansContent() {
         val a=Robolectric.buildActivity(Activity::class.java).setup().get();a.setTheme(R.style.Theme_SagerNet)
         val root=FrameLayout(a);LayoutInflater.from(a).inflate(R.layout.layout_connect_bar,root,true)
+        a.setContentView(root)
         TrayTapTargets.bind(root,{},{})
         root.findViewById<TextView>(R.id.bar_ip_value).text="80.251.211.247"
         root.measure(View.MeasureSpec.makeMeasureSpec(1080,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(2000,View.MeasureSpec.AT_MOST));root.layout(0,0,root.measuredWidth,root.measuredHeight)
         val icon=root.findViewById<ImageView>(R.id.bar_ip_info)
         val ip=root.findViewById<TextView>(R.id.bar_ip_value)
-        val x1=IntArray(2);val x2=IntArray(2);icon.getLocationInWindow(x1);ip.getLocationInWindow(x2)
-        assertEquals("visible icon edge not equal to address edge",(x2[0]+ip.width).toFloat(),(x1[0]+icon.width-icon.paddingRight).toFloat(),1f)
+        val iconRect=android.graphics.Rect(); val ipRect=android.graphics.Rect()
+        icon.getDrawingRect(iconRect); ip.getDrawingRect(ipRect)
+        root.offsetDescendantRectToMyCoords(icon,iconRect); root.offsetDescendantRectToMyCoords(ip,ipRect)
+        assertEquals("visible icon edge not equal to address edge",ipRect.right.toFloat(),(iconRect.right-icon.paddingRight).toFloat(),1f)
         assertEquals(0,icon.paddingRight)
         val content=root.findViewById<View>(R.id.tray_content)
         val now=android.os.SystemClock.uptimeMillis()
