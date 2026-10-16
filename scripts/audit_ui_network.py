@@ -27,6 +27,17 @@ assert 'binding.fab.changeState' in main and 'refreshNetworkCard()' in main
 card=text('java/io/nekohasekai/sagernet/widget/ConnectBar.kt')
 assert 'NetworkPrivacy.display' in card and 'NetworkPrivacy.flag' in card
 assert 'q.level' not in card and 'setTextColor' not in card
+stats=text('java/io/nekohasekai/sagernet/widget/StatsBar.kt')
+original=subprocess.check_output(['git','-C',str(r),'show','f167ebc88e9a733e65380e13dab39726eba917b2:app/src/main/java/io/nekohasekai/sagernet/widget/StatsBar.kt'],text=True)
+assert stats.replace('open class StatsBar','class StatsBar') == original, 'official StatsBar behavior drifted'
+assert ') : StatsBar(' in card and 'binding.connectBar.syncMainControls(' in main
+assert 'setupBottomBarScrollDriver()' in cfg and 'mainActivity.driveBottomBar(' in cfg
+network_layout=text('res/layout/layout_connect_bar.xml')
+assert 'MaterialCardView' not in network_layout and 'stroke' not in network_layout
+lookup=text('java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt')
+assert '.execute()' not in lookup and 'invokeOnCancellation { call.cancel() }' in lookup
+assert 'live.value = entry' in lookup and 'generation != epoch' in lookup
+assert 'updates.collect' in main and 'COUNTRY_GRACE_MS' not in lookup
 privacy=text('java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt')
 assert 'R.id.neko_hide_ip_switch' in privacy and 'NetworkPrivacy.hidden' in privacy
 for p in (base/'res').rglob('*.xml'): ET.parse(p)

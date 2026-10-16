@@ -119,8 +119,8 @@ grep -q 'val alwaysShowAddress get() = DataStore.alwaysShowAddress' "$F" \
 grep -q 'lastAppliedAlwaysShowAddress' "$F" \
   || fail "030 onResume refresh missing"
 C=app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
-grep -q 'speedZone.setOnClickListener' "$C" \
-  || fail "030 speed-zone test tap missing"
+grep -q 'bar_speed_zone).*setOnClickListener(test)' "$C" \
+  || fail "speed-zone test tap missing"
 
 grep -q 'displayPrefListener' "$F" \
   || fail "031 display pref listener missing"
@@ -134,7 +134,7 @@ grep -q 'grabOffset' "$E" || fail "033 scrollbar grab offset missing"
 grep -q 'trackingTouch' "$E" || fail "033 scrollbar touch tracking missing"
 grep -q 'getScrollBarThumbHeight' "$E" || fail "033 scrollbar hit bounds missing"
 # Both zones must call one shared test action, not separate behavior.
-grep -q 'speedZone.performClick()' "$C" || fail "shared speed/delay test action missing"
+grep -q 'bar_delay_zone).*setOnClickListener(test)' "$C" || fail "shared speed/delay test action missing"
 
 
 
