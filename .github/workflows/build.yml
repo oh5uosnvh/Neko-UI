@@ -227,6 +227,14 @@ jobs:
           python3 "$GITHUB_WORKSPACE/scripts/apply_oppa_yaml.py" upstream
           python3 "$GITHUB_WORKSPACE/scripts/audit_ui_network.py" upstream
 
+      - name: Keep VLESS label for #x365 nodes
+        run: |
+          python3 "$GITHUB_WORKSPACE/scripts/apply_x365_display.py" upstream
+
+      - name: Restore official scrollbar behaviour
+        run: |
+          python3 "$GITHUB_WORKSPACE/scripts/restore_official_scroll.py" upstream
+
       - name: Batch cleanup for delete-unavailable
         run: |
           python3 "$GITHUB_WORKSPACE/scripts/apply_bulk_delete.py" upstream
