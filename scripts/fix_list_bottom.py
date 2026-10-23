@@ -27,12 +27,6 @@ def main() -> int:
     text = cf.read_text(encoding="utf-8")
     changed = False
 
-    for old in ("bottom = dp2px(170) + insets.getInsets(",
-                "bottom = dp2px(72) + insets.getInsets("):
-        if old in text:
-            text = text.replace(old, "bottom = dp2px(48) + insets.getInsets(", 1)
-            changed = True
-            break
     if "configurationListView.clipToPadding = false" in text:
         text = text.replace("configurationListView.clipToPadding = false",
                             "configurationListView.clipToPadding = true", 1)
@@ -40,7 +34,7 @@ def main() -> int:
     if changed:
         cf.write_text(text, encoding="utf-8")
 
-    print("[list-bottom] padding=48dp, clipToPadding=true (official scroll range)")
+    print("[list-bottom] clipToPadding=true (padding counts towards thumb travel)")
     return 0
 
 
