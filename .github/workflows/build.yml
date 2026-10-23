@@ -227,6 +227,10 @@ jobs:
           python3 "$GITHUB_WORKSPACE/scripts/apply_oppa_yaml.py" upstream
           python3 "$GITHUB_WORKSPACE/scripts/audit_ui_network.py" upstream
 
+      - name: Batch cleanup for delete-unavailable
+        run: |
+          python3 "$GITHUB_WORKSPACE/scripts/apply_bulk_delete.py" upstream
+
       - name: Assert A01 final UI and crash-fix anchors
         run: |
           bash "$GITHUB_WORKSPACE/scripts/assert_source.sh" upstream
