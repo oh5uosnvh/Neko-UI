@@ -231,14 +231,6 @@ jobs:
         run: |
           python3 "$GITHUB_WORKSPACE/scripts/apply_x365_display.py" upstream
 
-      - name: Official list bottom inset
-        run: |
-          python3 "$GITHUB_WORKSPACE/scripts/fix_list_bottom.py" upstream
-
-      - name: Restore official scrollbar behaviour
-        run: |
-          python3 "$GITHUB_WORKSPACE/scripts/restore_official_scroll.py" upstream
-
       - name: Batch cleanup for delete-unavailable
         run: |
           python3 "$GITHUB_WORKSPACE/scripts/apply_bulk_delete.py" upstream
