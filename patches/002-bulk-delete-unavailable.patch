@@ -17,7 +17,7 @@
                      if (toClear.isNotEmpty()) {
                          onMainDispatcher {
                              MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
-@@ -1032,17 +1028,11 @@
+@@ -1032,35 +1028,33 @@
                                      val visible = mutableListOf<Pair<Int, ProxyEntity>>()
                                      val invisible = mutableListOf<ProxyEntity>()
                                      if (currentAdapter != null) {
@@ -40,7 +40,91 @@
                                      } else {
                                          invisible.addAll(toClear)
                                      }
-@@ -2515,6 +2505,23 @@
+-                                    if (visible.isNotEmpty() && groupFragment?.isUndoReady() == true) {
+-                                        groupFragment.undoManager.remove(visible)
+-                                    } else {
+-                                        visible.forEach {
+-                                            runOnDefaultDispatcher {
+-                                                ProfileManager.deleteProfile2(
+-                                                    it.second.groupId, it.second.id
+-                                                )
++                                    fun deleteNow(items: List<ProxyEntity>) {
++                                        if (items.isEmpty()) return
++                                        runOnDefaultDispatcher {
++                                            // One DELETE for the whole batch.
++                                            SagerDatabase.proxyDao.deleteProxy(items)
++                                            if (items.any { it.id == DataStore.selectedProxy }) {
++                                                DataStore.selectedProxy = 0L
+                                             }
+                                         }
+                                     }
+-                                    invisible.forEach {
+-                                        runOnDefaultDispatcher {
+-                                            ProfileManager.deleteProfile2(it.groupId, it.id)
+-                                        }
++                                    if (visible.isNotEmpty() &&
++                                        groupFragment?.isUndoReady() == true
++                                    ) {
++                                        groupFragment.undoManager.remove(visible)
++                                        deleteNow(invisible)
++                                    } else {
++                                        // No undo channel: nothing to restore, so drop
++                                        // every row in one statement.
++                                        deleteNow(visible.map { it.second } + invisible)
+                                     }
+                                 }
+                                 .setNegativeButton(R.string.no, null)
+@@ -1104,35 +1098,27 @@
+                                     val visible = mutableListOf<Pair<Int, ProxyEntity>>()
+                                     val invisible = mutableListOf<ProxyEntity>()
+                                     if (currentAdapter != null) {
+-                                        for (profile in toClear) {
+-                                            val index =
+-                                                currentAdapter.configurationIdList.indexOf(profile.id)
+-                                            if (index >= 0) {
+-                                                currentAdapter.remove(index)
+-                                                visible.add(index to profile)
+-                                            } else {
+-                                                invisible.add(profile)
+-                                            }
+-                                        }
++                                        visible.addAll(currentAdapter.removeAll(toClear.map { it.id }))
++                                        val visibleIds = visible.mapTo(HashSet()) { it.second.id }
++                                        invisible.addAll(toClear.filterNot { it.id in visibleIds })
+                                     } else {
+                                         invisible.addAll(toClear)
+                                     }
++                                    fun deleteNow(items: List<ProxyEntity>) {
++                                        if (items.isEmpty()) return
++                                        runOnDefaultDispatcher {
++                                            SagerDatabase.proxyDao.deleteProxy(items)
++                                            if (items.any { it.id == DataStore.selectedProxy }) {
++                                                DataStore.selectedProxy = 0L
++                                            }
++                                        }
++                                    }
+                                     if (visible.isNotEmpty() && groupFragment?.isUndoReady() == true) {
+                                         groupFragment.undoManager.remove(visible)
++                                        deleteNow(invisible)
+                                     } else {
+-                                        visible.forEach {
+-                                            runOnDefaultDispatcher {
+-                                                ProfileManager.deleteProfile2(
+-                                                    it.second.groupId, it.second.id
+-                                                )
+-                                            }
+-                                        }
++                                        deleteNow(visible.map { it.second } + invisible)
+                                     }
+-                                    invisible.forEach {
+-                                        runOnDefaultDispatcher {
+-                                            ProfileManager.deleteProfile2(it.groupId, it.id)
+-                                        }
+-                                    }
+                                 }
+                                 .setNegativeButton(R.string.no, null)
+                                 .show()
+@@ -2515,6 +2501,23 @@
                  notifyDataSetChanged()
              }
  
@@ -64,7 +148,7 @@
              fun remove(pos: Int) {
                  if (pos < 0) return
                  configurationIdList.removeAt(pos)
-@@ -2535,9 +2542,13 @@
+@@ -2535,9 +2538,13 @@
  
              override fun commit(actions: List<Pair<Int, ProxyEntity>>) {
                  val profiles = actions.map { it.second }
