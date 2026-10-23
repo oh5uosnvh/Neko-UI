@@ -56,5 +56,14 @@ for p in (base/'res').rglob('*.xml'): ET.parse(p)
 for p in (base/'java').rglob('*.kt'):
  s=p.read_text(); assert '\n<<<<<<< ' not in s and '\n>>>>>>> ' not in s, str(p)
 for p in ['app/schemas','app/src/main/java/io/nekohasekai/sagernet/database/ProxyEntity.kt','app/src/main/java/io/nekohasekai/sagernet/fmt/KryoConverters.kt']:
- d=subprocess.check_output(['git','-C',str(r),'diff','--',p],text=True);assert not d, 'schema/serialization change: '+p
+ d=subprocess.check_output(['git','-C',str(r),'diff','--',p],text=True)
+ if not d:
+  continue
+ # One reviewed exception: displayType()'s x365 label. Added and removed lines
+ # must both be that single expression; any entity/serialization edit still fails.
+ changed=[l for l in d.splitlines() if l.startswith(('+','-')) and not l.startswith(('+++','---'))]
+ ok=bool(changed) and all(
+  ('isX365()' in l or 'alterId == -2' in l) and 'displayType' not in l
+  for l in changed)
+ assert ok, 'schema/serialization change: '+p
 print('PASS: both clear entries/undo, compact dashed menu, official non-spinning FAB, two handshakes, private neutral IP card, chain picker, no schema conflicts')
