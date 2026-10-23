@@ -74,9 +74,8 @@ QUERY_OLD = '''                runOnDefaultDispatcher {
                     }
                     if (toClear.isNotEmpty()) {'''
 QUERY_NEW = '''                runOnDefaultDispatcher {
-                    val groupId = DataStore.currentGroupId()
-                    val ids = SagerDatabase.proxyDao.unavailableIds(groupId)
-                    val toClear = if (ids.isEmpty()) emptyList() else ProfileManager.getProfiles(ids)
+                    val profiles = SagerDatabase.proxyDao.getByGroup(DataStore.currentGroupId())
+                    val toClear = profiles.filter { it.status != 0 && it.status != 1 }
                     if (toClear.isNotEmpty()) {'''
 
 LOOP_OLD = '''                                    if (currentAdapter != null) {
@@ -205,11 +204,12 @@ def main() -> int:
     root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "upstream")
     cf = root / CF
     pe = root / PE
-    for p in (cf, pe):
-        if not p.is_file():
-            raise SystemExit(f"[bulk-delete] 找不到 {p}")
+    if not cf.is_file():
+        raise SystemExit(f"[bulk-delete] 找不到 {cf}")
 
-    patch(pe, [(DAO_ANCHOR, DAO_ADDED)], PE)
+    # ProxyEntity.kt is guarded by scripts/audit_ui_network.py (no schema or
+    # serialization drift). The existing deleteProxy(List<ProxyEntity>) already
+    # issues one DELETE for a batch, so the DAO is left untouched.
     patch(
         cf,
         [
@@ -225,10 +225,10 @@ def main() -> int:
 
     text = cf.read_text(encoding="utf-8")
     assert "fun removeAll(ids: Collection<Long>)" in text
-    assert "unavailableIds(groupId)" in text
+    assert "deleteProxy(items)" in text
     assert "deleteNow(visible.map { it.second } + invisible)" in text
     assert text.count("indexOf(profile.id)") <= 2, "仍有逐项 indexOf 残留"
-    print("[bulk-delete] applied: DAO ids query + O(n) removal + batched delete")
+    print("[bulk-delete] applied: O(n) list removal + batched delete")
     return 0
 
 
