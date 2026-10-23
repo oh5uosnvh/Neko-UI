@@ -1,0 +1,82 @@
+--- a/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
++++ b/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+@@ -1010,13 +1010,9 @@
+ 
+             R.id.action_connection_test_delete_unavailable -> {
+                 runOnDefaultDispatcher {
+-                    val profiles = SagerDatabase.proxyDao.getByGroup(DataStore.currentGroupId())
+-                    val toClear = mutableListOf<ProxyEntity>()
+-                    if (profiles.isNotEmpty()) for (profile in profiles) {
+-                        if (profile.status != 0 && profile.status != 1) {
+-                            toClear.add(profile)
+-                        }
+-                    }
++                    val groupId = DataStore.currentGroupId()
++                    val ids = SagerDatabase.proxyDao.unavailableIds(groupId)
++                    val toClear = if (ids.isEmpty()) emptyList() else ProfileManager.getProfiles(ids)
+                     if (toClear.isNotEmpty()) {
+                         onMainDispatcher {
+                             MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
+@@ -1032,17 +1028,11 @@
+                                     val visible = mutableListOf<Pair<Int, ProxyEntity>>()
+                                     val invisible = mutableListOf<ProxyEntity>()
+                                     if (currentAdapter != null) {
+-                                        for (profile in toClear) {
+-                                            val index =
+-                                                currentAdapter.configurationIdList.indexOf(profile.id)
+-                                            if (index >= 0) {
+-                                                // 逐个移除再取下一个 index，避免位移错位
+-                                                currentAdapter.remove(index)
+-                                                visible.add(index to profile)
+-                                            } else {
+-                                                invisible.add(profile)
+-                                            }
+-                                        }
++                                        // One pass, one refresh: per-item indexOf+remove is
++                                        // O(n) each and re-lays out the list every time.
++                                        visible.addAll(currentAdapter.removeAll(toClear.map { it.id }))
++                                        val visibleIds = visible.mapTo(HashSet()) { it.second.id }
++                                        invisible.addAll(toClear.filterNot { it.id in visibleIds })
+                                     } else {
+                                         invisible.addAll(toClear)
+                                     }
+@@ -2515,6 +2505,23 @@
+                 notifyDataSetChanged()
+             }
+ 
++            /** Removes every id in one pass and returns the rows with their
++             *  original positions so undo can put them back. */
++            fun removeAll(ids: Collection<Long>): List<Pair<Int, ProxyEntity>> {
++                if (ids.isEmpty() || configurationIdList.isEmpty()) return emptyList()
++                val wanted = ids.toHashSet()
++                val removed = ArrayList<Pair<Int, ProxyEntity>>()
++                val kept = ArrayList<Long>(configurationIdList.size)
++                configurationIdList.forEachIndexed { index, id ->
++                    if (id in wanted) removed.add(index to getItem(id)) else kept.add(id)
++                }
++                if (removed.isEmpty()) return emptyList()
++                configurationIdList = kept
++                configurationList.keys.removeAll(wanted)
++                notifyDataSetChanged()
++                return removed
++            }
++
+             fun remove(pos: Int) {
+                 if (pos < 0) return
+                 configurationIdList.removeAt(pos)
+@@ -2535,9 +2542,13 @@
+ 
+             override fun commit(actions: List<Pair<Int, ProxyEntity>>) {
+                 val profiles = actions.map { it.second }
++                if (profiles.isEmpty()) return
+                 runOnDefaultDispatcher {
+-                    for (entity in profiles) {
+-                        ProfileManager.deleteProfile(entity.groupId, entity.id)
++                    // Single statement instead of one DELETE + listener round
++                    // trip per row.
++                    SagerDatabase.proxyDao.deleteProxy(profiles)
++                    if (profiles.any { it.id == DataStore.selectedProxy }) {
++                        DataStore.selectedProxy = 0L
+                     }
+                 }
+             }
