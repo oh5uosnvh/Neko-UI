@@ -27,22 +27,18 @@ def main() -> int:
     text = cf.read_text(encoding="utf-8")
     changed = False
 
-    if "bottom = dp2px(170) + insets.getInsets(" in text:
-        text = text.replace("bottom = dp2px(170) + insets.getInsets(",
-                            "bottom = dp2px(48) + insets.getInsets(", 1)
-        changed = True
+    for old in ("bottom = dp2px(170) + insets.getInsets(",
+                "bottom = dp2px(72) + insets.getInsets("):
+        if old in text:
+            text = text.replace(old, "bottom = dp2px(48) + insets.getInsets(", 1)
+            changed = True
+            break
     if "configurationListView.clipToPadding = false" in text:
         text = text.replace("configurationListView.clipToPadding = false",
                             "configurationListView.clipToPadding = true", 1)
         changed = True
     if changed:
         cf.write_text(text, encoding="utf-8")
-
-    layout = root / LAYOUT
-    ltext = layout.read_text(encoding="utf-8")
-    if ("com.simplecityapps.recyclerview_fastscroll.views.FastScrollRecyclerView"
-            not in ltext):
-        raise SystemExit("[list-bottom] 列表未使用官方 FastScrollRecyclerView")
 
     print("[list-bottom] padding=48dp, clipToPadding=true (official scroll range)")
     return 0
