@@ -77,7 +77,7 @@ if 'private var unavailableCleanupInProgress = false' not in s:
  s=s.replace(anchor,'    private var unavailableCleanupInProgress = false\n\n'+anchor,1)
 s=s.replace('''            R.id.action_connection_test_delete_unavailable -> {
                 runOnDefaultDispatcher {''','''            R.id.action_connection_test_delete_unavailable -> {
-                if (unavailableCleanupInProgress) return@onOptionsItemSelected
+                if (unavailableCleanupInProgress) return@onMenuItemClick
                 unavailableCleanupInProgress = true
                 runOnDefaultDispatcher {''',1)
 s=s.replace('''                    if (unavailableIds.isNotEmpty()) {
