@@ -14,6 +14,9 @@ main.write_text(m)
 # the first answer before it can enrich the visible entry.
 anchor='''    private fun fromIdentMe(): IpQuality {
 '''
+if anchor not in s:
+ anchor='''    private suspend fun fromIdentMe(): IpQuality {
+'''
 extra='''    private suspend fun fromIpSb(): IpQuality {
         val j = getJson("https://api.ip.sb/geoip")
         return quality(j.optString("ip"), "ip.sb", "residential", true,
