@@ -82,7 +82,7 @@ for i in range(start,len(original)):
 method=original[a:end]
 edit(cfg,'            configurationListView.setItemViewCacheSize(20)', '            configurationListView.setItemViewCacheSize(20)\n            if (!select) setupBottomBarScrollDriver()')
 edit(cfg,'        inner class ConfigurationAdapter :',method+'\n\n        inner class ConfigurationAdapter :')
-edit(cfg,'bottom = dp2px(170) + insets.getInsets(', 'bottom = dp2px(116) + insets.getInsets(')
+edit(cfg,'bottom = dp2px(170) + insets.getInsets(', 'bottom = dp2px(48) + insets.getInsets(')
 # Async cancellable HTTP calls, no blocking execute() in child coroutines.
 edit(lookup,'    private const val COUNTRY_GRACE_MS = 1_500L     // 胜者缺国家时的宽限期\n','')
 edit(lookup,'    private const val TOTAL_TIMEOUT_MS = 10_000L    // 六源对冲总超时\n','')

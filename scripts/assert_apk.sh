@@ -30,7 +30,6 @@ for SO in "$TMP"/lib/*/libgojni.so; do
   }
   check x365       x365 1
   check efan-UA    'Chrome/120.0.0.0' 1
-  check Blackstone 'do not hack this protocol please' 1
   check viewTurbo  viewTurbo 1
   check fastup     fastup 1
   check oppa       'oppa-mod/oppa' 1

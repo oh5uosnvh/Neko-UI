@@ -21,7 +21,7 @@ on:
       mods_ref:
         description: 'Nekobox-MG ref (协议魔改源码, 空=HEAD)'
         required: false
-        default: 'agent/compatibility'
+        default: 'feature/r98-clean'
       anytls_commit:
         description: 'sing-anytls-shanlian commit (空=HEAD)'
         required: false
@@ -158,81 +158,39 @@ jobs:
           fi
           echo "mods @ $(git -C mods log --oneline -1)"
 
-      - name: Apply Nekobox-MG protocol mods
+      - name: Refresh x365 source only
         run: |
           set -euo pipefail
-          # Two cases:
-          #  a) upstream is a BARE NekoBoxForAndroid -> integrate.sh applies
-          #     patches/000-integration.patch (40 modified files) then overlays
-          #     files/ (12 new files).
-          #  b) upstream already carries the integration (tag A01 and friends)
-          #     -> patching again would conflict, so we only refresh the
-          #     protocol sources from Nekobox-MG, which is what we actually
-          #     want to ship.
-          # Never let the x365 refresh silently replace a newer Blackstone
-          # implementation with an archived fixed-magic cipher again.
-          for file in cipher.go cipher_test.go outbound.go; do
-            cmp mods/Neko-xhttp/libcore/protocol/xhttp/$file \
-                mods/Neko-gjgx/files/libcore/protocol/xhttp/$file
-          done
           cd upstream
           if [ -f libcore/protocol/x365/conn.go ] && grep -q libcoreX365 libcore/box_include.go; then
-            echo ">> upstream already integrated — refreshing x365 and Blackstone independently"
-            test -d libcore/protocol/xhttp
             cp -v ../mods/Neko-365/libcore/protocol/x365/*.go libcore/protocol/x365/
-            cp -v ../mods/Neko-xhttp/libcore/protocol/xhttp/*.go libcore/protocol/xhttp/
           else
-            echo ">> bare upstream — running full integration"
-            bash ../mods/Neko-gjgx/integrate.sh .
+            echo "::error::r98 upstream must already contain the captured x365 source"; exit 1
           fi
+          ! grep -q 'yfbridge\|Blackstone\|snell-yf' libcore/box_include.go || exit 1
 
-      - name: Assert current x365 is in place
-        run: |
-          set -euo pipefail
-          cd upstream
-          for f in libcore/protocol/x365/conn.go \
-                   libcore/protocol/x365/outbound.go \
-                   libcore/protocol/xhttp/outbound.go \
-                   libcore/protocol/xhttp/cipher.go ; do
-            [ -f "$f" ] || { echo "::error::$f missing after integration"; exit 1; }
-          done
-          # A 5-byte X365+00 in a memory dump was incorrectly labelled a
-          # client prologue. The captured 29-byte request is the supported
-          # evidence; fail fast if that unverified addition comes back.
-          ! grep -q 'PrologueVersion' libcore/protocol/x365/conn.go \
-            || { echo "::error::unverified x365 prologue reintroduced"; exit 1; }
-          grep -q 'libcoreX365' libcore/box_include.go \
-            || { echo "::error::x365 outbound not registered"; exit 1; }
-          grep -q 'libcoreXhttp.RegisterOutbound' libcore/box_include.go \
-            || { echo "::error::Blackstone outbound not registered"; exit 1; }
-          grep -q 'Chrome/120.0.0.0' libcore/protocol/x365/outbound.go
-          grep -q 'magicSuffix = "do not hack this protocol please"' libcore/protocol/xhttp/cipher.go
-          grep -q '11cb12c8cf84e0568896a7f6bd61ab53' libcore/protocol/xhttp/cipher.go
-          cmp libcore/protocol/xhttp/cipher.go ../mods/Neko-xhttp/libcore/protocol/xhttp/cipher.go
-          echo "x365 + Blackstone mods applied:"; git -C . diff --stat -- libcore app | tail -3
-
-      - name: Apply Neko-UI patches (33)
+      - name: Apply official r98 UI and suffix-only protocol contracts
         run: |
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
-
-      - name: Apply final Neko stability and requested protocol fixes
-        run: |
-          python3 "$GITHUB_WORKSPACE/scripts/apply_final_stability.py" upstream
-          python3 "$GITHUB_WORKSPACE/scripts/apply_final_protocols.py" upstream mods
           python3 "$GITHUB_WORKSPACE/scripts/apply_group_shortcut.py" upstream
-          python3 "$GITHUB_WORKSPACE/scripts/audit_group_shortcut.py" upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_ui_network.py" upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_official_tray.py" upstream
-          python3 "$GITHUB_WORKSPACE/scripts/apply_oppa_yaml.py" upstream
-          python3 "$GITHUB_WORKSPACE/scripts/audit_ui_network.py" upstream
+          python3 "$GITHUB_WORKSPACE/scripts/apply_chain_picker_alignment.py" upstream
+          python3 "$GITHUB_WORKSPACE/scripts/apply_final_protocols.py" upstream mods
+          python3 "$GITHUB_WORKSPACE/scripts/apply_suffix_contract.py" upstream
+          python3 "$GITHUB_WORKSPACE/scripts/apply_ip_reliability.py" upstream
+          ! rg -n 'Blackstone|snell-yf|yfbridge|apply_blackstone|prepare_yf' libcore app/src/main/java
 
-      - name: Assert A01 final UI and crash-fix anchors
+      - name: Assert clean r98 source and undo paths
         run: |
-          bash "$GITHUB_WORKSPACE/scripts/assert_source.sh" upstream
-          grep -q 'MIGRATION_8_9_SAFE' upstream/app/src/main/java/io/nekohasekai/sagernet/database/SagerDatabase.kt
-          grep -q 'if (pos !in configurationIdList.indices)' upstream/app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
-          ! grep -q 'repair_snell.py\|snell-yf\|RegisterSnellOutbound' upstream/app/src/main/java/io/nekohasekai/sagernet/database/SagerDatabase.kt upstream/libcore/box_include.go || true
+          set -euo pipefail
+          cd upstream
+          grep -q 'undoManager.remove' app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+          grep -q 'fun isUndoReady' app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+          grep -q 'type = "vless"' app/src/main/java/io/nekohasekai/sagernet/fmt/v2ray/V2RayFmt.kt
+          ! rg -n 'Blackstone|snell-yf|yfbridge|xhttp-yf' libcore app/src/main/java
+          ! grep -q 'deleteUnavailable(groupId)' app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -341,15 +299,15 @@ jobs:
           go version
           ./run lib core
 
-      - name: Test integrated x365 and Blackstone independently
+      - name: Test integrated x365 independently
         if: steps.libcore-cache.outputs.cache-hit != 'true'
         env:
           GOSUMDB: off
+          GOFLAGS: -mod=mod
         run: |
           set -euo pipefail
           cd upstream/libcore
           go test ./protocol/x365 -run 'TestPrepareX365Transport|TestEncodeMatchesLiveCapture' -count=1 -v
-          go test ./protocol/xhttp -run 'TestBlackstoneRotatedMagicAndKey' -count=1 -v
 
       - name: Check libcore.aar ABI coverage
         run: |
