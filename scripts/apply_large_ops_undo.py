@@ -33,7 +33,7 @@ block='''            R.id.action_remove_duplicate -> {
                                 if (visible.isNotEmpty() && groupFragment?.isUndoReady()==true) {
                                     groupFragment.undoManager.remove(visible)
                                 } else {
-                                    runOnDefaultDispatcher { SagerDatabase.proxyDao.deleteByIds(duplicates.map { it.id }) }
+                                    runOnDefaultDispatcher { duplicates.forEach { ProfileManager.deleteProfile2(it.groupId, it.id) } }
                                 }
                                 duplicateCleanupInProgress = false
                             }
