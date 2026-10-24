@@ -9,6 +9,8 @@ if 'fun publishCoreJson' not in s:
     anchor='    private fun publish(profileId: Long, q: IpQualityLookup.IpQuality): IpQualityLookup.IpQuality {'
     if anchor not in s:
         anchor='    private fun publish(profileId: Long, q: IpQuality): IpQuality {'
+    if anchor not in s:
+        anchor='    fun cacheFor(profileId: Long): CacheEntry? ='
     if anchor not in s: raise SystemExit('missing IpQuality publish anchor')
     method='''    fun publishCoreJson(profileId: Long, raw: String): Boolean {
         return try {
