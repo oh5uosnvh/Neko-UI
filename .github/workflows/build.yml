@@ -182,6 +182,7 @@ jobs:
           python3 "$GITHUB_WORKSPACE/scripts/apply_suffix_contract.py" .
           python3 "$GITHUB_WORKSPACE/scripts/apply_ip_reliability.py" .
           python3 "$GITHUB_WORKSPACE/scripts/apply_bulk_undo_counts.py" .
+          python3 "$GITHUB_WORKSPACE/scripts/apply_profile_batch_pipeline.py" .
           ! rg -n 'Blackstone|snell-yf|yfbridge|apply_blackstone|prepare_yf' libcore app/src/main/java
 
       - name: Assert clean r98 source and undo paths
@@ -386,7 +387,7 @@ jobs:
           echo "ndk.dir=${ANDROID_NDK_HOME}" >> local.properties
           ./run init action gradle
           set -a; . ../mods/keystore/keystore.properties; set +a
-          ./gradlew app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.ui.GroupShortcutRegressionTest' --tests 'io.nekohasekai.sagernet.ui.GroupDatabaseMigrationTest' --tests 'io.nekohasekai.sagernet.ui.NetworkUiRegressionTest' --tests 'io.nekohasekai.sagernet.ui.OfficialTrayRegressionTest' --tests 'io.nekohasekai.sagernet.ui.TrayGeometryRegressionTest' --tests 'io.nekohasekai.sagernet.ui.TrayDynamicContentTest' --tests 'io.nekohasekai.sagernet.ui.TraySurfaceFeedbackTest' --tests 'io.nekohasekai.sagernet.ui.OppaYamlImportTest' --tests 'io.nekohasekai.sagernet.ui.BulkUndoCountTest'
+          ./gradlew app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.ui.GroupShortcutRegressionTest' --tests 'io.nekohasekai.sagernet.ui.GroupDatabaseMigrationTest' --tests 'io.nekohasekai.sagernet.ui.NetworkUiRegressionTest' --tests 'io.nekohasekai.sagernet.ui.OfficialTrayRegressionTest' --tests 'io.nekohasekai.sagernet.ui.TrayGeometryRegressionTest' --tests 'io.nekohasekai.sagernet.ui.TrayDynamicContentTest' --tests 'io.nekohasekai.sagernet.ui.TraySurfaceFeedbackTest' --tests 'io.nekohasekai.sagernet.ui.OppaYamlImportTest' --tests 'io.nekohasekai.sagernet.ui.BulkUndoCountTest' --tests 'io.nekohasekai.sagernet.ui.ProfileHundredThousandTest'
           ./gradlew app:assemblePreviewRelease
           OUT=app/build/outputs/apk
           N64=$(find "$OUT" -name '*arm64-v8a*.apk' | wc -l)
