@@ -10,11 +10,8 @@ def rep(rel,old,new):
 # A newly created clipboard subscription must become the selected group; do not
 # leave the top bar pointing at the first pre-existing group.
 p='app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt'
-rep(p,'''            val newGroup = GroupManager.createGroup(ProxyGroup().apply { serialize() })
-            if (newGroup.type == GroupType.SUBSCRIPTION && !newGroup.subscription?.link.isNullOrEmpty()) {''','''            val newGroup = GroupManager.createGroup(ProxyGroup().apply { serialize() })
-            DataStore.selectedGroup = newGroup.id
-            DataStore.editingGroup = newGroup.id
-            if (newGroup.type == GroupType.SUBSCRIPTION && !newGroup.subscription?.link.isNullOrEmpty()) {''')
+if 'DataStore.editingGroup = newGroup.id' not in (r/'app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt').read_text():
+ rep(p,'            DataStore.selectedGroup = newGroup.id','            DataStore.selectedGroup = newGroup.id\n            DataStore.editingGroup = newGroup.id')
 # Direct subscription links imported by Android intent follow the same rule.
 p='app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt'
 rep(p,'''    private suspend fun finishImportSubscription(subscription: ProxyGroup) {
