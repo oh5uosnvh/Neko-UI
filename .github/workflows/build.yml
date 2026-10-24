@@ -233,6 +233,7 @@ jobs:
           python3 mods/compat/apply_suffix_contract.py upstream
           python3 mods/compat/prepare_yf_core.py upstream
           python3 mods/compat/finish_protocol_compat.py upstream
+          python3 mods/compat/apply_blackstone_import.py upstream
           python3 mods/compat/assert_compat.py upstream
 
       - name: Assert A01 final UI and crash-fix anchors
