@@ -13,6 +13,15 @@ def edit(rel, old, new):
   raise SystemExit(f'missing protocol anchor: {rel}')
  p.write_text(s.replace(old,new,1))
 
+def replace_any(rel, olds, new):
+ p=root/rel; s=p.read_text()
+ for old in olds:
+  if old in s and old != new:
+   p.write_text(s.replace(old,new,1)); return
+ # already migrated is acceptable only when no old marker remains
+ if not any(old in s for old in olds if old != new): return
+ raise SystemExit(f'missing protocol anchor: {rel}')
+
 def copy(src,dst):
  src=mods/src; dst=root/dst; dst.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(src,dst)
 
@@ -32,14 +41,14 @@ edit('app/src/main/java/io/nekohasekai/sagernet/fmt/v2ray/StandardV2RayBean.java
 '''    public boolean isX365() {
         return this instanceof VMessBean && uuid != null && uuid.toLowerCase().endsWith("#x365");
     }''')
-edit('app/src/main/java/io/nekohasekai/sagernet/fmt/v2ray/V2RayFmt.kt',
-'''            this is VMessBean && isX365() -> "x365"''',
+replace_any('app/src/main/java/io/nekohasekai/sagernet/fmt/v2ray/V2RayFmt.kt',
+['''            this is VMessBean && isX365() -> "x365"''','''            this is VMessBean && isX365() -> "vless"'''],
 '''            this is VMessBean && isX365() -> "vless"''')
-edit('app/src/main/java/io/nekohasekai/sagernet/database/ProxyEntity.kt',
-'''            vmessBean!!.isX365() -> "x365"''',
+replace_any('app/src/main/java/io/nekohasekai/sagernet/database/ProxyEntity.kt',
+['''            vmessBean!!.isX365() -> "x365"''','''            vmessBean!!.isX365() -> "VLESS"'''],
 '''            vmessBean!!.isX365() -> "VLESS"''')
-edit('app/src/main/java/io/nekohasekai/sagernet/fmt/v2ray/V2RayFmt.kt',
-'''                type = "x365"''',
+replace_any('app/src/main/java/io/nekohasekai/sagernet/fmt/v2ray/V2RayFmt.kt',
+['''                type = "x365"''','''                type = "vless"'''],
 '''                type = "vless"''')
 # Legacy x365 links retain the marker when normalized to VLESS.
 edit('app/src/main/java/io/nekohasekai/sagernet/fmt/v2ray/VMessBean.java',
