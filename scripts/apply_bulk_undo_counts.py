@@ -49,7 +49,7 @@ s=s[:a]+'''            R.id.action_remove_duplicate -> {
                                     .setPositiveButton(R.string.yes) { _, _ ->
                                         val page = adapter.groupFragments[targetGroupId]
                                         val list = page?.adapter
-                                        if (list != null && page.isUndoReady()) {
+                                        if (list != null && page?.isUndoReady() == true) {
                                             val actions = list.stageBatchRemoval(duplicates)
                                             page.undoManager.remove(actions)
                                         }
@@ -93,9 +93,19 @@ s=method(s,anchor,'''            override fun undo(actions: List<Pair<Int, Proxy
                     PendingProfileDeletes.undo(snapshot.map { it.second })
                     snapshot.forEach { (_, node) -> configurationList[node.id] = node }
                     val existing = configurationIdList.toHashSet()
-                    snapshot.filter { it.first >= 0 }.sortedBy { it.first }.forEach { (position, node) ->
-                        if (existing.add(node.id)) configurationIdList.add(position.coerceIn(0, configurationIdList.size), node.id)
+                    val restore = snapshot.filter { it.first >= 0 && existing.add(it.second.id) }.sortedBy { it.first }
+                    val merged = ArrayList<Long>(configurationIdList.size + restore.size)
+                    var next = 0
+                    var add = 0
+                    while (next < configurationIdList.size || add < restore.size) {
+                        if (add < restore.size && (restore[add].first <= merged.size || next == configurationIdList.size)) {
+                            merged.add(restore[add++].second.id)
+                        } else {
+                            merged.add(configurationIdList[next++])
+                        }
                     }
+                    configurationIdList.clear()
+                    configurationIdList.addAll(merged)
                     notifyDataSetChanged()
                 }
             }''')
