@@ -179,6 +179,7 @@ jobs:
           python3 "$GITHUB_WORKSPACE/scripts/apply_ui_network.py" .
           python3 "$GITHUB_WORKSPACE/scripts/apply_official_tray.py" .
           python3 "$GITHUB_WORKSPACE/scripts/apply_chain_picker_alignment.py" .
+          python3 "$GITHUB_WORKSPACE/scripts/apply_x365_core.py" . ../mods
           python3 "$GITHUB_WORKSPACE/scripts/apply_final_protocols.py" . ../mods
           python3 "$GITHUB_WORKSPACE/scripts/apply_x365_vless_only.py" .
           python3 "$GITHUB_WORKSPACE/scripts/apply_suffix_contract.py" .
