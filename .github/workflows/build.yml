@@ -168,6 +168,8 @@ jobs:
         run: |
           cd upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_all.py"
+          python3 "$GITHUB_WORKSPACE/scripts/remove_ip_surface.py" .
+          python3 "$GITHUB_WORKSPACE/scripts/assert_no_ip.py" .
           python3 "$GITHUB_WORKSPACE/scripts/apply_safe_migration.py" .
           python3 "$GITHUB_WORKSPACE/scripts/apply_group_shortcut.py" .
           python3 "$GITHUB_WORKSPACE/scripts/remove_group_filter_segment.py" .

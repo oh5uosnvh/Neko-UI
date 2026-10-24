@@ -6,7 +6,7 @@
 校验:
   1) dex 内功能锚点 + libgojni 协议 mod 标记（release 包同样适用）
   2) dex 内 UI 保留符号（8 项功能规格的锚点）
-  3) dex 内不得出现历史废案符号 + 已移除功能符号（☷ 手柄等）
+  3) dex 内不得出现历史废案符号 + 已移除功能符号（☷ 手柄、IP 查询等）
   4) 全部 libgojni.so 协议 mod 标记（x365/viewTurbo/fastup/oppa-mod/mihomo 伪装）
      ——双架构 split 包各含一个 ABI 的 so，逐个校验（未来 universal 包全覆盖）
 """
@@ -17,9 +17,8 @@ REQUIRED_DEX = [
     b"openGroupAt", b"scrollToGroup", b"resetScrollState", b"calculateDiff",
     b"applyFirstFill", b"syncOrderFromDb",
     b"drawerWarmRunnable", b"applyGroupCounts", b"armFallback",
-    b"ConnectBar", b"OutboundIpDialogFragment", b"deleteGroupWithUndo",
-    b"bindCopy", b"restoreGroupAt", b"ServiceButton", b"IpQualityLookup",
-    b"prefetch",
+    b"ConnectBar", b"deleteGroupWithUndo",
+    b"bindCopy", b"restoreGroupAt", b"ServiceButton",
 ]
 FORBIDDEN_DEX = [
     b"prefetchJob", b"prefetchGroupPages", b"pageWarmStep", b"pageWarmCap",
