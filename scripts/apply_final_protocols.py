@@ -35,6 +35,9 @@ edit('app/src/main/java/io/nekohasekai/sagernet/fmt/v2ray/StandardV2RayBean.java
 edit('app/src/main/java/io/nekohasekai/sagernet/fmt/v2ray/V2RayFmt.kt',
 '''            this is VMessBean && isX365() -> "x365"''',
 '''            this is VMessBean && isX365() -> "vless"''')
+edit('app/src/main/java/io/nekohasekai/sagernet/database/ProxyEntity.kt',
+'''            vmessBean!!.isX365() -> "x365"''',
+'''            vmessBean!!.isX365() -> "VLESS"''')
 edit('app/src/main/java/io/nekohasekai/sagernet/fmt/v2ray/V2RayFmt.kt',
 '''                type = "x365"''',
 '''                type = "vless"''')
