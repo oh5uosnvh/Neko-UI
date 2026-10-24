@@ -158,15 +158,10 @@ jobs:
           fi
           echo "mods @ $(git -C mods log --oneline -1)"
 
-      - name: Refresh x365 source only
+      - name: Assert clean r98 upstream base
         run: |
           set -euo pipefail
           cd upstream
-          if [ -f libcore/protocol/x365/conn.go ] && grep -q libcoreX365 libcore/box_include.go; then
-            cp -v ../mods/Neko-365/libcore/protocol/x365/*.go libcore/protocol/x365/
-          else
-            echo "::error::r98 upstream must already contain the captured x365 source"; exit 1
-          fi
           ! grep -q 'yfbridge\|Blackstone\|snell-yf' libcore/box_include.go || exit 1
 
       - name: Apply official r98 UI and suffix-only protocol contracts
