@@ -117,6 +117,8 @@ if 'private var liveJob' not in s:
   s=s.replace('import androidx.fragment.app.DialogFragment\n','import androidx.fragment.app.DialogFragment\nimport androidx.lifecycle.lifecycleScope\n',1)
  if 'import kotlinx.coroutines.flow.collect' not in s:
   s=s.replace('import io.nekohasekai.sagernet.R\n','import io.nekohasekai.sagernet.R\nimport kotlinx.coroutines.flow.collect\n',1)
+ if 'import kotlinx.coroutines.launch' not in s:
+  s=s.replace('import kotlinx.coroutines.flow.collect\n','import kotlinx.coroutines.flow.collect\nimport kotlinx.coroutines.launch\n',1)
  if 'override fun onDestroyView()' not in s:
   method='''
     override fun onDestroyView() {
