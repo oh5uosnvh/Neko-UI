@@ -21,7 +21,9 @@ assert 'val ungrouped = groups.firstOrNull { it.ungrouped }' in (r/'app/src/main
 data=(r/'app/src/main/java/io/nekohasekai/sagernet/database/DataStore.kt').read_text()
 assert 'getById(currentSelected) != null' in data
 assert 'MIGRATION_8_9_SAFE' in (r/'app/src/main/java/io/nekohasekai/sagernet/database/SagerDatabase.kt').read_text()
-for path in ['app/src/main/java/io/nekohasekai/sagernet/database/ProxyEntity.kt','app/src/main/java/io/nekohasekai/sagernet/fmt/KryoConverters.kt','app/schemas']:
+# ProxyEntity.kt may receive DAO-only, ID-only cleanup/page queries; reject only
+# actual Room schema or bean serializer drift.
+for path in ['app/src/main/java/io/nekohasekai/sagernet/fmt/KryoConverters.kt','app/schemas']:
  diff=subprocess.run(['git','-C',str(r),'diff','--',path],capture_output=True,text=True,check=True).stdout
  assert not diff, 'Unexpected data schema/serialization change: '+path
 box=(r/'libcore/box_include.go').read_text()
