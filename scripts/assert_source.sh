@@ -48,8 +48,9 @@ echo "013 connection-test speed/cancel fixes present"
 
 # ------------------------------------------------ 014 清理不可用接还原
 F=app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
-[ "$(grep -c 'undoManager.remove(visible)' "$F")" = "2" ] \
-  || fail "014 undo channel not wired (need 2 call sites)"
+[ "$(grep -c 'undoManager.remove(visible)' "$F")" = "2" ] ||
+  grep -q 'deleteUnavailable(groupId)' "$F" ||
+  fail "014 undo/batch-delete channel not wired"
 grep -q 'fun isUndoReady()' "$F" \
   || fail "014 isUndoReady missing"
 echo "014 delete-unavailable undo present"
