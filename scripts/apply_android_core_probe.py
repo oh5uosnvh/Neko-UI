@@ -4,6 +4,7 @@ import sys
 r=Path(sys.argv[1]).resolve();base='app/src/main/java/io/nekohasekai/sagernet/'
 # Add a parser that publishes the core answer into the existing shared flow.
 p=r/(base+'ui/IpQualityLookup.kt');s=p.read_text()
+s=s.replace('if (entry?.profileId == DataStore.currentProfile && DataStore.serviceState.connected) {','if (entry?.profileId == DataStore.currentProfile) {',1)
 if 'fun publishCoreJson' not in s:
     anchor='    private fun publish(profileId: Long, q: IpQualityLookup.IpQuality): IpQualityLookup.IpQuality {'
     if anchor not in s:
