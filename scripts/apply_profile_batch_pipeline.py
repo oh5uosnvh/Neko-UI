@@ -142,7 +142,10 @@ s=s[:a]+'''            R.id.action_connection_test_delete_unavailable -> {
                         onMainDispatcher {
                             if (!isAdded || nodes.isEmpty()) duplicateCleanupInProgress = false
                             else MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
-                                .setMessage(getString(R.string.delete_confirm_prompt) + " (" + nodes.size + ")")
+                                .setMessage("您确认要删除这些重复配置吗？\n一共 ${nodes.size} 个重复配置。\n\n" + nodes.take(50).joinToString("\n") { node ->
+                                    val name = node.displayName().orEmpty().replace("\\n", " ")
+                                    if (name.length > 42) name.take(41) + "…" else name
+                                } + if (nodes.size > 50) "\n……" else "")
                                 .setPositiveButton(R.string.yes) { _, _ ->
                                     val page = adapter.groupFragments[groupId]
                                     val list = page?.adapter
