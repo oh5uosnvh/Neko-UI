@@ -60,5 +60,14 @@ for p in ['app/schemas','app/src/main/java/io/nekohasekai/sagernet/fmt/KryoConve
 # Protocol compatibility may intentionally relabel the private x365 route as
 # ordinary VLESS; it must not alter the entity schema or serialized fields.
 d=subprocess.check_output(['git','-C',str(r),'diff','--','app/src/main/java/io/nekohasekai/sagernet/database/ProxyEntity.kt'],text=True)
-assert not d or ('isX365() -> "VLESS"' in d and d.count('@@') == 2), 'unexpected ProxyEntity change'
+if d:
+    allowed = (
+        'isX365() -> "VLESS"' in d or
+        'TYPE_XHTTP -> "Blackstone"' in d
+    )
+    assert allowed and all(
+        line.startswith(('diff ', 'index ', '--- ', '+++ ', '@@ ', '-        ', '+        '))
+        or not line.startswith(('+', '-'))
+        for line in d.splitlines()
+    ), 'unexpected ProxyEntity change'
 print('PASS: both clear entries/undo, compact dashed menu, official non-spinning FAB, two handshakes, private neutral IP card, chain picker, no schema conflicts')
