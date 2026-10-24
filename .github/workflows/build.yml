@@ -181,6 +181,7 @@ jobs:
           python3 "$GITHUB_WORKSPACE/scripts/apply_x365_vless_only.py" .
           python3 "$GITHUB_WORKSPACE/scripts/apply_suffix_contract.py" .
           python3 "$GITHUB_WORKSPACE/scripts/apply_ip_reliability.py" .
+          python3 "$GITHUB_WORKSPACE/scripts/apply_ip_flclash_sources.py" .
           python3 "$GITHUB_WORKSPACE/scripts/apply_bulk_undo_counts.py" .
           python3 "$GITHUB_WORKSPACE/scripts/apply_profile_batch_pipeline.py" .
           ! rg -n 'Blackstone|snell-yf|yfbridge|apply_blackstone|prepare_yf' libcore app/src/main/java
