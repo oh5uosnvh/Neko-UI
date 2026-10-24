@@ -162,7 +162,7 @@ s=s[:a]+'''            R.id.action_connection_test_delete_unavailable -> {
 '''+s[b:]
 p.write_text(s)
 # Clears retain their existing restore semantics, but no whole-table cursor or per-row existence queries.
-p=r/(base+'ui/GroupClearStore.kt');s=p.read_text().replace('db.proxyDao().getByGroup(groupId)','PendingProfileDeletes.loadGroup(groupId)')
+p=r/(base+'ui/GroupClearStore.kt');s=p.read_text().replace('db.proxyDao().getByGroup(groupId)','PendingProfileDeletes.loadGroup(groupId, db)')
 s=s.replace('''val missing = nodes.filter { it.groupId == groupId && db.proxyDao().getById(it.id) == null }''','''val existing = db.proxyDao().getIdsByGroup(groupId).toHashSet()
                 val missing = nodes.filter { it.groupId == groupId && it.id !in existing }''')
 p.write_text(s)

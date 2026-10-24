@@ -44,11 +44,11 @@ internal object PendingProfileDeletes {
     }
 
     /** Bound each CursorWindow; sorting remains the same as the original group query. */
-    fun loadGroup(groupId: Long): List<ProxyEntity> {
+    fun loadGroup(groupId: Long, db: SagerDatabase = SagerDatabase.instance): List<ProxyEntity> {
         val nodes = ArrayList<ProxyEntity>()
         var after = 0L
         while (true) {
-            val page = SagerDatabase.proxyDao.profilePageAfter(groupId, after, 128)
+            val page = db.proxyDao().profilePageAfter(groupId, after, 128)
             if (page.isEmpty()) break
             nodes.addAll(page)
             after = page.last().id
