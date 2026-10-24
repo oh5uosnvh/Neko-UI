@@ -55,6 +55,10 @@ assert 'R.id.neko_hide_ip_switch' in privacy and 'NetworkPrivacy.hidden' in priv
 for p in (base/'res').rglob('*.xml'): ET.parse(p)
 for p in (base/'java').rglob('*.kt'):
  s=p.read_text(); assert '\n<<<<<<< ' not in s and '\n>>>>>>> ' not in s, str(p)
-for p in ['app/schemas','app/src/main/java/io/nekohasekai/sagernet/database/ProxyEntity.kt','app/src/main/java/io/nekohasekai/sagernet/fmt/KryoConverters.kt']:
+for p in ['app/schemas','app/src/main/java/io/nekohasekai/sagernet/fmt/KryoConverters.kt']:
  d=subprocess.check_output(['git','-C',str(r),'diff','--',p],text=True);assert not d, 'schema/serialization change: '+p
+# Protocol compatibility may intentionally relabel the private x365 route as
+# ordinary VLESS; it must not alter the entity schema or serialized fields.
+d=subprocess.check_output(['git','-C',str(r),'diff','--','app/src/main/java/io/nekohasekai/sagernet/database/ProxyEntity.kt'],text=True)
+assert not d or ('isX365() -> "VLESS"' in d and d.count('@@') == 2), 'unexpected ProxyEntity change'
 print('PASS: both clear entries/undo, compact dashed menu, official non-spinning FAB, two handshakes, private neutral IP card, chain picker, no schema conflicts')

@@ -21,7 +21,7 @@ on:
       mods_ref:
         description: 'Nekobox-MG ref (协议魔改源码, 空=HEAD)'
         required: false
-        default: 'agent/compatibility'
+        default: 'feature/r98-vless-suffix-blackstone'
       anytls_commit:
         description: 'sing-anytls-shanlian commit (空=HEAD)'
         required: false
@@ -226,6 +226,14 @@ jobs:
           python3 "$GITHUB_WORKSPACE/scripts/apply_official_tray.py" upstream
           python3 "$GITHUB_WORKSPACE/scripts/apply_oppa_yaml.py" upstream
           python3 "$GITHUB_WORKSPACE/scripts/audit_ui_network.py" upstream
+
+      - name: Apply r98 protocol suffix and YF Blackstone compatibility
+        run: |
+          python3 mods/compat/apply_protocol_compat.py upstream
+          python3 mods/compat/apply_suffix_contract.py upstream
+          python3 mods/compat/prepare_yf_core.py upstream
+          python3 mods/compat/finish_protocol_compat.py upstream
+          python3 mods/compat/assert_compat.py upstream
 
       - name: Assert A01 final UI and crash-fix anchors
         run: |
