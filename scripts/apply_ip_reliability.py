@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 import sys
 r=Path(sys.argv[1]).resolve()
 
@@ -53,7 +54,9 @@ if 'val updates = live.asStateFlow()' not in s:
 # FirstReplyRace cancelled it, which left the bar with an IP but no metadata.
 p='app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt'
 s=(r/p).read_text()
-start=s.index('    suspend fun lookup(forProfile: Long): IpQuality = coroutineScope {')
+m=re.search(r'    suspend fun lookup\(forProfile: Long\): IpQuality(?: = [^{]+)? \{',s)
+if not m: raise SystemExit('missing lookup function anchor')
+start=m.start()
 end=s.index('\n    suspend fun prefetch(forProfile: Long)',start)
 new='''    suspend fun lookup(forProfile: Long): IpQuality = kotlinx.coroutines.supervisorScope {
         val epoch = epoch()
