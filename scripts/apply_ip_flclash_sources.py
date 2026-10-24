@@ -50,14 +50,20 @@ extra='''    private suspend fun fromIpSb(): IpQuality {
 if extra not in s:
  if anchor not in s: raise SystemExit('missing IP source anchor')
  s=s.replace(anchor,extra+anchor,1)
-old='''            ::fromIdentMe, ::fromIpApiCom, ::fromIpQuery,
+old='''            ::fromIpSb, ::fromIpWho, ::fromGeoJs, ::fromCountryIs,
+            ::fromIdentMe, ::fromIpApiCom, ::fromIpQuery,
+            ::fromIpLocate, ::fromIpApiIs, ::fromProxyCheck,
+'''
+if old not in s:
+ old='''            ::fromIdentMe, ::fromIpApiCom, ::fromIpQuery,
             ::fromIpLocate, ::fromIpApiIs, ::fromProxyCheck,
 '''
 new='''            ::fromIpSb, ::fromIpWho, ::fromGeoJs, ::fromCountryIs,
             ::fromIdentMe, ::fromIpApiCom, ::fromIpQuery,
             ::fromIpLocate, ::fromIpApiIs, ::fromProxyCheck,
 '''
-if old not in s: raise SystemExit('missing fetcher list')
+else:
+ new=old
 s=s.replace(old,new,1)
 # If the detailed source is unavailable, enrich the quick answer from any
 # source that reports the identical IPv4/IPv6 address instead of returning a
