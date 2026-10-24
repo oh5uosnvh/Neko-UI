@@ -235,10 +235,6 @@ jobs:
         run: |
           python3 "$GITHUB_WORKSPACE/scripts/apply_bulk_delete.py" upstream
 
-      - name: Restore official scrollbar behavior
-        run: |
-          python3 "$GITHUB_WORKSPACE/scripts/restore_official_scroll.py" upstream
-
       - name: Assert A01 final UI and crash-fix anchors
         run: |
           bash "$GITHUB_WORKSPACE/scripts/assert_source.sh" upstream
