@@ -9,7 +9,7 @@ def rep(rel,old,new):
  p.write_text(s.replace(old,new,1))
 # A newly created clipboard subscription must become the selected group; do not
 # leave the top bar pointing at the first pre-existing group.
-p='app/src/main/java/io/nekohasekai/sagernet/ui/profile/GroupSettingsActivity.kt'
+p='app/src/main/java/io/nekohasekai/sagernet/ui/GroupSettingsActivity.kt'
 rep(p,'''            val newGroup = GroupManager.createGroup(ProxyGroup().apply { serialize() })
             if (newGroup.type == GroupType.SUBSCRIPTION && !newGroup.subscription?.link.isNullOrEmpty()) {''','''            val newGroup = GroupManager.createGroup(ProxyGroup().apply { serialize() })
             DataStore.selectedGroup = newGroup.id
