@@ -130,9 +130,9 @@ grep -q 'page.adapter?.reloadProfiles()' "$F" \
 # ------------------------------------------------ 033 滚动条拖动锚定 + 速度/延迟统一测试
 E=app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt
 test -f "$E" || fail "033 ExactScrollRecyclerView missing"
-grep -q 'class ExactScrollRecyclerView' "$E" || fail "033 scroll view class missing"
-! grep -q 'override fun dispatchTouchEvent' "$E" \
-  || fail "033 custom scrollbar drag must stay removed (official behaviour)"
+grep -q 'grabOffset' "$E" || fail "033 scrollbar grab offset missing"
+grep -q 'trackingTouch' "$E" || fail "033 scrollbar touch tracking missing"
+grep -q 'getScrollBarThumbHeight' "$E" || fail "033 scrollbar hit bounds missing"
 # Both zones must call one shared test action, not separate behavior.
 grep -q 'R.id.bar_speed_zone, R.id.bar_delay_zone, R.id.bar_network_card' app/src/main/java/io/nekohasekai/sagernet/widget/TrayTapTargets.kt || fail "shared tray test action missing"
 
