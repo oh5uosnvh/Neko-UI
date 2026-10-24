@@ -118,7 +118,16 @@ if 'private var liveJob' not in s:
  if 'import kotlinx.coroutines.flow.collect' not in s:
   s=s.replace('import io.nekohasekai.sagernet.R\n','import io.nekohasekai.sagernet.R\nimport kotlinx.coroutines.flow.collect\n',1)
  if 'override fun onDestroyView()' not in s:
-  s += '''\n    override fun onDestroyView() {\n        liveJob?.cancel()\n        liveJob = null\n        super.onDestroyView()\n    }\n'''
+  method='''
+    override fun onDestroyView() {
+        liveJob?.cancel()
+        liveJob = null
+        super.onDestroyView()
+    }
+'''
+  idx=s.rfind('\n}')
+  if idx < 0: raise SystemExit('missing dialog class closing brace')
+  s=s[:idx]+method+s[idx:]
  # Never let a stale loading flag block retry after an exception/cancellation.
  s=s.replace('''        if (loading) return
 ''','''        if (loading && !force) return
