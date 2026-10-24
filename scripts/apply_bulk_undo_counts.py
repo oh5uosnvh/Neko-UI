@@ -45,10 +45,10 @@ s=s[:a]+'''            R.id.action_remove_duplicate -> {
                                 duplicateCleanupInProgress = false
                             } else {
                                 MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
-                                    .setMessage("您确认要删除这些重复配置吗？\n一共 ${duplicates.size} 个重复配置。\n\n" + duplicates.take(50).joinToString("\n") { node ->
+                                    .setMessage("您确认要删除这些重复配置吗？\\n一共 ${duplicates.size} 个重复配置。\\n\\n" + duplicates.take(50).joinToString("\\n") { node ->
                                 val name = node.displayName().orEmpty().replace("\\n", " ")
                                 if (name.length > 42) name.take(41) + "…" else name
-                            } + if (duplicates.size > 50) "\n……" else "")
+                            } + if (duplicates.size > 50) "\\n……" else "")
                                     .setPositiveButton(R.string.yes) { _, _ ->
                                         val page = adapter.groupFragments[targetGroupId]
                                         val list = page?.adapter
