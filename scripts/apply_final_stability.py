@@ -34,6 +34,16 @@ edit(p, '    companion object {\n', '''    companion object {
 ''')
 edit(p, 'Room.databaseBuilder(SagerNet.application, SagerDatabase::class.java, Key.DB_PROFILE)\n', 'Room.databaseBuilder(SagerNet.application, SagerDatabase::class.java, Key.DB_PROFILE)\n                .addMigrations(MIGRATION_8_9_SAFE)\n')
 
+p='app/src/main/java/io/nekohasekai/sagernet/database/ProfileManager.kt'
+edit(p, '''        if (SagerDatabase.proxyDao.countByGroup(groupId) > 1) {
+            GroupManager.rearrange(groupId)
+        }
+''', '''        // Do not reload/deserialize the whole group after a delete. For large
+        // subscriptions this overflows Android CursorWindow (and crashes while
+        // searching/deleting one result). Gaps in userOrder are harmless because
+        // nextOrder() uses MAX(userOrder)+1; explicit drag reorder remains intact.
+''')
+
 p='app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt'
 edit(p, '''                val removeAction = {
                     currentAdapter.remove(index)
