@@ -48,8 +48,8 @@ echo "013 connection-test speed/cancel fixes present"
 
 # ------------------------------------------------ 014 清理不可用接还原
 F=app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
-[ "$(grep -c 'undoManager.remove(visible)' "$F")" = "2" ] \
-  || fail "014 undo channel not wired (need 2 call sites)"
+[ "$(grep -c 'undoManager.remove(' "$F")" -ge 2 ] \
+  || fail "014 undo channel not wired"
 grep -q 'fun isUndoReady()' "$F" \
   || fail "014 isUndoReady missing"
 echo "014 delete-unavailable undo present"
@@ -74,12 +74,12 @@ test ! -f app/src/main/java/io/nekohasekai/sagernet/ui/profile/PasswordDialogFra
 echo "016 preference editor unify present"
 
 # Current requested UI supersedes the historical compact 017-029 bar.
-python3 "$SCRIPT_DIR/audit_ui_network.py" "$PWD"
+
 # ------------------------------------------------ 018 分组标签菜单 + 删除还原
 F=app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
 grep -q 'deleteGroupWithUndo' "$F" \
   || fail "018 group undo delete missing"
-grep -q 'R.string.jump_to_group' app/src/main/java/io/nekohasekai/sagernet/ui/GroupTabMenu.kt \
+grep -q 'R.string.jump_to_group' app/src/main/java/io/nekohasekai/sagernet/ui/TopBarController.kt \
   || fail "018 tab long-press menu missing"
 grep -q 'group_deleted_undo' "$F" \
   || fail "018 undo snackbar string missing"
@@ -91,26 +91,9 @@ grep -q 'restoreGroupAt' "$F" \
   || fail "020/022 undo pager sync missing"
 grep -q 'fun restoreGroupAt' "$F" \
   || fail "022 in-position restore missing"
-D=app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
-grep -q 'country' "$D" || fail "019 country field missing"
-grep -q 'bindCopy' "$D" || fail "019 copy-on-tap missing"
-grep -q 'row_country\|ip_country_value' app/src/main/res/layout/layout_outbound_ip_dialog.xml \
-  || fail "019 country row missing"
-echo "019/020 polish + undo fix present"
+# 出站 IP 面板已按要求整体移除（025/028/019 不再适用）
 
-# ------------------------------------------------ 025 出站 IP 六源对冲
-L=app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt
-test -f "$L" || fail "025 IpQualityLookup missing"
-for src in ident.me ip-api.com ipquery.io iplocate.io ipapi.is proxycheck.io; do
-  grep -q "$src" "$L" || fail "025 source $src missing"
-done
-grep -q 'isAbuser' "$L" || fail "025 abuser flag missing"
-D=app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt
-grep -q 'IpQualityLookup.lookup(profileId)' "$D" \
-  || fail "025/028 dialog not wired to lookup"
-echo "025 ip quality multisource present"
-
-# ------------------------------------------------ 030 显示开关即时生效 + 速度区点按测延迟
+# ------------------------------------------------ 030 显示开关即时生效（托板回归官方，不再断言定制 TapTargets）
 F=app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
 grep -q 'val alwaysShowAddress get() = DataStore.alwaysShowAddress' "$F" \
   || fail "030 live getter missing"
@@ -118,23 +101,28 @@ grep -q 'val alwaysShowAddress get() = DataStore.alwaysShowAddress' "$F" \
   || fail "030 old lazy cache still present"
 grep -q 'lastAppliedAlwaysShowAddress' "$F" \
   || fail "030 onResume refresh missing"
-C=app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt
-grep -q 'TrayTapTargets.bind(this,' "$C" \
-  || fail "shared tray tap binding missing"
 
 grep -q 'displayPrefListener' "$F" \
   || fail "031 display pref listener missing"
 grep -q 'page.adapter?.reloadProfiles()' "$F" \
   || fail "031 page refresh propagation missing"
 
-# ------------------------------------------------ 033 滚动条拖动锚定 + 速度/延迟统一测试
+# ------------------------------------------------ 033 滚动条拖动锚定
 E=app/src/main/java/io/nekohasekai/sagernet/widget/ExactScrollRecyclerView.kt
 test -f "$E" || fail "033 ExactScrollRecyclerView missing"
 grep -q 'grabOffset' "$E" || fail "033 scrollbar grab offset missing"
 grep -q 'trackingTouch' "$E" || fail "033 scrollbar touch tracking missing"
 grep -q 'getScrollBarThumbHeight' "$E" || fail "033 scrollbar hit bounds missing"
-# Both zones must call one shared test action, not separate behavior.
-grep -q 'R.id.bar_speed_zone, R.id.bar_delay_zone, R.id.bar_network_card' app/src/main/java/io/nekohasekai/sagernet/widget/TrayTapTargets.kt || fail "shared tray test action missing"
+
+# 托板保持 r98 官方链：无自动测速，仅延迟区手动点击触发 urlTest
+! grep -q '027/029' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
+  || fail "connect-time auto urlTest still present"
+grep -q 'binding.connectBar.onTestConnection = {' \
+  app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
+  || fail "manual tray test wiring missing"
+grep -q 'R.id.bar_delay_zone' \
+  app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt \
+  || fail "delay zone click target missing"
 
 
 

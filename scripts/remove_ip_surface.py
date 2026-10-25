@@ -20,7 +20,7 @@ def remove_method(s, marker):
 for p in (r/'app/src/main/res').rglob('layout_connect_bar.xml'):
     s=p.read_text()
     s=re.sub(r'\s*<io\.nekohasekai\.sagernet\.widget\.TrayNetworkLayout\b.*?</io\.nekohasekai\.sagernet\.widget\.TrayNetworkLayout>','',s,flags=re.S)
-    s=re.sub(r'\s*<!-- ⓘ 出站 IP 查询.*?</androidx\.appcompat\.widget\.AppCompatImageView>','',s,flags=re.S)
+    s=re.sub(r'\s*<!-- ⓘ 出站 IP 查询.*?/>','',s,flags=re.S)
     p.write_text(s)
 
 # Delete IP-only classes/resources.
@@ -56,6 +56,10 @@ for p in list((r/'app/src/main/java').rglob('ConnectBar.kt')):
     for marker in ['    private fun openNetworkDialog()', '    override fun onAttachedToWindow()', '    override fun onDetachedFromWindow()', '    override fun onSharedPreferenceChanged(', '    fun renderNetwork(']:
         s=remove_method(s,marker)
     s=s.replace('onInfo = { openNetworkDialog() },','')
+    # Drop the IP info button and its dialog opener entirely.
+    s=re.sub(r'\n\s*ipInfo\.setOnClickListener \{.*?\n\s*\}\n','\n',s,flags=re.S)
+    s=re.sub(r'\n\s*private val ipInfo:[^\n]*','',s)
+    s=s.replace('        ipInfo = findViewById(R.id.bar_ip_info)\n','')
     s=re.sub(r'^\s*[^\n]*renderNetwork\([^\n]*\)\s*\n','',s,flags=re.M)
     s=s.replace('TrayTapTargets.bind(this,\n            onTest = { if (DataStore.serviceState.connected) onTestConnection?.invoke() },\n            \n        )','')
     p.write_text(s)

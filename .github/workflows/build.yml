@@ -173,11 +173,7 @@ jobs:
           python3 "$GITHUB_WORKSPACE/scripts/remove_group_filter_segment.py" .
           python3 "$GITHUB_WORKSPACE/scripts/apply_subscription_import_fix.py" .
           python3 "$GITHUB_WORKSPACE/scripts/apply_large_ops_undo.py" .
-          python3 "$GITHUB_WORKSPACE/scripts/apply_ui_network.py" .
-          python3 "$GITHUB_WORKSPACE/scripts/apply_official_tray.py" .
-          python3 "$GITHUB_WORKSPACE/scripts/apply_statsbar_init.py" .
-          python3 "$GITHUB_WORKSPACE/scripts/apply_manual_tray_test_only.py" .
-          python3 "$GITHUB_WORKSPACE/scripts/apply_tray_click.py" .
+          python3 "$GITHUB_WORKSPACE/scripts/apply_no_auto_test.py" .
           python3 "$GITHUB_WORKSPACE/scripts/apply_chain_picker_alignment.py" .
           python3 "$GITHUB_WORKSPACE/scripts/apply_x365_core.py" . ../mods
           python3 "$GITHUB_WORKSPACE/scripts/apply_final_protocols.py" . ../mods
