@@ -36,10 +36,13 @@ s=re.sub(r'\n\s*private fun observeNetworkResults\(\) \{.*?\n\s*\}\n','\n',s,fla
 s=re.sub(r'\n\s*private fun refreshNetworkCard\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
 s=s.replace('import kotlinx.coroutines.flow.collect\n','').replace('IpQualityLookup','')
 s=re.sub(r'\n\s*private fun observeNetworkResults\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
-s=s.replace('''        }
-    }
+s=s.replace('''                if (elapsed != null) binding.connectBar.showDelay(elapsed) else binding.connectBar.showDelayError()
+            }
+        }
 
-    private fun observeNetworkResults''','''        }
+    suspend fun importSubscription''','''                if (elapsed != null) binding.connectBar.showDelay(elapsed) else binding.connectBar.showDelayError()
+            }
+        }
     }
 
     suspend fun importSubscription''',1)
