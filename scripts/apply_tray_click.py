@@ -2,6 +2,14 @@
 from pathlib import Path
 import sys
 r=Path(sys.argv[1]).resolve();p=r/'app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt';s=p.read_text()
+# TrayTapTargets installs a parent-wide auto-test listener and then clears the
+# delay child listener. Remove that owner; keep only the official StatsBar
+# surface and a dedicated delay-zone click with selectable press feedback.
+s=s.replace('''        TrayTapTargets.bind(this,
+            onTest = { if (DataStore.serviceState.connected) onTestConnection?.invoke() },
+            onInfo = { openNetworkDialog() },
+        )
+''','')
 if 'findViewById<View>(R.id.bar_delay_zone)' not in s:
     anchor='''        super.setOnClickListener(null)'''
     if anchor not in s: raise SystemExit('ConnectBar init anchor missing')
