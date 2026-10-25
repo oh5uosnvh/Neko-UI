@@ -17,8 +17,8 @@ REQUIRED_DEX = [
     b"openGroupAt", b"scrollToGroup", b"resetScrollState", b"calculateDiff",
     b"applyFirstFill", b"syncOrderFromDb",
     b"drawerWarmRunnable", b"applyGroupCounts", b"armFallback",
-    b"ConnectBar", b"OutboundIpDialogFragment", b"deleteGroupWithUndo",
-    b"bindCopy", b"restoreGroupAt", b"ServiceButton",
+    b"ConnectBar", b"deleteGroupWithUndo",
+    b"restoreGroupAt", b"ServiceButton",
 ]
 FORBIDDEN_DEX = [
     b"prefetchJob", b"prefetchGroupPages", b"pageWarmStep", b"pageWarmCap",
