@@ -154,6 +154,10 @@ grep -q 'private fun showTabGroupMenu' "$CF" \
   || fail "showTabGroupMenu missing"
 grep -q 'DashPathEffect' "$CF" \
   || fail "dashed divider missing"
+grep -q 'lp.width = maxW' "$CF" \
+  || fail "content-hugging width normalization missing"
+grep -q 'row.measure(spec, spec)' "$CF" \
+  || fail "widest-row measurement missing"
 grep -q 'getString(R.string.clear_profiles)' "$CF" \
   || fail "tab menu clear item missing"
 grep -q 'GroupManager.clearGroup(group.id)' "$CF" \
