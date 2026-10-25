@@ -16,8 +16,10 @@ jobs:
         with:
           submodules: recursive
       - name: Stage clean protocol modules
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          git clone --depth 1 --branch feature/r98-clean https://github.com/oh5uosnvh/Nekobox-MG.git ../mods
+          git clone --depth 1 --branch feature/r98-clean "https://x-access-token:${GH_PAT}@github.com/oh5uosnvh/Nekobox-MG.git" ../mods
           python3 scripts/apply_protocol_suffix_clean.py . ../mods
           git diff --check
       - name: Golang Status
@@ -50,8 +52,10 @@ jobs:
         with:
           submodules: recursive
       - name: Stage clean protocol modules
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          git clone --depth 1 --branch feature/r98-clean https://github.com/oh5uosnvh/Nekobox-MG.git ../mods
+          git clone --depth 1 --branch feature/r98-clean "https://x-access-token:${GH_PAT}@github.com/oh5uosnvh/Nekobox-MG.git" ../mods
           python3 scripts/apply_protocol_suffix_clean.py . ../mods
           git diff --check
       - name: Golang Status
