@@ -1721,6 +1721,8 @@ class ConfigurationFragment @JvmOverloads constructor(
             undoManager.flush()
         }
 
+        fun isUndoReady(): Boolean = ::undoManager.isInitialized && adapter != null
+
         inner class ConfigurationAdapter : RecyclerView.Adapter<ConfigurationHolder>(),
             ProfileManager.Listener,
             GroupManager.Listener,
