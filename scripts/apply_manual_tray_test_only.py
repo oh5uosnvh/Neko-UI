@@ -2,19 +2,16 @@
 from pathlib import Path
 import sys
 r=Path(sys.argv[1]).resolve();p=r/'app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt';s=p.read_text()
-old='''        if (state == BaseService.State.Connected && previousState != state) {
-            refreshNetworkCard()
+import re
+old='''        if (state == BaseService.State.Connected && previousState != state) {'''
+start=s.find(old)
+if start < 0: raise SystemExit('state change anchor missing')
+end=s.find('''        } else if (state != BaseService.State.Connected && previousState != state) {''',start)
+if end < 0: raise SystemExit('state change end anchor missing')
+replacement='''        if (state == BaseService.State.Connected && previousState != state) {
             handshakeJob?.cancel()
-            lifecycleScope.launch {
-                delay(500)
-                if (lastObservedState == BaseService.State.Connected && handshakeJob?.isActive != true) runHandshakeTests()
-            }
-        } else if (state != BaseService.State.Connected && previousState != state) {'''
-new='''        if (state == BaseService.State.Connected && previousState != state) {
-            handshakeJob?.cancel()
-        } else if (state != BaseService.State.Connected && previousState != state) {'''
-if old not in s: raise SystemExit('auto tray test block not found')
-s=s.replace(old,new,1)
+'''
+s=s[:start]+replacement+s[end:]
 # Selector changes should not start a hidden automatic test either.
 s=s.replace('''        refreshConfigurationProfileState()
         refreshNetworkCard()
