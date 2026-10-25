@@ -30,6 +30,7 @@ p=r/'app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt';s=p.read_te
 p=r/'app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt';s=p.read_text();s=re.sub(r'\n\s*runCatching \{ IpQualityLookup\.prefetch\(DataStore\.currentProfile\) \}\n','\n',s);s=re.sub(r'\n\s*IpQualityLookup\.invalidate\(\)','',s)
 s=re.sub(r'\n\s*IpQualityLookup\.[A-Za-z0-9_]+\([^\n]*\)','',s)
 s=re.sub(r'\n\s*private fun observeNetworkResults\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
+s=re.sub(r'\n\s*private fun refreshNetworkCard\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
 s=s.replace('import kotlinx.coroutines.flow.collect\n','').replace('IpQualityLookup','')
 s=re.sub(r'\n\s*private fun observeNetworkResults\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
 p.write_text(s)
