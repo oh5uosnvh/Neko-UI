@@ -24,6 +24,20 @@ p.write_text(s)
 for rel in ['app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt','app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt','app/src/main/java/io/nekohasekai/sagernet/ui/NetworkPrivacy.kt','app/src/main/res/layout/layout_outbound_ip_dialog.xml','app/src/main/res/drawable/ic_outbound_ip.xml']:
  p=r/rel
  if p.exists():p.unlink()
+# Remove official-tray network card helpers and tests that only exercised IP UI.
+for rel in ['app/src/main/java/io/nekohasekai/sagernet/widget/TrayNetworkLayout.kt','app/src/main/java/io/nekohasekai/sagernet/widget/TrayTapTargets.kt']:
+ p=r/rel
+ if p.exists(): p.unlink()
+for p in list((r/'app/src').rglob('*')):
+ if p.is_file() and p.suffix in {'.kt','.java','.xml'}:
+  try: text=p.read_text()
+  except Exception: continue
+  if 'bar_ip_info' in text or 'TrayNetworkLayout' in text:
+   if '/test/' in str(p): p.unlink()
+   elif p.suffix == '.xml':
+    text=re.sub(r'\n\s*<[^>]*bar_network_card[^>]*>.*?</[^>]+>','',text,flags=re.S)
+    text=re.sub(r'\n\s*<[^>]*bar_ip_info[^>]*/>','',text)
+    p.write_text(text)
 # Remove IP-only strings and test/verification references.
 drop={'outbound_ip','ip_info_basic','ip_info_network','ip_address','ip_country','ip_level','ip_type','ip_flags','ip_org','ip_asn','ip_source','ip_source_ipapicom','ip_level_good','ip_level_normal','ip_type_residential','ip_type_mobile','ip_type_hosting','ip_flag_proxy','ip_none','ip_loading','ip_query_failed','ip_action_refresh','ip_level_risky','ip_type_business','ip_flag_tor','ip_flag_vpn','ip_flag_abuser'}
 for p in list((r/'app/src/main/res').rglob('strings.xml')):
