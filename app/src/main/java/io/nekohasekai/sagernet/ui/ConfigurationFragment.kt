@@ -179,6 +179,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private val profileStateRequests = Channel<Long>(Channel.CONFLATED)
     private val profileStateGeneration = AtomicLong()
+    private var duplicateCleanupInProgress = false
     private val profileStateInitialized = CompletableDeferred<Unit>()
 
     fun refreshProfileState() {
@@ -2018,6 +2019,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                 notifyItemRemoved(pos)
                 refreshFromPosition(pos - 1)
             }
+
+            fun isUndoReady(): Boolean = ::undoManager.isInitialized
 
             fun stageBatchRemoval(nodes: List<ProxyEntity>): List<Pair<Int, ProxyEntity>> {
                 val ids = nodes.map { it.id }.toHashSet()
