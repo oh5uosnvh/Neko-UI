@@ -23,6 +23,11 @@ for rel in ['app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt','ap
  s=re.sub(r'\n\s*private fun openNetworkDialog\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
  s=re.sub(r'\n\s*override fun onAttachedToWindow\(\).*?\n\s*fun renderNetwork\([^}]+\}\n','\n',s,flags=re.S)
  s=s.replace('onInfo = { openNetworkDialog() },','')
+s=s.replace('''        TrayTapTargets.bind(this,
+            onTest = { if (DataStore.serviceState.connected) onTestConnection?.invoke() },
+            
+        )''','''        updateSpeed(0, 0)''')
+s=s.replace(', SharedPreferences.OnSharedPreferenceChangeListener','')
  # Official tray ConnectBar has one IP-only method removed; drop its stale extra brace.
  if rel.endswith('widget/ConnectBar.kt'):
   s=s.replace('''        updateSpeed(0,0); renderNetwork()\n    }\n    }\n    fun setTesting''','''        updateSpeed(0,0)\n    }\n    fun setTesting''')
@@ -35,6 +40,8 @@ s=re.sub(r'\n\s*IpQualityLookup\.[A-Za-z0-9_]+\([^\n]*\)','',s)
 s=re.sub(r'\n\s*private fun observeNetworkResults\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
 s=re.sub(r'\n\s*private fun refreshNetworkCard\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
 s=s.replace('import kotlinx.coroutines.flow.collect\n','').replace('IpQualityLookup','')
+s=re.sub(r'^\s*(?:observeNetworkResults|refreshNetworkCard)\(\)\s*$', '', s, flags=re.M)
+s=re.sub(r'^\s*binding\.connectBar\.renderNetwork\([^\n]*\)\s*$', '', s, flags=re.M)
 s=re.sub(r'\n\s*private fun observeNetworkResults\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
 s=s.replace('''                if (elapsed != null) binding.connectBar.showDelay(elapsed) else binding.connectBar.showDelayError()
             }
