@@ -60,6 +60,13 @@ for p in list((r/'app/src/main/java').rglob('ConnectBar.kt')):
     s=s.replace('TrayTapTargets.bind(this,\n            onTest = { if (DataStore.serviceState.connected) onTestConnection?.invoke() },\n            \n        )','')
     p.write_text(s)
 
+# Remove tests and resources whose only purpose was the deleted IP surface.
+for p in list((r/'app/src').rglob('*')):
+    if p.is_file() and '/test/' in str(p) and p.suffix in {'.kt','.java','.xml'}:
+        text=p.read_text(errors='ignore')
+        if any(token in text for token in ('bar_ip_info','bar_ip_value','bar_ip_flag','bar_network_card','TrayNetworkLayout','TrayTapTargets','IpQuality','NetworkPrivacy')):
+            p.unlink()
+
 # Remove IP-only strings.
 drop={'outbound_ip','ip_info_basic','ip_info_network','ip_address','ip_country','ip_level','ip_type','ip_flags','ip_org','ip_asn','ip_source','ip_source_ipapicom','ip_level_good','ip_level_normal','ip_type_residential','ip_type_mobile','ip_type_hosting','ip_flag_proxy','ip_none','ip_loading','ip_query_failed','ip_action_refresh','ip_level_risky','ip_type_business','ip_flag_tor','ip_flag_vpn','ip_flag_abuser'}
 for p in (r/'app/src/main/res').rglob('strings.xml'):
