@@ -57,7 +57,17 @@ for p in list((r/'app/src/main/java').rglob('ConnectBar.kt')):
         s=remove_method(s,marker)
     s=s.replace('onInfo = { openNetworkDialog() },','')
     # Drop the IP info button and its dialog opener entirely.
-    s=re.sub(r'\n\s*ipInfo\.setOnClickListener \{.*?\n\s*\}\n','\n',s,flags=re.S)
+    s=s.replace('''        ipInfo.setOnClickListener {
+            val activity = context as? FragmentActivity ?: return@setOnClickListener
+            // 防重复：已有实例则不叠开
+            if (activity.supportFragmentManager
+                    .findFragmentByTag(OutboundIpDialogFragment.DIALOG_TAG) == null
+            ) {
+                OutboundIpDialogFragment()
+                    .show(activity.supportFragmentManager, OutboundIpDialogFragment.DIALOG_TAG)
+            }
+        }
+''','')
     s=re.sub(r'\n\s*private val ipInfo:[^\n]*','',s)
     s=s.replace('        ipInfo = findViewById(R.id.bar_ip_info)\n','')
     s=re.sub(r'^\s*[^\n]*renderNetwork\([^\n]*\)\s*\n','',s,flags=re.M)
