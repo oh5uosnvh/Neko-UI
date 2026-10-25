@@ -23,6 +23,9 @@ for rel in ['app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt','ap
  s=re.sub(r'\n\s*private fun openNetworkDialog\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
  s=re.sub(r'\n\s*override fun onAttachedToWindow\(\).*?\n\s*fun renderNetwork\([^}]+\}\n','\n',s,flags=re.S)
  s=s.replace('onInfo = { openNetworkDialog() },','')
+# Official tray ConnectBar has one IP-only method removed; drop its stale extra brace.
+if rel.endswith('widget/ConnectBar.kt'):
+    s=s.replace('''        updateSpeed(0,0); renderNetwork()\n    }\n    }\n    fun setTesting''','''        updateSpeed(0,0)\n    }\n    fun setTesting''')
  p.write_text(s)
 # Original UI ConnectBar follows for compatibility with both tray variants.
 p=r/'app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt';s=p.read_text();s=s.replace('import androidx.appcompat.widget.AppCompatImageView\n','').replace('import androidx.fragment.app.FragmentActivity\n','').replace('import io.nekohasekai.sagernet.ui.OutboundIpDialogFragment\n','');s=re.sub(r'\n\s*private val ipInfo: AppCompatImageView','',s);s=s.replace('        ipInfo = findViewById(R.id.bar_ip_info)\n','');s=drop_between(s,'        ipInfo.setOnClickListener {','        // 导航栏 inset');p.write_text(s)
@@ -33,7 +36,7 @@ s=re.sub(r'\n\s*private fun observeNetworkResults\(\) \{.*?\n\s*\}\n','\n',s,fla
 s=re.sub(r'\n\s*private fun refreshNetworkCard\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
 s=s.replace('import kotlinx.coroutines.flow.collect\n','').replace('IpQualityLookup','')
 s=re.sub(r'\n\s*private fun observeNetworkResults\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
-s=re.sub(r'\n(?:\s*\}\n){3,5}(\s*suspend fun importSubscription)',r'\n\n\\1',s, count=1)
+s=re.sub(r'\n(?:\s*\}\n){3,5}\s*suspend fun importSubscription', '\n\n    suspend fun importSubscription', s, count=1)
 p.write_text(s)
 for rel in ['app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt','app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt','app/src/main/java/io/nekohasekai/sagernet/ui/NetworkPrivacy.kt','app/src/main/res/layout/layout_outbound_ip_dialog.xml','app/src/main/res/drawable/ic_outbound_ip.xml']:
  p=r/rel
