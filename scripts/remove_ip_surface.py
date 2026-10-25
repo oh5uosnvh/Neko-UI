@@ -15,7 +15,10 @@ p=r/'app/src/main/res/layout/layout_connect_bar.xml';s=p.read_text();s=drop_betw
 # Remove IP-specific fields/listener/imports from ConnectBar.
 p=r/'app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt';s=p.read_text();s=s.replace('import androidx.appcompat.widget.AppCompatImageView\n','').replace('import androidx.fragment.app.FragmentActivity\n','').replace('import io.nekohasekai.sagernet.ui.OutboundIpDialogFragment\n','');s=re.sub(r'\n\s*private val ipInfo: AppCompatImageView','',s);s=s.replace('        ipInfo = findViewById(R.id.bar_ip_info)\n','');s=drop_between(s,'        ipInfo.setOnClickListener {','        // 导航栏 inset');p.write_text(s)
 # Remove MainActivity's automatic IP lookup and invalidation calls.
-p=r/'app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt';s=p.read_text();s=re.sub(r'\n\s*runCatching \{ IpQualityLookup\.prefetch\(DataStore\.currentProfile\) \}\n','\n',s);s=re.sub(r'\n\s*IpQualityLookup\.invalidate\(\)','',s);p.write_text(s)
+p=r/'app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt';s=p.read_text();s=re.sub(r'\n\s*runCatching \{ IpQualityLookup\.prefetch\(DataStore\.currentProfile\) \}\n','\n',s);s=re.sub(r'\n\s*IpQualityLookup\.invalidate\(\)','',s)
+s=re.sub(r'\n\s*IpQualityLookup\.[A-Za-z0-9_]+\([^\n]*\)','',s)
+s=re.sub(r'\n\s*private fun observeNetworkResults\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
+p.write_text(s)
 for rel in ['app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt','app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt','app/src/main/res/layout/layout_outbound_ip_dialog.xml','app/src/main/res/drawable/ic_outbound_ip.xml']:
  p=r/rel
  if p.exists():p.unlink()
