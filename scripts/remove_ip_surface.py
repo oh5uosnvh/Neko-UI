@@ -51,8 +51,9 @@ needle='\n    suspend fun importSubscription'
 pos=s.find(needle)
 if pos>=0:
  before=s[:pos]
- if before.count('{')>before.count('}'):
-  s=before+'\n    }'+s[pos:]
+ # runHandshakeTests loses the private IP helper methods but retains its own
+ # class-level close; add exactly one class member close before import.
+ s=before+'\n    }'+s[pos:]
 s=s.replace('''    private fun observeNetworkResults() {
         lifecycleScope.launch {
             IpQualityLookup.updates.collect { entry ->
