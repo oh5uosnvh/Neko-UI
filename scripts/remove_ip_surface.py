@@ -33,6 +33,7 @@ s=re.sub(r'\n\s*private fun observeNetworkResults\(\) \{.*?\n\s*\}\n','\n',s,fla
 s=re.sub(r'\n\s*private fun refreshNetworkCard\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
 s=s.replace('import kotlinx.coroutines.flow.collect\n','').replace('IpQualityLookup','')
 s=re.sub(r'\n\s*private fun observeNetworkResults\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
+s=re.sub(r'\n(?:\s*\}\n){3,5}(\s*suspend fun importSubscription)',r'\n\n\\1',s, count=1)
 p.write_text(s)
 for rel in ['app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt','app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt','app/src/main/java/io/nekohasekai/sagernet/ui/NetworkPrivacy.kt','app/src/main/res/layout/layout_outbound_ip_dialog.xml','app/src/main/res/drawable/ic_outbound_ip.xml']:
  p=r/rel
