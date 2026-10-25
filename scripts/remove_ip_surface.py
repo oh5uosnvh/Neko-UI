@@ -37,11 +37,36 @@ s=re.sub(r'\n\s*private fun refreshNetworkCard\(\) \{.*?\n\s*\}\n','\n',s,flags=
 s=s.replace('import kotlinx.coroutines.flow.collect\n','').replace('IpQualityLookup','')
 s=re.sub(r'\n\s*private fun observeNetworkResults\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
 s=s.replace('''        }
+    }
 
-    suspend fun importSubscription''','''        }
+    private fun observeNetworkResults''','''        }
     }
 
     suspend fun importSubscription''',1)
+s=s.replace('''    private fun observeNetworkResults() {
+        lifecycleScope.launch {
+            IpQualityLookup.updates.collect { entry ->
+                if (entry != null && entry.profileId == DataStore.currentProfile && DataStore.serviceState.connected) {
+                    binding.connectBar.renderNetwork(entry.quality)
+                }
+            }
+        }
+    }
+
+    private fun refreshNetworkCard() {
+        networkJob?.cancel()
+        IpQualityLookup.invalidate()
+        binding.connectBar.renderNetwork()
+        if (!DataStore.serviceState.connected) return
+        val profileId = DataStore.currentProfile
+        networkJob = lifecycleScope.launch {
+            try { IpQualityLookup.lookup(profileId) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { Logs.w(e) }
+        }
+    }
+
+''','',1)
 s=re.sub(r'\n(?:\s*\}\n){3,5}\s*suspend fun importSubscription', '\n\n    suspend fun importSubscription', s, count=1)
 p.write_text(s)
 for rel in ['app/src/main/java/io/nekohasekai/sagernet/ui/IpQualityLookup.kt','app/src/main/java/io/nekohasekai/sagernet/ui/OutboundIpDialogFragment.kt','app/src/main/java/io/nekohasekai/sagernet/ui/NetworkPrivacy.kt','app/src/main/res/layout/layout_outbound_ip_dialog.xml','app/src/main/res/drawable/ic_outbound_ip.xml']:
