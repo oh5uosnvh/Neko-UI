@@ -41,6 +41,7 @@ for marker in ['    private fun observeNetworkResults()', '    private fun refre
     s=remove_method(s,marker)
 s=re.sub(r'^\s*runCatching \{ IpQualityLookup\.prefetch\([^\n]*\}\s*\n','',s,flags=re.M)
 s=re.sub(r'^\s*IpQualityLookup\.[A-Za-z0-9_]+\([^\n]*\)\s*\n','',s,flags=re.M)
+s=re.sub(r'^\s*(?:observeNetworkResults|refreshNetworkCard)\(\)\s*\n','',s,flags=re.M)
 s=s.replace('import kotlinx.coroutines.flow.collect\n','')
 p.write_text(s)
 
@@ -54,6 +55,7 @@ for p in list((r/'app/src/main/java').rglob('ConnectBar.kt')):
     for marker in ['    private fun openNetworkDialog()', '    override fun onAttachedToWindow()', '    override fun onDetachedFromWindow()', '    override fun onSharedPreferenceChanged(', '    fun renderNetwork(']:
         s=remove_method(s,marker)
     s=s.replace('onInfo = { openNetworkDialog() },','')
+    s=re.sub(r'^\s*[^\n]*renderNetwork\([^\n]*\)\s*\n','',s,flags=re.M)
     s=s.replace('TrayTapTargets.bind(this,\n            onTest = { if (DataStore.serviceState.connected) onTestConnection?.invoke() },\n            \n        )','')
     p.write_text(s)
 
