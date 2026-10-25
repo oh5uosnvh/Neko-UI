@@ -114,16 +114,36 @@ grep -q 'grabOffset' "$E" || fail "033 scrollbar grab offset missing"
 grep -q 'trackingTouch' "$E" || fail "033 scrollbar touch tracking missing"
 grep -q 'getScrollBarThumbHeight' "$E" || fail "033 scrollbar hit bounds missing"
 
-# 托板保持 r98 官方链：无自动测速，仅延迟区手动点击触发 urlTest
-! grep -q '027/029' app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
+# ------------------------------------------------ 托板 = starifly 官方源码（StatsBar + ServiceButton FAB）
+M=app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt
+grep -q 'binding.fab.initProgress(binding.fabProgress)' "$M" \
+  || fail "official fab init missing"
+grep -q 'binding.stats.setOnClickListener { if (DataStore.serviceState.connected) binding.stats.testConnection() }' "$M" \
+  || fail "official stats manual-test click missing"
+grep -q 'private fun syncMainControls(' "$M" \
+  || fail "official syncMainControls missing"
+grep -q 'fun driveBottomBar(' "$M" \
+  || fail "official driveBottomBar missing"
+! grep -q 'ConnectBar\|ServiceIconView\|connectBar\|bar_delay' "$M" \
+  || fail "custom tray residue in MainActivity"
+W=app/src/main/java/io/nekohasekai/sagernet/widget
+test -f "$W/StatsBar.kt" || fail "official StatsBar.kt missing"
+test -f "$W/ServiceButton.kt" || fail "official ServiceButton.kt missing"
+test ! -f "$W/ConnectBar.kt" || fail "custom ConnectBar.kt still present"
+test ! -f "$W/ServiceIconView.kt" || fail "custom ServiceIconView.kt still present"
+test ! -f app/src/main/res/layout/layout_connect_bar.xml \
+  || fail "custom layout_connect_bar.xml still present"
+grep -q 'setupBottomBarScrollDriver' \
+  app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt \
+  || fail "official stats scroll driver missing"
+grep -q 'app:key="showBottomBar"' app/src/main/res/xml/global_preferences.xml \
+  || fail "official showBottomBar preference missing"
+grep -q 'name="show_bottom_bar"' app/src/main/res/values/strings.xml \
+  || fail "official show_bottom_bar string missing"
+# 官方托板无自动测速：连接成功不触发任何 urlTest
+! grep -q '027/029' "$M" \
   || fail "connect-time auto urlTest still present"
-grep -q 'binding.connectBar.onTestConnection = {' \
-  app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt \
-  || fail "manual tray test wiring missing"
-grep -q 'R.id.bar_delay_zone' \
-  app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt \
-  || fail "delay zone click target missing"
+! grep -rn 'fun onTestConnection' app/src/main/java/io/nekohasekai/sagernet/widget/ \
+  || fail "custom tray test hook still present"
 
-
-
-echo "== 源码断言全部通过（011–033）=="
+echo "== 源码断言全部通过（011–033 + 官方托板）=="

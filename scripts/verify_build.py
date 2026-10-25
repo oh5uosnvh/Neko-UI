@@ -18,9 +18,10 @@ REQUIRED_DEX = [
     b"applyFirstFill", b"syncOrderFromDb",
     b"drawerWarmRunnable", b"applyGroupCounts", b"armFallback",
     b"deleteGroupWithUndo",
-    b"restoreGroupAt",
+    b"restoreGroupAt", b"StatsBar", b"ServiceButton",
 ]
 FORBIDDEN_DEX = [
+    b"ConnectBar", b"ServiceIconView",
     b"prefetchJob", b"prefetchGroupPages", b"pageWarmStep", b"pageWarmCap",
     b"warmUpJob", b"isPagerBusy", b"pendingStateRefreshes",
     b"sharedRecycledViewPool", b"ensureProfilesLoaded", b"startPageWarmUp",
