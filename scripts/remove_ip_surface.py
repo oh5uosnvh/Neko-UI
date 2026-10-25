@@ -43,6 +43,7 @@ s=re.sub(r'^\s*runCatching \{ IpQualityLookup\.prefetch\([^\n]*\}\s*\n','',s,fla
 s=re.sub(r'^\s*IpQualityLookup\.[A-Za-z0-9_]+\([^\n]*\)\s*\n','',s,flags=re.M)
 s=re.sub(r'^\s*(?:observeNetworkResults|refreshNetworkCard)\(\)\s*\n','',s,flags=re.M)
 s=s.replace('import kotlinx.coroutines.flow.collect\n','')
+s=re.sub(r'^\s*binding\.connectBar\.renderNetwork\([^\n]*\)\s*\n','',s,flags=re.M)
 p.write_text(s)
 
 # Remove IP members/listeners/dialog code from every ConnectBar variant.
