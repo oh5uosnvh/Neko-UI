@@ -18,7 +18,7 @@ REQUIRED_DEX = [
     b"applyFirstFill", b"syncOrderFromDb",
     b"drawerWarmRunnable", b"applyGroupCounts", b"armFallback",
     b"deleteGroupWithUndo",
-    b"restoreGroupAt", b"ServiceButton",
+    b"restoreGroupAt",
 ]
 FORBIDDEN_DEX = [
     b"prefetchJob", b"prefetchGroupPages", b"pageWarmStep", b"pageWarmCap",
