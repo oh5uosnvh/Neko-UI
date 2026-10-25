@@ -12,7 +12,19 @@ def drop_between(text,start,end):
  return text
 # Exact bottom-bar IP view block.
 p=r/'app/src/main/res/layout/layout_connect_bar.xml';s=p.read_text();s=drop_between(s,'        <!-- ⓘ 出站 IP 查询','        <!-- [2] 上传/下载');p.write_text(s)
-# Remove IP-specific fields/listener/imports from ConnectBar.
+# Remove IP-specific fields/listener/imports from ConnectBar, including the
+# official-tray variant copied later by apply_official_tray.
+for rel in ['app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt','app/src/main/java/io/nekohasekai/sagernet/widget/TrayTapTargets.kt']:
+ p=r/rel
+ if not p.exists(): continue
+ s=p.read_text();s=s.replace('import androidx.appcompat.widget.AppCompatImageView\n','').replace('import androidx.fragment.app.FragmentActivity\n','').replace('import io.nekohasekai.sagernet.ui.OutboundIpDialogFragment\n','').replace('import io.nekohasekai.sagernet.ui.*\n','import io.nekohasekai.sagernet.ui.MainActivity\n')
+ s=re.sub(r'\n\s*private val (ipInfo|ipValue|flagValue):[^\n]*','',s)
+ s=re.sub(r'\n\s*(ipInfo|ipValue|flagValue) = findViewById\([^\n]*','',s)
+ s=re.sub(r'\n\s*private fun openNetworkDialog\(\) \{.*?\n\s*\}\n','\n',s,flags=re.S)
+ s=re.sub(r'\n\s*override fun onAttachedToWindow\(\).*?\n\s*fun renderNetwork\([^}]+\}\n','\n',s,flags=re.S)
+ s=s.replace('onInfo = { openNetworkDialog() },','')
+ p.write_text(s)
+# Original UI ConnectBar follows for compatibility with both tray variants.
 p=r/'app/src/main/java/io/nekohasekai/sagernet/widget/ConnectBar.kt';s=p.read_text();s=s.replace('import androidx.appcompat.widget.AppCompatImageView\n','').replace('import androidx.fragment.app.FragmentActivity\n','').replace('import io.nekohasekai.sagernet.ui.OutboundIpDialogFragment\n','');s=re.sub(r'\n\s*private val ipInfo: AppCompatImageView','',s);s=s.replace('        ipInfo = findViewById(R.id.bar_ip_info)\n','');s=drop_between(s,'        ipInfo.setOnClickListener {','        // 导航栏 inset');p.write_text(s)
 # Remove MainActivity's automatic IP lookup and invalidation calls.
 p=r/'app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt';s=p.read_text();s=re.sub(r'\n\s*runCatching \{ IpQualityLookup\.prefetch\(DataStore\.currentProfile\) \}\n','\n',s);s=re.sub(r'\n\s*IpQualityLookup\.invalidate\(\)','',s)
