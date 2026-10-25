@@ -12,6 +12,9 @@ replacement='''        if (state == BaseService.State.Connected && previousState
             handshakeJob?.cancel()
 '''
 s=s[:start]+replacement+s[end:]
+# Remove every automatic invocation; retain only the callback assignment that
+# is reached from the delay-zone click.
+s=re.sub(r'^(?!\s*binding\.connectBar\.onTestConnection)(\s*)runHandshakeTests\(\)\s*$', r'\1', s, flags=re.M)
 # Selector changes should not start a hidden automatic test either.
 s=s.replace('''        refreshConfigurationProfileState()
         refreshNetworkCard()
