@@ -15,6 +15,7 @@ import androidx.activity.result.component1
 import androidx.activity.result.component2
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
+import androidx.core.widget.NestedScrollView
 import androidx.recyclerview.widget.RecyclerView
 import com.danielstone.materialaboutlibrary.MaterialAboutFragment
 import com.danielstone.materialaboutlibrary.items.MaterialAboutActionItem
@@ -37,6 +38,17 @@ import moe.matsuri.nb4a.utils.Util
 import org.json.JSONObject
 
 class AboutFragment : ToolbarFragment(R.layout.layout_about) {
+
+    /** 问题1-B：切回关于页时内容回顶部 */
+    override fun resetScrollState() {
+        val root = view ?: return
+        if (root is android.view.ViewGroup) {
+            for (i in 0 until root.childCount) {
+                val child = root.getChildAt(i)
+                if (child is NestedScrollView) child.scrollTo(0, 0)
+            }
+        }
+    }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)

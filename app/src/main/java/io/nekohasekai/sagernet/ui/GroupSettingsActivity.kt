@@ -351,14 +351,19 @@ class GroupSettingsActivity(
 
     }
 
-    val child by lazy { supportFragmentManager.findFragmentById(R.id.settings) as MyPreferenceFragmentCompat }
+    // 015: fragment 提交是双重异步（DB 协程 + commit()），高频操作下手速快于
+    // fragment attach 时 findFragmentById 返回 null，旧的非空强转直接 NPE 崩溃
+    // （崩溃日志 GroupSettingsActivity.child_delegate$lambda）。未就绪时交给父类。
+    val child: MyPreferenceFragmentCompat?
+        get() = supportFragmentManager.findFragmentById(R.id.settings) as? MyPreferenceFragmentCompat
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.profile_config_menu, menu)
         return true
     }
 
-    override fun onOptionsItemSelected(item: MenuItem) = child.onOptionsItemSelected(item)
+    override fun onOptionsItemSelected(item: MenuItem): Boolean =
+        child?.onOptionsItemSelected(item) ?: super.onOptionsItemSelected(item)
 
     override fun onBackPressed() {
         if (needSave()) {

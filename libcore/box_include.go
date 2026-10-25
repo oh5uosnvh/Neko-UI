@@ -40,7 +40,7 @@ import (
 	"github.com/sagernet/sing-box/protocol/vmess"
 	"github.com/sagernet/sing-box/protocol/wireguard"
 
-	"libcore/protocol/juicity"
+	libcoreX365 "libcore/protocol/x365"
 
 	_ "github.com/sagernet/sing-box/experimental/clashapi"
 	_ "github.com/sagernet/sing-box/transport/v2rayquic"
@@ -82,6 +82,7 @@ func nekoboxAndroidOutboundRegistry() *outbound.Registry {
 	ssh.RegisterOutbound(registry)
 	shadowtls.RegisterOutbound(registry)
 	vless.RegisterOutbound(registry)
+	libcoreX365.RegisterVLESSOutbound(registry)
 	anytls.RegisterOutbound(registry)
 	snellprotocol.RegisterOutbound(registry)
 

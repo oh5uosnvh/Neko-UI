@@ -110,6 +110,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
@@ -133,6 +134,8 @@ import java.net.URLDecoder
 import java.net.UnknownHostException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.ZipInputStream
@@ -492,9 +495,10 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     suspend fun import(proxies: List<AbstractBean>) {
         val targetId = DataStore.selectedGroupForImport()
-        for (proxy in proxies) {
-            ProfileManager.createProfile(targetId, proxy)
+        withContext(Dispatchers.IO) {
+            ProfileBatchStore.append(SagerDatabase.instance, targetId, proxies)
         }
+        GroupManager.postReload(targetId)
         onMainDispatcher {
             DataStore.editingGroup = targetId
             snackbar(
@@ -720,7 +724,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             R.id.action_clear_traffic_statistics -> {
                 val trafficService = (activity as? MainActivity)?.connection?.service
                 runOnDefaultDispatcher {
-                    val profiles = SagerDatabase.proxyDao.getByGroup(DataStore.currentGroupId())
+                    val profiles = PendingProfileDeletes.loadGroup(DataStore.currentGroupId())
                     val toClear = mutableListOf<ProxyEntity>()
                     if (profiles.isNotEmpty()) for (profile in profiles) {
                         if (profile.tx != 0L || profile.rx != 0L) {
@@ -745,7 +749,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             R.id.action_connection_test_clear_results -> {
                 runOnDefaultDispatcher {
-                    val profiles = SagerDatabase.proxyDao.getByGroup(DataStore.currentGroupId())
+                    val profiles = PendingProfileDeletes.loadGroup(DataStore.currentGroupId())
                     val toClear = mutableListOf<ProxyEntity>()
                     if (profiles.isNotEmpty()) for (profile in profiles) {
                         if (profile.status != 0) {
@@ -766,7 +770,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             R.id.action_connection_test_delete_unavailable -> {
                 runOnDefaultDispatcher {
-                    val profiles = SagerDatabase.proxyDao.getByGroup(DataStore.currentGroupId())
+                    val profiles = PendingProfileDeletes.loadGroup(DataStore.currentGroupId())
                     val toClear = mutableListOf<ProxyEntity>()
                     if (profiles.isNotEmpty()) for (profile in profiles) {
                         if (profile.status != 0 && profile.status != 1) {
@@ -804,52 +808,47 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             R.id.action_remove_duplicate -> {
+                if (duplicateCleanupInProgress) return true
+                duplicateCleanupInProgress = true
+                val targetGroupId = DataStore.currentGroupId()
                 runOnDefaultDispatcher {
-                    val profiles = SagerDatabase.proxyDao.getByGroup(DataStore.currentGroupId())
-                    val toClear = mutableListOf<ProxyEntity>()
-                    val uniqueProxies = LinkedHashSet<Protocols.Deduplication>()
-                    for (pf in profiles) {
-                        val proxy = Protocols.Deduplication(pf.requireBean(), pf.displayType())
-                        if (!uniqueProxies.add(proxy)) {
-                            toClear += pf
+                    try {
+                        val snapshot = PendingProfileDeletes.loadGroup(targetGroupId)
+                        val unique = HashSet<Protocols.Deduplication>()
+                        val duplicates = snapshot.filter {
+                            !unique.add(Protocols.Deduplication(it.requireBean(), it.displayType()))
                         }
-                    }
-                    if (toClear.isNotEmpty()) {
                         onMainDispatcher {
-                            MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
-                                .setMessage(
-                                    getString(R.string.delete_confirm_prompt) + "\n" +
-                                            toClear.mapIndexedNotNull { index, proxyEntity ->
-                                                if (index < 20) {
-                                                    proxyEntity.displayName()
-                                                } else if (index == 20) {
-                                                    "......"
-                                                } else {
-                                                    null
-                                                }
-                                            }.joinToString("\n")
-                                )
-                                .setPositiveButton(R.string.yes) { _, _ ->
-                                    for (profile in toClear) {
-                                        adapter.groupFragments[DataStore.selectedGroup]?.adapter?.apply {
-                                            val index = configurationIdList.indexOf(profile.id)
-                                            if (index >= 0) {
-                                                configurationIdList.removeAt(index)
-                                                configurationList.remove(profile.id)
-                                                notifyItemRemoved(index)
-                                            }
+                            if (!isAdded || duplicates.isEmpty()) {
+                                duplicateCleanupInProgress = false
+                            } else {
+                                MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
+                                    .setMessage("您确认要删除这些重复配置吗？\n一共 ${duplicates.size} 个重复配置。\n\n" + duplicates.take(50).joinToString("\n") { node ->
+                                val name = node.displayName().orEmpty().replace("\n", " ")
+                                if (name.length > 42) name.take(41) + "…" else name
+                            } + if (duplicates.size > 50) "\n……" else "")
+                                    .setPositiveButton(R.string.yes) { _, _ ->
+                                        val page = adapter.groupFragments[targetGroupId]
+                                        val list = page?.adapter
+                                        if (list != null && page?.isUndoReady() == true) {
+                                            val actions = list.stageBatchRemoval(duplicates)
+                                            page.undoManager.remove(actions)
                                         }
+                                        duplicateCleanupInProgress = false
                                     }
-                                    runOnDefaultDispatcher {
-                                        for (profile in toClear) {
-                                            ProfileManager.deleteProfile2(
-                                                profile.groupId, profile.id
-                                            )
-                                        }
-                                    }
-                                }
-                                .setNegativeButton(R.string.no, null)
-                                .show()
+                                    .setNegativeButton(R.string.no) { _, _ -> duplicateCleanupInProgress = false }
+                                    .setOnCancelListener { duplicateCleanupInProgress = false }
+                                    .show()
+                            }
+                        }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        onMainDispatcher { duplicateCleanupInProgress = false }
+                        throw e
+                    } catch (e: Exception) {
+                        Logs.w(e)
+                        onMainDispatcher {
+                            duplicateCleanupInProgress = false
+                            if (isAdded) snackbar(e.readableMessage).show()
                         }
                     }
                 }
@@ -917,12 +916,43 @@ class ConfigurationFragment @JvmOverloads constructor(
         var notification: ConnectionTestNotification? = null
 
         val results: MutableSet<ProxyEntity> = ConcurrentHashMap.newKeySet()
+        private val flushScheduled = AtomicBoolean(false)
+        private val resultsLock = Any()
         var proxyN = 0
         val finishedN = AtomicInteger(0)
 
+        // 012: 单个节点测完即防抖批量回写（250ms 合并窗口）。
+        // 行延迟经 ProfileManager.onUpdated 定点刷新，实时变化；
+        // 不再等全部测完/取消后串行回写（旧实现 180 节点要等 2~3 秒才变化）。
+        fun scheduleFlush() {
+            if (dialogStatus.get() == 2) return
+            if (!flushScheduled.compareAndSet(false, true)) return
+            runOnDefaultDispatcher {
+                delay(250)
+                flushScheduled.set(false)
+                flushPending()
+            }
+        }
+
+        // 取出当前累积结果一次性批量落库；cancel 收尾也复用同一入口。
+        suspend fun flushPending() {
+            val snapshot = synchronized(resultsLock) {
+                val copy = ArrayList(results)
+                results.clear()
+                copy
+            }
+            if (snapshot.isEmpty()) return
+            try {
+                ProfileManager.updateProfile(snapshot)
+            } catch (e: Exception) {
+                Logs.w(e)
+            }
+        }
+
         fun update(profile: ProxyEntity) {
             if (dialogStatus.get() != 2) {
-                results.add(profile)
+                synchronized(resultsLock) { results.add(profile) }
+                scheduleFlush()
             }
             runOnMainDispatcher {
                 val context = context ?: return@runOnMainDispatcher
@@ -1112,18 +1142,15 @@ class ConfigurationFragment @JvmOverloads constructor(
         test.cancel = {
             test.dialogStatus.set(2)
             dialog.dismiss()
+            // 012: 先放行下一次测试（空档期≈0）；取消与回写全部后台收尾。
+            // 进行中的 urlTest 实例最多再跑自身超时（默认 3s）后自行关闭，不阻塞新测试。
+            DataStore.runningTest = false
             runOnDefaultDispatcher {
                 mainJob.cancel()
                 testJobs.forEach { it.cancel() }
-                test.results.forEach {
-                    try {
-                        ProfileManager.updateProfile(it)
-                    } catch (e: Exception) {
-                        Logs.w(e)
-                    }
-                }
+                // update() 已在测试过程中实时批量落库；这里只补冲最后一批收尾结果。
+                test.flushPending()
                 GroupManager.postReload(DataStore.currentGroupId())
-                DataStore.runningTest = false
             }
         }
         test.minimize = {
@@ -1143,6 +1170,15 @@ class ConfigurationFragment @JvmOverloads constructor(
         val dialog = test.builder.show()
         val testJobs = mutableListOf<Job>()
         val group = DataStore.currentGroup()
+        // 013: 单实例测试的 init/launch/Libcore.urlTest 全程占用一个线程；旧实现把
+        // 这条阻塞链跑在 Dispatchers.Default 上，有效并发被 CPU 核数封顶（并发设置
+        // 开再高也快不起来），且取消后的僵尸实例霸占全部 Default 线程直到超时
+        // （取消后重测 2~3 秒空档的根因）。改为专用阻塞池：测试实例为无入站轻量
+        // 配置，16 路（≈2×CPU 核数）内存安全；真实 HTTP 延迟测量路径零改动。
+        // 两条收尾路径（自然测完 / 用户取消）都会经 test.cancel 关闭池子。
+        val testPool = Executors.newFixedThreadPool(
+            DataStore.connectionTestConcurrent.coerceIn(1, 16)
+        ).asCoroutineDispatcher()
 
         val mainJob = runOnDefaultDispatcher {
             val profilesList = SagerDatabase.proxyDao.getByGroup(group.id)
@@ -1150,7 +1186,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             val profiles = ConcurrentLinkedQueue(profilesList)
             repeat(DataStore.connectionTestConcurrent) {
                 testJobs.add(launch(Dispatchers.IO) {
-                    val urlTest = UrlTest() // note: this is NOT in bg process
+                    val urlTest = UrlTest(testPool) // note: this is NOT in bg process
                     while (isActive) {
                         val profile = profiles.poll() ?: break
                         profile.status = 0
@@ -1181,18 +1217,18 @@ class ConfigurationFragment @JvmOverloads constructor(
         test.cancel = {
             test.dialogStatus.set(2)
             dialog.dismiss()
+            // 012: 先放行下一次测试（空档期≈0）；取消与回写全部后台收尾。
+            // 013: 僵尸实例已由 TestInstance.invokeOnCancellation 即时关闭，
+            // 这里同步关闭专用测试池；Default 线程不再被占坑，postReload 的
+            // 后台 DiffUtil 不再被饿死。
+            DataStore.runningTest = false
+            runCatching { testPool.close() }
             runOnDefaultDispatcher {
                 mainJob.cancel()
                 testJobs.forEach { it.cancel() }
-                test.results.forEach {
-                    try {
-                        ProfileManager.updateProfile(it)
-                    } catch (e: Exception) {
-                        Logs.w(e)
-                    }
-                }
+                // update() 已在测试过程中实时批量落库；这里只补冲最后一批收尾结果。
+                test.flushPending()
                 GroupManager.postReload(DataStore.currentGroupId())
-                DataStore.runningTest = false
             }
         }
         test.minimize = {
@@ -1983,22 +2019,52 @@ class ConfigurationFragment @JvmOverloads constructor(
                 refreshFromPosition(pos - 1)
             }
 
+            fun stageBatchRemoval(nodes: List<ProxyEntity>): List<Pair<Int, ProxyEntity>> {
+                val ids = nodes.map { it.id }.toHashSet()
+                val positions = configurationIdList.withIndex().associate { it.value to it.index }
+                val actions = nodes.map { (positions[it.id] ?: -1) to it }
+                PendingProfileDeletes.stage(nodes)
+                configurationIdList.removeAll { it in ids }
+                ids.forEach { configurationList.remove(it) }
+                notifyDataSetChanged()
+                return actions
+            }
+
             override fun undo(actions: List<Pair<Int, ProxyEntity>>) {
-                for ((index, item) in actions) {
-                    configurationListView.post {
-                        configurationList[item.id] = item
-                        configurationIdList.add(index, item.id)
-                        notifyItemInserted(index)
-                        refreshFromPosition(index - 1)
+                val snapshot = actions.toList()
+                configurationListView.post {
+                    PendingProfileDeletes.undo(snapshot.map { it.second })
+                    snapshot.forEach { (_, node) -> configurationList[node.id] = node }
+                    val existing = configurationIdList.toHashSet()
+                    val restore = snapshot.filter { it.first >= 0 && existing.add(it.second.id) }.sortedBy { it.first }
+                    val merged = ArrayList<Long>(configurationIdList.size + restore.size)
+                    var next = 0
+                    var add = 0
+                    while (next < configurationIdList.size || add < restore.size) {
+                        if (add < restore.size && (restore[add].first <= merged.size || next == configurationIdList.size)) {
+                            merged.add(restore[add++].second.id)
+                        } else {
+                            merged.add(configurationIdList[next++])
+                        }
                     }
+                    configurationIdList.clear()
+                    configurationIdList.addAll(merged)
+                    notifyDataSetChanged()
                 }
             }
 
             override fun commit(actions: List<Pair<Int, ProxyEntity>>) {
-                val profiles = actions.map { it.second }
+                // The Snackbar clears its recycle bin immediately: take a detached snapshot first.
+                val snapshot = actions.map { it.second }
                 runOnDefaultDispatcher {
-                    for (entity in profiles) {
-                        ProfileManager.deleteProfile(entity.groupId, entity.id)
+                    try {
+                        PendingProfileDeletes.commit(snapshot)
+                    } catch (e: Exception) {
+                        Logs.w(e)
+                        onMainDispatcher {
+                            undo(snapshot.map { -1 to it })
+                            if (isAdded) snackbar(e.readableMessage).show()
+                        }
                     }
                 }
             }
@@ -2107,7 +2173,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             fun reloadProfiles() {
-                var newProfiles = SagerDatabase.proxyDao.getByGroup(proxyGroup.id)
+                var newProfiles = PendingProfileDeletes.loadGroup(proxyGroup.id)
                 when (proxyGroup.order) {
                     GroupOrder.BY_NAME -> {
                         newProfiles = newProfiles.sortedBy { it.displayName() }

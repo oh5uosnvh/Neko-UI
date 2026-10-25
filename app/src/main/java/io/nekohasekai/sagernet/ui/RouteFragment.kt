@@ -29,6 +29,11 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
     lateinit var ruleAdapter: RuleAdapter
     lateinit var undoManager: UndoSnackbarManager<RuleEntity>
 
+    /** 问题1-B：切回路由页时列表回顶部 */
+    override fun resetScrollState() {
+        if (::ruleListView.isInitialized) ruleListView.scrollToPosition(0)
+    }
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 

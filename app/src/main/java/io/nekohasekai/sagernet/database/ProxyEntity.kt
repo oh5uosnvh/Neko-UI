@@ -576,6 +576,12 @@ data class ProxyEntity(
 
     @androidx.room.Dao
     interface Dao {
+        @Query("DELETE FROM proxy_entities WHERE id IN (:ids)")
+        fun deleteSnapshotIds(ids: List<Long>): Int
+
+        @Query("SELECT * FROM proxy_entities WHERE groupId = :groupId AND id > :afterId ORDER BY id LIMIT :pageSize")
+        fun profilePageAfter(groupId: Long, afterId: Long, pageSize: Int): List<ProxyEntity>
+
 
         @Query("select * from proxy_entities")
         fun getAll(): List<ProxyEntity>

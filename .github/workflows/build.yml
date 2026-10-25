@@ -15,6 +15,11 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
+      - name: Stage clean protocol modules
+        run: |
+          git clone --depth 1 --branch feature/r98-clean https://github.com/oh5uosnvh/Nekobox-MG.git ../mods
+          python3 scripts/apply_protocol_suffix_clean.py . ../mods
+          git diff --check
       - name: Golang Status
         run: find buildScript libcore/*.sh | xargs cat | sha1sum > golang_status
       - name: Libcore Status
@@ -44,6 +49,11 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
+      - name: Stage clean protocol modules
+        run: |
+          git clone --depth 1 --branch feature/r98-clean https://github.com/oh5uosnvh/Nekobox-MG.git ../mods
+          python3 scripts/apply_protocol_suffix_clean.py . ../mods
+          git diff --check
       - name: Golang Status
         run: find buildScript libcore/*.sh | xargs cat | sha1sum > golang_status
       - name: Libcore Status

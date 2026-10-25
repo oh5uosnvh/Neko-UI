@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.ui
 
 import android.os.Bundle
 import android.view.View
+import android.widget.ScrollView
 import androidx.fragment.app.Fragment
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import com.google.android.material.tabs.TabLayoutMediator
@@ -27,6 +28,14 @@ class ToolsFragment : ToolbarFragment(R.layout.layout_tools) {
                 true
             }
         }.attach()
+    }
+
+    /** 问题1-B：切回工具页时内部滚动视图回顶部 */
+    override fun resetScrollState() {
+        for (child in childFragmentManager.fragments) {
+            val v = child.view
+            if (v is ScrollView) v.scrollTo(0, 0)
+        }
     }
 
     inner class ToolsAdapter(val tools: List<Fragment>) : FragmentStateAdapter(this) {

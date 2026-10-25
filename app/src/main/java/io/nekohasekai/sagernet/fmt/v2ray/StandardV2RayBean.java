@@ -372,6 +372,10 @@ public abstract class StandardV2RayBean extends AbstractBean {
         // Note: kcp fields are read in the switch case above when version >= 6
     }
 
+    public boolean isX365() {
+        return this instanceof VMessBean && uuid != null && uuid.toLowerCase().endsWith("#x365");
+    }
+
     public boolean isVLESS() {
         if (this instanceof VMessBean) {
             Integer aid = ((VMessBean) this).alterId;

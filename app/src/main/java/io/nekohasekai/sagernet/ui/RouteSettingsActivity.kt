@@ -291,14 +291,17 @@ class RouteSettingsActivity(
 
     }
 
-    val child by lazy { supportFragmentManager.findFragmentById(R.id.settings) as MyPreferenceFragmentCompat }
+    // 015: 见 GroupSettingsActivity —— fragment 未 attach 时防 NPE。
+    val child: MyPreferenceFragmentCompat?
+        get() = supportFragmentManager.findFragmentById(R.id.settings) as? MyPreferenceFragmentCompat
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.profile_config_menu, menu)
         return true
     }
 
-    override fun onOptionsItemSelected(item: MenuItem) = child.onOptionsItemSelected(item)
+    override fun onOptionsItemSelected(item: MenuItem): Boolean =
+        child?.onOptionsItemSelected(item) ?: super.onOptionsItemSelected(item)
 
     override fun onBackPressed() {
         if (needSave()) {
