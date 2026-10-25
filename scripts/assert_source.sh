@@ -146,4 +146,13 @@ grep -q 'name="show_bottom_bar"' app/src/main/res/values/strings.xml \
 ! grep -rn 'fun onTestConnection' app/src/main/java/io/nekohasekai/sagernet/widget/ \
   || fail "custom tray test hook still present"
 
+# ------------------------------------------------ 018 分组标签长按菜单 = 编辑/跳转分组/──/清空/删除
+CF=app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt
+grep -q 'R.string.clear_profiles)' "$CF" \
+  || fail "tab menu clear item missing"
+grep -q 'MenuCompat.setGroupDividerEnabled(popup.menu, true)' "$CF" \
+  || fail "tab menu group divider missing"
+grep -q 'GroupManager.clearGroup(group.id)' "$CF" \
+  || fail "tab menu clear action missing"
+
 echo "== 源码断言全部通过（011–033 + 官方托板）=="

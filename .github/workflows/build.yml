@@ -182,6 +182,7 @@ jobs:
           python3 "$GITHUB_WORKSPACE/scripts/apply_profile_batch_pipeline.py" .
           python3 "$GITHUB_WORKSPACE/scripts/remove_ip_surface.py" .
           python3 "$GITHUB_WORKSPACE/scripts/restore_official_tray.py" .
+          python3 "$GITHUB_WORKSPACE/scripts/apply_tab_menu_clear.py" .
           python3 "$GITHUB_WORKSPACE/scripts/assert_no_ip.py" .
           ! rg -n 'Blackstone|snell-yf|yfbridge|apply_blackstone|prepare_yf' libcore app/src/main/java
 
