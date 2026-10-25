@@ -40,6 +40,7 @@ import (
 	"github.com/sagernet/sing-box/protocol/vmess"
 	"github.com/sagernet/sing-box/protocol/wireguard"
 
+	"libcore/protocol/juicity"
 	libcoreX365 "libcore/protocol/x365"
 
 	_ "github.com/sagernet/sing-box/experimental/clashapi"

@@ -5,6 +5,7 @@ r=Path(sys.argv[1]).resolve();mg=Path(sys.argv[2]).resolve()
 # Copy x365 implementation only; it registers the existing VLESS tag.
 src=mg/'Neko-365/libcore/protocol/x365';dst=r/'libcore/protocol/x365';dst.mkdir(parents=True,exist_ok=True)
 for n in ['conn.go','outbound.go']: shutil.copy2(src/n,dst/n)
+shutil.copy2(mg/'compat/files/libcore/protocol/x365/vless.go', dst/'vless.go')
 p=r/'libcore/box_include.go';s=p.read_text()
 if 'libcoreX365 "libcore/protocol/x365"' not in s:
  s=s.replace('"libcore/protocol/juicity"','"libcoreX365 \\"libcore/protocol/x365\\"')
