@@ -226,10 +226,13 @@ for loc in locales:
     if "bar_delay_" in s:
         errors.append(f"{loc} 仍有 bar_delay_*")
 for token in ["ConnectBar", "ServiceIconView", "connect_bar", "bar_delay", "bg_touch_rounded"]:
-    r = subprocess.run(["rg", "-l", token, str(tree / "app/src/main")],
-                       capture_output=True, text=True)
-    if r.stdout.strip():
-        errors.append(f"全树残留 {token}: {r.stdout.strip()}")
+    hits = []
+    for f in (tree / "app/src/main").rglob("*"):
+        if f.is_file() and f.suffix in {".kt", ".java", ".xml"}:
+            if token in f.read_text(errors="ignore"):
+                hits.append(str(f.relative_to(tree)))
+    if hits:
+        errors.append(f"全树残留 {token}: {hits}")
 
 if errors:
     for e in errors:
