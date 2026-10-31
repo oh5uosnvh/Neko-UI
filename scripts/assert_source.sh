@@ -160,9 +160,33 @@ grep -q 'row.measure(spec, spec)' "$CF" \
   || fail "widest-row measurement missing"
 grep -q 'getString(R.string.clear_profiles)' "$CF" \
   || fail "tab menu clear item missing"
-grep -q 'GroupManager.clearGroup(group.id)' "$CF" \
-  || fail "tab menu clear action missing"
+grep -q 'GroupClearAction.confirm(requireActivity() as ThemedActivity, group)' "$CF" \
+  || fail "tab menu shared clear/undo action missing"
+grep -q 'showTabGroupMenu(v, group)' "$CF" \
+  || fail "tab menu callback missing"
+! grep -q 'GroupManager.clearGroup(group.id)' "$CF" \
+  || fail "tab menu still directly clears without undo"
 ! grep -q 'popup.menu.add' "$CF" \
   || fail "system PopupMenu still used for tab menu"
 
-echo "== 源码断言全部通过（011–033 + 官方托板）=="
+# 清空/选择配置回归：分组页同一撤销 Snackbar，选择模式右侧 ☴ 同一分组列表。
+CA=app/src/main/java/io/nekohasekai/sagernet/ui/GroupClearAction.kt
+test -f "$CA" || fail "GroupClearAction missing"
+grep -q 'setAction(R.string.undo)' "$CA" \
+  || fail "clear undo action missing"
+grep -q 'GroupClearStore.restore' "$CA" \
+  || fail "clear restore path missing"
+GF=app/src/main/java/io/nekohasekai/sagernet/ui/GroupFragment.kt
+grep -q 'GroupClearAction.confirm(activity, proxyGroup)' "$GF" \
+  || fail "group page clear does not use shared undo action"
+TP=app/src/main/java/io/nekohasekai/sagernet/ui/TopBarController.kt
+grep -q 'fun showGroupPicker(anchor: View)' "$TP" \
+  || fail "group picker not exposed to select mode"
+grep -q 'neko_picker_groups' "$CF" \
+  || fail "select mode group picker button missing"
+grep -q 'topBar.showGroupPicker(toolbar)' "$CF" \
+  || fail "select mode group picker callback missing"
+grep -q 'if (host.select)' "$TP" \
+  || fail "select mode picker right alignment missing"
+
+echo "== 源码断言全部通过（011–033 + 官方托板 + 清空撤销 + 选择器）=="

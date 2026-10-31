@@ -170,16 +170,7 @@ fun_code = '''    /**
         addRow { dashedDivider() }
         addRow {
             menuItem(getString(R.string.clear_profiles)) {
-                MaterialAlertDialogBuilder(context)
-                    .setTitle(R.string.confirm)
-                    .setMessage(R.string.clear_profiles_message)
-                    .setPositiveButton(R.string.yes) { _, _ ->
-                        runOnDefaultDispatcher {
-                            GroupManager.clearGroup(group.id)
-                        }
-                    }
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show()
+                GroupClearAction.confirm(requireActivity() as ThemedActivity, group)
             }
         }
         addRow {
@@ -233,7 +224,7 @@ for token in ["showTabGroupMenu(v, group)",
               "lp.width = maxW",
               "row.measure(spec, spec)",
               "getString(R.string.clear_profiles)",
-              "GroupManager.clearGroup(group.id)",
+              "GroupClearAction.confirm(requireActivity() as ThemedActivity, group)",
               "DashPathEffect",
               "deleteGroupWithUndo(group)"]:
     assert token in s, f"缺少 {token}"
