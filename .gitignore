@@ -1,0 +1,30 @@
+*.iml
+.gradle
+.idea
+.vscode
+.DS_Store
+build/
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+/app/libs/
+/app/src/main/assets/sing-box
+/service_account_credentials.json
+jniLibs/
+/library/libcore_build/
+.idea/deploymentTargetDropDown.xml
+/nkmr
+
+# submodules
+/external
+.hev-build/
+.kotlin/
+
+# native core sources fetched by buildScript/lib/core (never committed)
+/sing-box
+/libneko
+/sing-anytls-shanlian
+/sing-shadowsocks2-vt
+/fastup-mod
+/oppa-mod

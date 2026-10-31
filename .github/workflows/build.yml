@@ -1,0 +1,104 @@
+name: Build release source
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to build'
+        required: false
+        default: '1.4.2-mg-pre1'
+
+permissions:
+  contents: write
+
+jobs:
+  libcore:
+    name: Build LibCore
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/checkout@v4
+        with:
+          repository: oh5uosnvh/Nekobox-MG
+          ref: feature/r98-clean
+          path: mg
+          token: ${{ secrets.GH_PAT || github.token }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '^1.25'
+      - uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r25c
+      - name: Stage protocol modules
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          set -euo pipefail
+          mkdir -p sing-anytls-shanlian sing-shadowsocks2-vt fastup-mod oppa-mod
+          cp -a mg/Neko-shanlian/. sing-anytls-shanlian/
+          cp -a mg/Neko-viewTurbo/. sing-shadowsocks2-vt/
+          cp -a mg/Neko-fastup/. fastup-mod/
+          cp -a mg/Neko-oppa/. oppa-mod/
+          mkdir -p libcore/protocol/x365
+          cp mg/protocols/x365/*.go libcore/protocol/x365/
+      - name: Build
+        env:
+          GOSUMDB: off
+        run: ./run lib core
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libcore
+          path: app/libs/libcore.aar
+
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    needs: libcore
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/checkout@v4
+        with:
+          repository: oh5uosnvh/Nekobox-MG
+          ref: feature/r98-clean
+          path: mg
+          token: ${{ secrets.GH_PAT || github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: libcore
+          path: app/libs
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r25c
+      - name: Stage protocol modules
+        run: |
+          set -euo pipefail
+          mkdir -p sing-anytls-shanlian sing-shadowsocks2-vt fastup-mod oppa-mod
+          cp -a mg/Neko-shanlian/. sing-anytls-shanlian/
+          cp -a mg/Neko-viewTurbo/. sing-shadowsocks2-vt/
+          cp -a mg/Neko-fastup/. fastup-mod/
+          cp -a mg/Neko-oppa/. oppa-mod/
+      - name: Build APK
+        env:
+          BUILD_PLUGIN: none
+          GOSUMDB: off
+        run: |
+          set -euo pipefail
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          echo "ndk.dir=${ANDROID_NDK_HOME}" >> local.properties
+          ./run init action gradle
+          ./gradlew app:assemblePreviewRelease
+          mkdir -p release
+          cp app/build/outputs/apk/preview/release/*.apk release/ 2>/dev/null || cp $(find app/build/outputs/apk -name '*.apk') release/
+          sha256sum release/*.apk > release/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-apks
+          path: release/
