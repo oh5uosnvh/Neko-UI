@@ -13,6 +13,25 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.assets.KaringResourceSettings
 import io.nekohasekai.sagernet.assets.KaringRuleFamily
 
+/**
+ * Configure a resource switch before it can be measured.
+ *
+ * MaterialSwitch extends AppCompat's SwitchCompat. On Android 15 the latter
+ * measures textOn/textOff whenever showText is true; a programmatically-created
+ * switch has null labels and therefore reaches StaticLayout with null text.
+ */
+internal fun configureKaringResourceSwitch(
+    control: MaterialSwitch,
+    title: Int,
+    checked: Boolean,
+    change: (Boolean) -> Unit,
+) {
+    control.showText = false
+    control.setText(title)
+    control.isChecked = checked
+    control.setOnCheckedChangeListener { _, value -> change(value) }
+}
+
 class KaringResourceSettingsDialog : DialogFragment() {
     companion object {
         fun newInstance(family: KaringRuleFamily) = KaringResourceSettingsDialog().apply {
@@ -34,6 +53,13 @@ class KaringResourceSettingsDialog : DialogFragment() {
         }
         fun addSwitch(title: Int, checked: Boolean, change: (Boolean) -> Unit): MaterialSwitch {
             val control = MaterialSwitch(context).apply {
+                // AppCompat's SwitchCompat.measure path assumes textOn/textOff are non-null
+                // when showText is enabled. MaterialSwitch inherits that path, and Android 15
+                // reaches it even though these programmatic switches do not use ON/OFF labels.
+                // Disable that optional label rendering before the first measure pass.
+                showText = false
+                textOn = ""
+                textOff = ""
                 setText(title)
                 isChecked = checked
                 setPadding(0, dp(12), 0, dp(12))
@@ -48,6 +74,10 @@ class KaringResourceSettingsDialog : DialogFragment() {
         }
         val remoteRow = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
         val remote = MaterialSwitch(context).apply {
+            // Keep the same invariant for the remote-resource switch.
+            showText = false
+            textOn = ""
+            textOff = ""
             setText(R.string.karing_resource_remote)
             isChecked = options.useRemote
             setOnCheckedChangeListener { _, value -> settings.setUseRemote(family, value) }

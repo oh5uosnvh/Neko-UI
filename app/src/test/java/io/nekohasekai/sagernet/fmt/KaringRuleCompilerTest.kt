@@ -8,6 +8,11 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class KaringRuleCompilerTest {
+    @Test fun validPresetExclamationAndUnsafePaths() {
+        assertTrue(KaringRuleSetValidation.builtIn("geosite:geolocation-!cn"))
+        assertFalse(KaringRuleSetValidation.builtIn("geosite:../secret"))
+        assertFalse(KaringRuleSetValidation.builtIn("geosite:foo/bar"))
+    }
     private val resolver = object : KaringRuleSetResolver {
         override fun resolveBuiltIn(code: String) = KaringRuleSetRef(code, "binary", "/tmp/$code.srs")
         override fun resolveRemote(item: io.nekohasekai.sagernet.database.KaringRuleSetItem) =

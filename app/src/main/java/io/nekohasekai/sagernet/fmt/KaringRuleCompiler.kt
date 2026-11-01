@@ -20,7 +20,7 @@ interface KaringRuleSetResolver {
 data class KaringRuleSetRef(val tag: String, val format: String, val pathOrUrl: String, val remote: Boolean = false)
 
 object KaringRuleSetValidation {
-    private val builtin = Regex("^(geosite|geoip|acl):[A-Za-z0-9][A-Za-z0-9@._-]{0,127}$")
+    private val builtin = Regex("^(geosite|geoip|acl):[A-Za-z0-9][A-Za-z0-9@._!-]{0,127}$")
     fun builtIn(value: String): Boolean = builtin.matches(value.trim())
     fun remote(value: String): Boolean = try {
         val uri = URI(value.trim())

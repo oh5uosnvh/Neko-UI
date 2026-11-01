@@ -49,7 +49,7 @@ class KaringResourceManager(context: Context, externalRoot: File? = null) {
     companion object {
         private const val MAX_DOWNLOAD_BYTES = 64L * 1024L * 1024L
         private const val MAX_CODE_LENGTH = 128
-        private val SAFE_CODE = Regex("^[A-Za-z0-9][A-Za-z0-9@._-]{0,127}$")
+        private val SAFE_CODE = Regex("^[A-Za-z0-9][A-Za-z0-9@._!-]{0,127}$")
     }
 
     private val appContext = context.applicationContext
