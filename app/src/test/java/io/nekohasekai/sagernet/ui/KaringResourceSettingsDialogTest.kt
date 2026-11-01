@@ -58,16 +58,15 @@ class KaringResourceSettingsDialogTest {
     }
 
     @Test
-    fun leadingInfoDoesNotMoveRemoteSwitch() {
+    fun infoIconInRemoteSwitchRow() {
         val context = ApplicationProvider.getApplicationContext<Application>()
-        val plain = createKaringResourceSwitchRow(context, R.string.karing_resource_enable, false) {}
         val remote = createKaringResourceSwitchRow(context, R.string.karing_resource_remote, false) {} as LinearLayout
-        remote.addView(View(context), 0, LinearLayout.LayoutParams(48, 48))
+        remote.addView(View(context), 1, LinearLayout.LayoutParams(40, 48))
         val label = remote.findViewById<TextView>(R.id.karing_resource_switch_label)
         val control = remote.findViewById<SwitchCompat>(R.id.karing_resource_switch_control)
         assertNotNull(label)
         assertNotNull(control)
-        assertEquals(remote.getChildAt(0)::class.java, View::class.java)
+        assertEquals(remote.getChildAt(1)::class.java, View::class.java)
     }
 
 }

@@ -162,8 +162,75 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 MaterialAlertDialogBuilder(activity).setTitle(R.string.confirm)
                     .setMessage(R.string.clear_profiles_message)
                     .setPositiveButton(R.string.yes) { _, _ ->
+                        val currentTabIsPresets = showPresets
+                        val appContext = requireContext().applicationContext
                         runOnDefaultDispatcher {
-                            SagerDatabase.rulesDao.reset()
+                            if (currentTabIsPresets) {
+                                // 仅重置“预设置规则”选项卡下的规则
+                                SagerDatabase.instance.runInTransaction {
+                                    val dao = SagerDatabase.rulesDao
+                                    val presets = dao.allRules().filter { it.hasKaringEnvelope() }
+                                    dao.deleteRules(presets)
+                                }
+                                // 重新导入原版的预设置规则
+                                runCatching {
+                                    val json = appContext.assets.open("karing/cn.json").bufferedReader().use { it.readText() }
+                                    val preset = KaringPresetImporter.parse(json)
+                                    SagerDatabase.instance.runInTransaction {
+                                        val dao = SagerDatabase.rulesDao
+                                        val existing = dao.allRules()
+                                        val plan = KaringPresetImporter.importInto(existing, preset, "karing-cn-v1")
+                                        val newRules = plan.rules.drop(existing.size)
+                                        var order = dao.nextOrder() ?: 1L
+                                        newRules.forEach { rule ->
+                                            rule.userOrder = order++
+                                            dao.createRule(rule)
+                                        }
+                                    }
+                                }
+                            } else {
+                                // 处于“自定义分流”选项卡：仅重置自定义规则，恢复 NekoBox 官方原本的内置初始路由
+                                SagerDatabase.instance.runInTransaction {
+                                    val dao = SagerDatabase.rulesDao
+                                    val customs = dao.allRules().filter { !it.hasKaringEnvelope() }
+                                    dao.deleteRules(customs)
+                                    var order = dao.nextOrder() ?: 1L
+                                    val defaults = mutableListOf<RuleEntity>()
+                                    defaults += RuleEntity(
+                                        name = appContext.getString(R.string.route_opt_block_quic),
+                                        port = "443", network = "udp", outbound = -2
+                                    )
+                                    defaults += RuleEntity(
+                                        name = appContext.getString(R.string.route_opt_block_ads),
+                                        domains = "geosite:category-ads-all", outbound = -2
+                                    )
+                                    val countries = mutableListOf("cn:中国")
+                                    if (java.util.Locale.getDefault().country != java.util.Locale.CHINA.country) {
+                                        countries += "ir:Iran"
+                                        countries += "ru:Russia"
+                                    }
+                                    countries.forEach { countryEntry ->
+                                        val country = countryEntry.substringBefore(":")
+                                        val displayCountry = countryEntry.substringAfter(":")
+                                        if (country == "cn") defaults += RuleEntity(
+                                            name = appContext.getString(R.string.route_play_store, displayCountry),
+                                            domains = "domain:googleapis.cn\ndomain:xn--ngstr-lra8j.com\ndomain:xn--ngstr-cn-8za9o.com"
+                                        )
+                                        defaults += RuleEntity(
+                                            name = appContext.getString(R.string.route_bypass_domain, displayCountry),
+                                            domains = "geosite:$country", outbound = -1
+                                        )
+                                        defaults += RuleEntity(
+                                            name = appContext.getString(R.string.route_bypass_ip, displayCountry),
+                                            ip = "geoip:$country", outbound = -1
+                                        )
+                                    }
+                                    defaults.forEach { rule ->
+                                        rule.userOrder = order++
+                                        dao.createRule(rule)
+                                    }
+                                }
+                            }
                             DataStore.rulesFirstCreate = false
                             ruleAdapter.reload()
                         }

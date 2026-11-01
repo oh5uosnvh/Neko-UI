@@ -73,17 +73,20 @@ class KaringResourceSettingsDialog : DialogFragment() {
         val remoteRow = createKaringResourceSwitchRow(
             context, R.string.karing_resource_remote, options.useRemote,
         ) { settings.setUseRemote(family, it) } as LinearLayout
-        remoteRow.addView(AppCompatImageButton(context).apply {
+        val infoButton = AppCompatImageButton(context).apply {
             setImageResource(R.drawable.ic_baseline_info_24)
             setBackgroundResource(android.R.color.transparent)
             contentDescription = getString(R.string.karing_resource_remote_info)
-            setPadding(dp(12), dp(12), dp(12), dp(12))
+            setPadding(dp(8), dp(12), dp(8), dp(12))
             setOnClickListener {
                 MaterialAlertDialogBuilder(context).setTitle(R.string.karing_resource_remote)
                     .setMessage(KaringResourceSettings.remoteBase(family))
                     .setPositiveButton(android.R.string.ok, null).show()
             }
-        }, 0, LinearLayout.LayoutParams(dp(48), dp(48)))
+        }
+        // remoteRow 的第 0 个子 view 是 TextView (weight=1)，第 1 个是 SwitchCompat。
+        // 将感叹号加在两者之间，形成：使用远程规则 (圆形感叹号)      [开关]
+        remoteRow.addView(infoButton, 1, LinearLayout.LayoutParams(dp(40), dp(48)))
         content.addView(remoteRow, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
         ))

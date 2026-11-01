@@ -435,8 +435,6 @@ class KaringRouteSettingsActivity(
                 }
             }
             content.addView(outbound)
-            // An explicit button permits re-selecting a profile when already selected.
-            content.addView(android.widget.Button(context).apply { text = getString(R.string.karing_select_profile); setOnClickListener { host.openProfile() } })
             content.requestFocus()
             return scroll
         }
