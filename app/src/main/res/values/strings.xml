@@ -723,4 +723,21 @@
     <string name="sort_ascending">Ascending</string>
     <string name="sort_descending">Descending</string>
     <string name="group_deleted_undo">Group %s deleted</string>
+    <string name="route_logic">Match logic</string>
+    <string name="route_builtin_rulesets">Built-in rule sets</string>
+    <string name="route_external_rulesets">External rule sets</string>
+    <string name="route_packages_manual">Package IDs (manual)</string>
+    <string name="karing_asset_exists">资源 %1$s 已存在，未覆盖</string>
+    <string name="karing_import_cn">导入中国区预设</string>
+    <string name="karing_import_confirm">将中国区预设追加到现有规则，保留已有规则和修改。是否继续？</string>
+    <string name="karing_import_result">已添加 %1$d 条，跳过重复 %2$d 条</string>
+    <string name="karing_acl_resources">ACL 规则资源</string>
+    <string name="karing_acl_loading">正在读取 ACL 资源…</string>
+    <string name="karing_acl_empty">没有可用的 ACL 资源</string>
+    <string name="karing_acl_status">内置 %1$d 项，已安装且有效 %2$d 项。点击管理。</string>
+    <string name="karing_acl_install">安装内置资源</string>
+    <string name="karing_acl_installed">已验证并安装：%1$s</string>
+    <string name="karing_acl_unavailable">未打包</string>
+    <string name="karing_acl_ready">已安装</string>
+    <string name="karing_acl_bundled">可安装</string>
 </resources>

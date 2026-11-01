@@ -5,6 +5,8 @@ import io.nekohasekai.sagernet.*
 import io.nekohasekai.sagernet.bg.VpnService
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.database.hasKaringEnvelope
+import io.nekohasekai.sagernet.database.toKaringRule
 import io.nekohasekai.sagernet.database.ProxyEntity.Companion.TYPE_CONFIG
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.SagerDatabase
@@ -656,10 +658,15 @@ fun buildConfig(
         } else {
             // 应用用户规则
             for (rule in extraRules) {
-                if (rule.packages.isNotEmpty()) {
+                // The v1 envelope is authoritative. Resolve its package list rather
+                // than the legacy mirror, otherwise an edit can compile stale UIDs
+                // alongside package_name and duplicate one criterion.
+                val envelopeModel = if (rule.hasKaringEnvelope()) rule.toKaringRule() else null
+                val packageNames = envelopeModel?.packageNames ?: rule.packages.toList()
+                if (packageNames.isNotEmpty()) {
                     PackageCache.awaitLoadSync()
                 }
-                val uidList = rule.packages.map {
+                val uidList = packageNames.map {
                     if (!isVPN) {
                         Toast.makeText(
                             SagerNet.application,
@@ -670,6 +677,110 @@ fun buildConfig(
                     PackageCache[it]?.takeIf { uid -> uid >= 1000 }
                 }.toHashSet().filterNotNull()
                 val ruleSets = mutableListOf<RuleSet>()
+
+                // Karing groups read the envelope first; stale legacy mirrors must
+                // not make an otherwise valid v1 rule fail validation.
+                if (!rule.hasKaringEnvelope()) {
+                    // Legacy parsing used to drop malformed ports and continue,
+                    // silently changing the rule. Reject the whole row instead.
+                    val invalidLegacyPort = (rule.port.listByLineOrComma() + rule.sourcePort.listByLineOrComma())
+                        .firstOrNull { value ->
+                            if (value.contains(":")) KaringRuleSetValidation.portRange(value) == null
+                            else KaringRuleSetValidation.port(value) == null
+                        }
+                    if (invalidLegacyPort != null) {
+                        Toast.makeText(
+                            SagerNet.application,
+                            "Warning: ${rule.displayName()}: invalid port $invalidLegacyPort",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        continue
+                    }
+                }
+
+                // Karing groups need explicit logical children. Do not feed these rows through
+                // the legacy single Rule_DefaultOptions path: sing-box address matching ORs
+                // domain/CIDR, while rule_set is an additional AND operand.
+                if (rule.hasKaringEnvelope()) {
+                    val resolver = object : KaringRuleSetResolver {
+                        override fun resolveBuiltIn(code: String): KaringRuleSetRef? =
+                            try { KaringResourceResolver(SagerNet.application).resolveBuiltIn(code) } catch (_: Exception) { null }
+
+                        override fun resolveRemote(item: io.nekohasekai.sagernet.database.KaringRuleSetItem): KaringRuleSetRef {
+                            val url = item.url.substringBefore('?')
+                            val tag = "ruleset-${kotlin.math.abs(item.url.hashCode())}"
+                            val format = if (url.endsWith(".json", true)) "source" else "binary"
+                            return KaringRuleSetRef(tag, format, item.url, remote = true)
+                        }
+                    }
+                    var karingOutbound = when (rule.outbound) {
+                        0L -> mainProxyTag
+                        -1L -> TAG_BYPASS
+                        -2L -> TAG_BLOCK
+                        else -> if (rule.outbound == proxy.id) mainProxyTag else tagMap[rule.outbound] ?: ""
+                    }
+                    val karingModel = envelopeModel ?: error("Karing envelope disappeared while building route")
+                    val karingRule = try {
+                        KaringRuleCompiler.compile(karingModel, resolver, karingOutbound, ruleSets, uidList)
+                    } catch (error: IllegalArgumentException) {
+                        Toast.makeText(
+                            SagerNet.application,
+                            "Warning: ${rule.displayName()}: ${error.message ?: "invalid route rule"}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        continue
+                    }
+                    if (karingOutbound == TAG_BLOCK && karingRule is Rule_DefaultOptions) {
+                        karingRule.outbound = null
+                        karingRule.action = "reject"
+                    }
+                    if (!karingRule.asMap().let { it.isEmpty() }) {
+                        route.rules.add(karingRule)
+                        route.rule_set.addAll(ruleSets)
+                    }
+                    // DNS routing is only a projection of explicit domain branches.
+                    // Never project an IP/app/network/port/protocol operand: doing so
+                    // turns AND into a broader DNS match and can bypass block/direct
+                    // policy. External and acl rule-sets are also not known to be
+                    // domain sets, so only geosite is safe to project.
+                    val dnsSets = karingModel.ruleSetBuildIn.filter { it.startsWith("geosite:") }
+                    val hasExplicitDnsAddress = karingModel.domain.isNotEmpty() ||
+                        karingModel.domainSuffix.isNotEmpty() || karingModel.domainKeyword.isNotEmpty() ||
+                        karingModel.domainRegex.isNotEmpty() || dnsSets.isNotEmpty()
+                    val hasNonDnsOperand = uidList.isNotEmpty() ||
+                        karingModel.packageNames.isNotEmpty() || karingModel.ipCidr.isNotEmpty() ||
+                        karingModel.network.isNotEmpty() || karingModel.sourceIpCidr.isNotEmpty() ||
+                        karingModel.sourcePorts.isNotEmpty() || karingModel.port.isNotEmpty() ||
+                        karingModel.portRange.isNotEmpty() || karingModel.protocol.isNotEmpty() ||
+                        karingModel.ruleSetItems.isNotEmpty() ||
+                        karingModel.ruleSetBuildIn.any { !it.startsWith("geosite:") }
+                    val canProjectDns = hasExplicitDnsAddress && (karingModel.or || !hasNonDnsOperand)
+                    if (canProjectDns && karingOutbound != "") {
+                        val dnsOutbound = when (rule.outbound) {
+                            -1L -> "dns-direct"
+                            -2L -> "dns-block"
+                            0L -> if (useFakeDns) "dns-fake" else "dns-remote"
+                            else -> ""
+                        }
+                        if (dnsOutbound.isNotEmpty()) {
+                            userDNSRuleList += DNSRule_DefaultOptions().apply {
+                                domain = karingModel.domain.takeIf { it.isNotEmpty() }
+                                domain_suffix = karingModel.domainSuffix.takeIf { it.isNotEmpty() }
+                                domain_keyword = karingModel.domainKeyword.takeIf { it.isNotEmpty() }
+                                domain_regex = karingModel.domainRegex.takeIf { it.isNotEmpty() }
+                                rule_set = dnsSets.takeIf { it.isNotEmpty() }
+                                server = dnsOutbound
+                                if (dnsOutbound == "dns-fake") {
+                                    inbound = listOf(deviceInboundTag)
+                                    query_type = listOf("A", "AAAA")
+                                } else if (dnsOutbound == "dns-block") {
+                                    disable_cache = true
+                                }
+                            }
+                        }
+                    }
+                    continue
+                }
 
                 val ruleObj = Rule_DefaultOptions().apply {
                     if (uidList.isNotEmpty()) {

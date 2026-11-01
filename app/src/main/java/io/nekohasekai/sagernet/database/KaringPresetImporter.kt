@@ -1,0 +1,82 @@
+package io.nekohasekai.sagernet.database
+
+import io.nekohasekai.sagernet.fmt.KaringRuleSetValidation
+import org.json.JSONObject
+import java.net.URI
+
+class KaringPresetException(message: String) : IllegalArgumentException(message)
+
+data class KaringImportResult(
+    val rules: List<RuleEntity>,
+    val skippedDuplicates: Int = 0,
+)
+
+/** Pure parser/import planner. The caller writes the returned rows in one Room transaction. */
+object KaringPresetImporter {
+    fun parse(json: String): KaringPreset {
+        val preset = KaringRuleJson.parsePreset(json)
+        if (preset.rules.any { it.ruleSetBuildIn.any { code -> !KaringRuleSetValidation.builtIn(code) } }) {
+            throw KaringPresetException("invalid Karing built-in rule-set")
+        }
+        if (preset.rules.any { it.ruleSetItems.any { item -> !validRemote(item.url) } }) {
+            throw KaringPresetException("Karing rule-set URL must be HTTPS .srs/.json")
+        }
+        return preset
+    }
+
+    fun importInto(
+        existing: List<RuleEntity>,
+        preset: KaringPreset,
+        importId: String,
+        policy: KaringImportPolicy = KaringImportPolicy.APPEND,
+    ): KaringImportResult {
+        val current = if (policy == KaringImportPolicy.REPLACE_IMPORTED) {
+            existing.filterNot { it.karingImportMarker() == importId }
+        } else existing
+        val seen = current.mapTo(mutableSetOf()) { fingerprint(it.toKaringRule()) }
+        val result = mutableListOf<RuleEntity>()
+        var skipped = 0
+        val existingEntries = current.mapNotNull { rule ->
+            runCatching { JSONObject(rule.config).optString("karing_preset_entry").takeIf { it.isNotBlank() } }.getOrNull()
+        }.toMutableSet()
+        preset.rules.forEachIndexed { index, model ->
+            val entry = "$importId:$index"
+            val id = fingerprint(model)
+            if (entry in existingEntries || !seen.add(id)) {
+                skipped++
+                return@forEachIndexed
+            }
+            existingEntries.add(entry)
+            result += RuleEntity(
+                name = model.name,
+                enabled = model.switch,
+                outbound = when (model.outbound) {
+                    "direct" -> -1L
+                    "block" -> -2L
+                    else -> 0L // currentSelected is resolved by the caller/profile context
+                },
+                config = JSONObject().apply {
+                    put("karing_preset_entry", entry)
+                    put(KARING_CONFIG_KEY, JSONObject().apply { put("import_id", importId) })
+                }.toString(),
+            ).apply { applyKaringRule(model) }
+        }
+        return KaringImportResult(current + result, skipped)
+    }
+
+    private fun validRemote(value: String): Boolean = try {
+        val uri = URI(value)
+        uri.scheme.equals("https", true) && !uri.host.isNullOrBlank() &&
+            (uri.path.endsWith(".srs", true) || uri.path.endsWith(".json", true))
+    } catch (_: Exception) { false }
+
+    private fun fingerprint(model: KaringRuleModel): String = listOf(
+        model.ruleSetBuildIn, model.ruleSetItems.map { it.url }, model.packageNames,
+        model.processName, model.processPath, model.processDir, model.domainSuffix,
+        model.domain, model.domainKeyword, model.domainRegex, model.ipCidr, model.networkType,
+        model.network, model.sourceIpCidr, model.sourcePorts, model.wifiSsid, model.wifiBssid, model.port, model.portRange,
+        model.protocol, model.or, model.outbound, model.rawPresetJson,
+    ).toString()
+}
+
+enum class KaringImportPolicy { APPEND, REPLACE_IMPORTED }

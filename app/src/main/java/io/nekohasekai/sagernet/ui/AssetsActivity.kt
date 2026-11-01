@@ -11,6 +11,9 @@ import androidx.core.view.isInvisible
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import io.nekohasekai.sagernet.assets.KaringResourceManager
+import io.nekohasekai.sagernet.assets.KaringRuleFamily
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.databinding.LayoutAssetItemBinding
@@ -21,7 +24,6 @@ import libcore.Libcore
 import moe.matsuri.nb4a.utils.Util
 import org.json.JSONObject
 import java.io.File
-import java.io.FileWriter
 import java.util.*
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -65,14 +67,16 @@ class AssetsActivity : ThemedActivity() {
                 recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder
             ): Int {
                 val index = viewHolder.bindingAdapterPosition
-                if (index < 2) return 0
+                if (index == RecyclerView.NO_POSITION || index < 3) return 0
                 return super.getSwipeDirs(recyclerView, viewHolder)
             }
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                 val index = viewHolder.bindingAdapterPosition
+                if (index < 3 || index >= adapter.assets.size) return
+                val file = adapter.assets[index]
                 adapter.remove(index)
-                undoManager.remove(index to (viewHolder as AssetHolder).file)
+                undoManager.remove(index to file)
             }
 
             override fun onMove(
@@ -104,28 +108,34 @@ class AssetsActivity : ThemedActivity() {
                 .substringAfterLast('/')
                 .substringAfter(':')
 
-            if (!fileName.endsWith(".db")) {
+            if (!fileName.endsWith(".db") || fileName != File(fileName).name || fileName == ".db") {
                 alert(getString(R.string.route_not_asset, fileName)).show()
                 return@registerForActivityResult
             }
             val filesDir = getExternalFilesDir(null) ?: filesDir
 
             runOnDefaultDispatcher {
-                val outFile = File(filesDir, fileName).apply {
-                    parentFile?.mkdirs()
-                }
-
-                contentResolver.openInputStream(file)?.use(outFile.outputStream())
-
-                File(outFile.parentFile, outFile.nameWithoutExtension + ".version.txt").apply {
-                    if (isFile) delete()
-                    createNewFile()
-                    val fw = FileWriter(this)
-                    fw.write("Custom")
-                    fw.close()
-                }
-
-                adapter.reloadAssets()
+                runCatching {
+                    val outFile = File(filesDir, fileName)
+                    require(!outFile.exists()) { getString(R.string.karing_asset_exists, fileName) }
+                    val temp = File.createTempFile("asset-", ".part", filesDir)
+                    try {
+                        val input = contentResolver.openInputStream(file) ?: error("Cannot open selected file")
+                        input.use { source -> temp.outputStream().use { source.copyTo(it) } }
+                        // createNewFile prevents a simultaneous import from replacing an existing asset.
+                        check(outFile.createNewFile()) { getString(R.string.karing_asset_exists, fileName) }
+                        try {
+                            check(temp.renameTo(outFile)) { "Cannot install selected file" }
+                        } catch (e: Exception) {
+                            outFile.delete()
+                            throw e
+                        }
+                        File(outFile.parentFile, outFile.nameWithoutExtension + ".version.txt").writeText("Custom")
+                    } finally {
+                        temp.delete()
+                    }
+                    adapter.reloadAssets()
+                }.onFailure { error -> onMainDispatcher { alert(error.readableMessage).tryToShow() } }
             }
 
         }
@@ -154,12 +164,11 @@ class AssetsActivity : ThemedActivity() {
             val filesDir = getExternalFilesDir(null) ?: filesDir
             val files = filesDir.listFiles()
                 ?.filter { it.isFile && it.name.endsWith(".db") && it.name !in assetNames }
-            assets.clear()
-            assets.add(File(filesDir, "geoip.db"))
-            assets.add(File(filesDir, "geosite.db"))
-            if (files != null) assets.addAll(files)
-
+            val refreshed = listOf(File(filesDir, "geoip.db"), File(filesDir, "geosite.db"),
+                File(filesDir, "karing-acl-card")) + files.orEmpty().sortedBy { it.name }
             layout.refreshLayout.post {
+                assets.clear()
+                assets.addAll(refreshed)
                 notifyDataSetChanged()
             }
         }
@@ -205,6 +214,29 @@ class AssetsActivity : ThemedActivity() {
 
         fun bind(file: File) {
             this.file = file
+            binding.root.setOnClickListener(null)
+            binding.subscriptionUpdateProgress.isInvisible = true
+            if (file.name == "karing-acl-card") {
+                binding.assetName.setText(R.string.karing_acl_resources)
+                binding.assetStatus.setText(R.string.karing_acl_loading)
+                binding.rulesUpdate.isInvisible = true
+                binding.root.setOnClickListener { showAclResources() }
+                runOnDefaultDispatcher {
+                    val counts = runCatching {
+                        KaringResourceManager(applicationContext).list(KaringRuleFamily.ACL).let { list ->
+                            list.count { it.bundled } to list.count { it.valid }
+                        }
+                    }
+                    onMainDispatcher {
+                        if (this.file != file) return@onMainDispatcher
+                        binding.assetStatus.text = counts.fold(
+                            { (bundled, valid) -> getString(R.string.karing_acl_status, bundled, valid) },
+                            { it.readableMessage }
+                        )
+                    }
+                }
+                return
+            }
 
             binding.assetName.text = file.name
             val versionFile = File(file.parentFile, "${file.nameWithoutExtension}.version.txt")
@@ -253,6 +285,48 @@ class AssetsActivity : ThemedActivity() {
 
         }
 
+    }
+
+    private fun showAclResources() {
+        runOnDefaultDispatcher {
+            runCatching {
+                val manager = KaringResourceManager(applicationContext)
+                manager to manager.list(KaringRuleFamily.ACL)
+            }.onSuccess { (manager, entries) ->
+                onMainDispatcher {
+                    if (isFinishing || isDestroyed) return@onMainDispatcher
+                    if (entries.isEmpty()) {
+                        alert(getString(R.string.karing_acl_empty)).show()
+                        return@onMainDispatcher
+                    }
+                    val labels = entries.map { entry ->
+                        val status = when {
+                            entry.valid -> getString(R.string.karing_acl_ready)
+                            entry.bundled -> getString(R.string.karing_acl_bundled)
+                            else -> getString(R.string.karing_acl_unavailable)
+                        }
+                        "${entry.code} · $status"
+                    }.toTypedArray()
+                    MaterialAlertDialogBuilder(this).setTitle(R.string.karing_acl_resources)
+                        .setItems(labels) { _, which ->
+                            val entry = entries[which]
+                            if (!entry.bundled && !entry.valid) {
+                                alert(getString(R.string.karing_acl_unavailable)).show()
+                            } else runOnDefaultDispatcher {
+                                runCatching { manager.ensure(KaringRuleFamily.ACL, entry.code) }
+                                    .onSuccess {
+                                        onMainDispatcher {
+                                            snackbar(getString(R.string.karing_acl_installed, entry.code)).show()
+                                            adapter.reloadAssets()
+                                        }
+                                    }.onFailure { error ->
+                                        onMainDispatcher { alert(error.readableMessage).tryToShow() }
+                                    }
+                            }
+                        }.setNegativeButton(android.R.string.cancel, null).show()
+                }
+            }.onFailure { error -> onMainDispatcher { alert(error.readableMessage).tryToShow() } }
+        }
     }
 
     private val rulesProviders = listOf(

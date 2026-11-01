@@ -1,10 +1,12 @@
 package io.nekohasekai.sagernet.ui
 
+import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import androidx.appcompat.widget.Toolbar
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -12,6 +14,7 @@ import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.database.KaringPresetImporter
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.RuleEntity
@@ -28,6 +31,26 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
     lateinit var ruleListView: RecyclerView
     lateinit var ruleAdapter: RuleAdapter
     lateinit var undoManager: UndoSnackbarManager<RuleEntity>
+
+    private val selectProfile = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val pending = pendingOutboundRule
+        pendingOutboundRule = null
+        if (result.resultCode == Activity.RESULT_OK) {
+            val id = result.data?.getLongExtra(ProfileSelectActivity.EXTRA_PROFILE_ID, 0L) ?: 0L
+            if (id > 0L && pending != null) saveOutbound(pending, id)
+        }
+    }
+    private var pendingOutboundRule: RuleEntity? = null
+
+    private fun saveOutbound(rule: RuleEntity, outbound: Long) {
+        runOnDefaultDispatcher {
+            val current = SagerDatabase.rulesDao.getById(rule.id) ?: return@runOnDefaultDispatcher
+            current.outbound = outbound
+            ProfileManager.updateRule(current)
+        }
+    }
 
     /** 问题1-B：切回路由页时列表回顶部 */
     override fun resetScrollState() {
@@ -73,8 +96,10 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                 val index = viewHolder.bindingAdapterPosition
+                if (index !in 1..ruleAdapter.ruleList.size || viewHolder !is RuleAdapter.RuleHolder) return
+                val rule = ruleAdapter.ruleList[index - 1]
                 ruleAdapter.remove(index)
-                undoManager.remove(index to (viewHolder as RuleAdapter.RuleHolder).rule)
+                undoManager.remove(index to rule)
             }
 
             override fun onMove(
@@ -111,6 +136,12 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             R.id.action_new_route -> {
                 startActivity(Intent(context, RouteSettingsActivity::class.java))
             }
+            R.id.action_import_cn_preset -> {
+                MaterialAlertDialogBuilder(activity).setTitle(R.string.karing_import_cn)
+                    .setMessage(R.string.karing_import_confirm)
+                    .setPositiveButton(android.R.string.ok) { _, _ -> importChinaPreset() }
+                    .setNegativeButton(android.R.string.cancel, null).show()
+            }
             R.id.action_reset_route -> {
                 MaterialAlertDialogBuilder(activity).setTitle(R.string.confirm)
                     .setMessage(R.string.clear_profiles_message)
@@ -129,6 +160,40 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             }
         }
         return true
+    }
+
+    private fun importChinaPreset() {
+        val appContext = requireContext().applicationContext
+        runOnDefaultDispatcher {
+            runCatching {
+                val json = appContext.assets.open("karing/cn.json").bufferedReader().use { it.readText() }
+                val preset = KaringPresetImporter.parse(json)
+                var added = 0
+                var skipped = 0
+                SagerDatabase.instance.runInTransaction {
+                    val dao = SagerDatabase.rulesDao
+                    val existing = dao.allRules()
+                    val plan = KaringPresetImporter.importInto(existing, preset, "karing-cn-v1")
+                    val newRules = plan.rules.drop(existing.size)
+                    var order = dao.nextOrder() ?: 1L
+                    newRules.forEach { rule ->
+                        rule.userOrder = order++
+                        dao.createRule(rule)
+                    }
+                    added = newRules.size
+                    skipped = plan.skippedDuplicates
+                }
+                added to skipped
+            }.onSuccess { (added, skipped) ->
+                ruleAdapter.reload()
+                onMainDispatcher {
+                    needReload()
+                    activity.snackbar(getString(R.string.karing_import_result, added, skipped)).show()
+                }
+            }.onFailure { error ->
+                onMainDispatcher { activity.alert(error.readableMessage).tryToShow() }
+            }
+        }
     }
 
     inner class RuleAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>(), ProfileManager.RuleListener, UndoSnackbarManager.Interface<RuleEntity> {
@@ -182,30 +247,31 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             return ruleList[position - 1].id
         }
 
-        private val updated = HashSet<RuleEntity>()
+        private var moved = false
         fun move(from: Int, to: Int) {
-            val first = ruleList[from - 1]
-            var previousOrder = first.userOrder
-            val (step, range) = if (from < to) Pair(1, from - 1 until to - 1) else Pair(-1, to downTo from - 1)
-            for (i in range) {
-                val next = ruleList[i + step]
-                val order = next.userOrder
-                next.userOrder = previousOrder
-                previousOrder = order
-                ruleList[i] = next
-                updated.add(next)
-            }
-            first.userOrder = previousOrder
-            ruleList[to - 1] = first
-            updated.add(first)
+            if (from !in 1..ruleList.size || to !in 1..ruleList.size || from == to) return
+            val orders = ruleList.map { it.userOrder }.sorted()
+            val item = ruleList.removeAt(from - 1)
+            ruleList.add(to - 1, item)
+            ruleList.forEachIndexed { index, rule -> rule.userOrder = orders[index] }
+            moved = true
             notifyItemMoved(from, to)
         }
 
-        fun commitMove() = runOnDefaultDispatcher {
-            if (updated.isNotEmpty()) {
-                SagerDatabase.rulesDao.updateRules(updated.toList())
-                updated.clear()
-                needReload()
+        fun commitMove() {
+            if (!moved) return
+            moved = false
+            val orders = ruleList.map { it.id to it.userOrder }
+            runOnDefaultDispatcher {
+                SagerDatabase.instance.runInTransaction {
+                    orders.forEach { (id, order) ->
+                        SagerDatabase.rulesDao.getById(id)?.let { current ->
+                            current.userOrder = order
+                            SagerDatabase.rulesDao.updateRule(current)
+                        }
+                    }
+                }
+                onMainDispatcher { needReload() }
             }
         }
 
@@ -237,24 +303,23 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
         }
 
         override suspend fun onUpdated(rule: RuleEntity) {
-            val index = ruleList.indexOfFirst { it.id == rule.id }
-            if (index == -1) return
             ruleListView.post {
-                ruleList[index] = rule
-                ruleAdapter.notifyItemChanged(index + 1)
+                val index = ruleList.indexOfFirst { it.id == rule.id }
+                if (index >= 0) {
+                    ruleList[index] = rule
+                    ruleAdapter.notifyItemChanged(index + 1)
+                }
                 needReload()
             }
         }
 
         override suspend fun onRemoved(ruleId: Long) {
-            val index = ruleList.indexOfFirst { it.id == ruleId }
-            if (index == -1) {
-                onMainDispatcher {
-                    needReload()
+            ruleListView.post {
+                val index = ruleList.indexOfFirst { it.id == ruleId }
+                if (index >= 0) {
+                    ruleList.removeAt(index)
+                    ruleAdapter.notifyItemRemoved(index + 1)
                 }
-            } else ruleListView.post {
-                ruleList.removeAt(index)
-                ruleAdapter.notifyItemRemoved(index + 1)
                 needReload()
             }
         }
@@ -288,7 +353,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             fun bind(ruleEntity: RuleEntity) {
                 rule = ruleEntity
                 profileName.text = rule.displayName()
-                profileType.text = rule.mkSummary()
+                profileType.text = ""
                 routeOutbound.text = rule.displayOutbound()
 
                 // 根据路由类型设置文字颜色
@@ -300,17 +365,62 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 }
                 routeOutbound.setTextColor(ContextCompat.getColor(itemView.context, colorRes))
 
-                itemView.setOnClickListener(null)
-                itemView.isClickable = false
-                itemView.isFocusable = false
+                profileName.setOnClickListener {
+                    val input = EditText(it.context).apply {
+                        setSingleLine(true)
+                        setText(rule.name)
+                        selectAll()
+                        setPadding(48, 0, 48, 0)
+                    }
+                    MaterialAlertDialogBuilder(it.context)
+                        .setTitle(R.string.route_name)
+                        .setView(input)
+                        .setPositiveButton(android.R.string.ok) { _, _ ->
+                            val name = input.text.toString().trim()
+                            if (name.isNotEmpty()) {
+                                val id = rule.id
+                                runOnDefaultDispatcher {
+                                    SagerDatabase.rulesDao.getById(id)?.let { current ->
+                                        current.name = name
+                                        ProfileManager.updateRule(current)
+                                    }
+                                }
+                            }
+                        }.setNegativeButton(android.R.string.cancel, null).show()
+                }
+                routeOutbound.setOnClickListener {
+                    val labels = arrayOf(
+                        it.context.getString(R.string.route_proxy),
+                        it.context.getString(R.string.route_bypass),
+                        it.context.getString(R.string.route_block),
+                        it.context.getString(R.string.select_profile)
+                    )
+                    MaterialAlertDialogBuilder(it.context).setTitle(R.string.cag_route)
+                        .setItems(labels) { _, which ->
+                            when (which) {
+                                0 -> saveOutbound(rule, 0L)
+                                1 -> saveOutbound(rule, -1L)
+                                2 -> saveOutbound(rule, -2L)
+                                3 -> { pendingOutboundRule = rule; selectProfile.launch(Intent(it.context, ProfileSelectActivity::class.java).apply {
+                                    ProfileManager.getProfile(rule.outbound)?.let { selected -> putExtra(ProfileSelectActivity.EXTRA_SELECTED, selected) }
+                                })
+                                }
+                            }
+                        }.show()
+                }
+                itemView.setOnClickListener {
+                    editButton.performClick()
+                }
+                itemView.isClickable = true
+                itemView.isFocusable = true
                 enableSwitch.setOnCheckedChangeListener(null)
                 enableSwitch.isChecked = rule.enabled
                 enableSwitch.setOnCheckedChangeListener { _, isChecked ->
+                    val id = rule.id
                     runOnDefaultDispatcher {
-                        rule.enabled = isChecked
-                        SagerDatabase.rulesDao.updateRule(rule)
-                        onMainDispatcher {
-                            needReload()
+                        SagerDatabase.rulesDao.getById(id)?.let { current ->
+                            current.enabled = isChecked
+                            ProfileManager.updateRule(current)
                         }
                     }
                 }

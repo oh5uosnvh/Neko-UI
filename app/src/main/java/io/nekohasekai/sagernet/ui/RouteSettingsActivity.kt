@@ -29,6 +29,10 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.RuleEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.database.hasKaringEnvelope
+import io.nekohasekai.sagernet.database.toKaringRule
+import io.nekohasekai.sagernet.database.applyKaringRule
+import io.nekohasekai.sagernet.database.KaringRuleSetItem
 import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
@@ -75,10 +79,37 @@ class RouteSettingsActivity(
             -2L -> 2
             else -> OutboundPreference.VALUE_SELECT_PROFILE.toInt()
         }
-        DataStore.routePackages = packages.joinToString("\n")
+        val ext = if (hasKaringEnvelope()) RouteRuleExtension.from(this) else RouteRuleExtension(logic = "and")
+        if (hasKaringEnvelope()) {
+            val model = toKaringRule()
+            DataStore.routeDomain = model.domain.joinToString("\n")
+            DataStore.routeIP = ""
+            DataStore.routePort = model.port.joinToString("\n")
+            DataStore.routeSourcePort = model.sourcePorts.joinToString("\n")
+            DataStore.routeNetwork = model.network.joinToString("\n")
+            DataStore.routeSource = model.sourceIpCidr.joinToString("\n")
+            DataStore.routeProtocol = model.protocol.joinToString("\n")
+            DataStore.routeRuleset = ""
+        }
+        DataStore.routePackages = (if (hasKaringEnvelope()) ext.packages else packages.toList()).joinToString("\n")
+        // The picker owns the persisted package set; manual IDs are merged only during this edit.
+        DataStore.routePackagesManual = ""
+        DataStore.routeLogic = ext.logic
+        DataStore.routeBuiltinRulesets = ext.builtin.joinToString("\n")
+        DataStore.routeExternalRulesets = ext.external.joinToString("\n")
+        DataStore.routeDomainSuffix = ext.domainSuffix.joinToString("\n")
+        DataStore.routeDomainKeyword = ext.domainKeyword.joinToString("\n")
+        DataStore.routeDomainRegex = ext.domainRegex.joinToString("\n")
+        DataStore.routeIpCidr = ext.ipCidr.joinToString("\n")
+        DataStore.routeNetworkType = ext.networkType.joinToString("\n")
+        DataStore.routeWifiSsid = ext.wifiSsid.joinToString("\n")
+        DataStore.routeWifiBssid = ext.wifiBssid.joinToString("\n")
+        DataStore.routePortRange = ext.portRanges.joinToString("\n")
     }
 
     fun RuleEntity.serialize() {
+        val wasKaring = hasKaringEnvelope()
+        val model = if (wasKaring) toKaringRule() else null
         name = DataStore.routeName
         config = DataStore.serverConfig
         domains = DataStore.routeDomain
@@ -95,7 +126,47 @@ class RouteSettingsActivity(
             2 -> -2L
             else -> DataStore.routeOutboundRule
         }
-        packages = DataStore.routePackages.split("\n").filter { it.isNotBlank() }.toSet()
+        packages = (DataStore.routePackages + "\n" + DataStore.routePackagesManual).split("\n").map { it.trim() }.filter { it.isNotBlank() }.toSet()
+        val extraFields = listOf(DataStore.routeBuiltinRulesets, DataStore.routeExternalRulesets,
+            DataStore.routeDomainSuffix, DataStore.routeDomainKeyword, DataStore.routeDomainRegex,
+            DataStore.routeIpCidr, DataStore.routeNetworkType, DataStore.routeWifiSsid,
+            DataStore.routeWifiBssid, DataStore.routePortRange).any { it.isNotBlank() }
+        if (wasKaring) {
+            require(hasKaringEnvelope()) { "The Karing envelope was removed from custom config" }
+            require(DataStore.routeIP.isBlank() && DataStore.routeRuleset.isBlank()) {
+                "Legacy dst ip and rule-set fields cannot be combined with Karing rules"
+            }
+            val previous = model!!
+            applyKaringRule(previous.copy(
+                or = DataStore.routeLogic == "or",
+                ruleSetBuildIn = DataStore.routeBuiltinRulesets.linesClean(),
+                ruleSetItems = DataStore.routeExternalRulesets.linesClean().map { url ->
+                    previous.ruleSetItems.firstOrNull { it.url == url } ?: KaringRuleSetItem(url)
+                },
+                packageNames = packages.toList(), domain = DataStore.routeDomain.linesClean(),
+                domainSuffix = DataStore.routeDomainSuffix.linesClean(),
+                domainKeyword = DataStore.routeDomainKeyword.linesClean(),
+                domainRegex = DataStore.routeDomainRegex.linesClean(), ipCidr = DataStore.routeIpCidr.linesClean(),
+                networkType = DataStore.routeNetworkType.linesClean(), network = DataStore.routeNetwork.linesClean(),
+                sourceIpCidr = DataStore.routeSource.linesClean(), sourcePorts = DataStore.routeSourcePort.linesClean(),
+                wifiSsid = DataStore.routeWifiSsid.linesClean(), wifiBssid = DataStore.routeWifiBssid.linesClean(),
+                protocol = DataStore.routeProtocol.linesClean(), port = DataStore.routePort.linesClean(),
+                portRange = DataStore.routePortRange.linesClean(),
+            ))
+        } else if (extraFields || DataStore.routeLogic == "or") {
+            require((DataStore.editingId == 0L || domains.isBlank()) && ip.isBlank() && ruleset.isBlank() && sourcePort.isBlank() && config.isBlank()) {
+                "Legacy fields or custom config cannot be combined with Karing fields; keep this rule legacy or create a separate Karing rule"
+            }
+            applyKaringRule(toKaringRule().copy(
+                domain = DataStore.routeDomain.linesClean(), domainSuffix = DataStore.routeDomainSuffix.linesClean(),
+                or = DataStore.routeLogic == "or", ruleSetBuildIn = DataStore.routeBuiltinRulesets.linesClean(),
+                ruleSetItems = DataStore.routeExternalRulesets.linesClean().map { KaringRuleSetItem(it) },
+                domainKeyword = DataStore.routeDomainKeyword.linesClean(),
+                domainRegex = DataStore.routeDomainRegex.linesClean(), ipCidr = DataStore.routeIpCidr.linesClean(),
+                networkType = DataStore.routeNetworkType.linesClean(), wifiSsid = DataStore.routeWifiSsid.linesClean(),
+                wifiBssid = DataStore.routeWifiBssid.linesClean(), portRange = DataStore.routePortRange.linesClean(),
+            ))
+        }
 
         if (DataStore.editingId == 0L) {
             enabled = true
@@ -274,6 +345,7 @@ class RouteSettingsActivity(
         }
 
         val editingId = DataStore.editingId
+        try {
         if (editingId == 0L) {
             if (intent.hasExtra(EXTRA_PACKAGE_NAME)) {
                 setResult(RESULT_OK, Intent())
@@ -287,6 +359,14 @@ class RouteSettingsActivity(
                 return
             }
             ProfileManager.updateRule(entity.apply { serialize() })
+        }
+        } catch (error: IllegalArgumentException) {
+            onMainDispatcher {
+                MaterialAlertDialogBuilder(this@RouteSettingsActivity)
+                    .setTitle(R.string.error_title).setMessage(error.message)
+                    .setPositiveButton(android.R.string.ok, null).show()
+            }
+            return
         }
         finish()
 

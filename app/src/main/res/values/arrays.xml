@@ -716,4 +716,13 @@
         <item>unsafe-raw</item>
     </string-array>
 
+    <string-array name="route_logic_entries">
+        <item>OR</item>
+        <item>AND</item>
+    </string-array>
+    <string-array name="route_logic_values">
+        <item>or</item>
+        <item>and</item>
+    </string-array>
+
 </resources>
