@@ -9,7 +9,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [28])
+@Config(sdk = [28], application = android.app.Application::class)
 class KaringRuleStorageTest {
     @Test fun presetDefaultsToOrButExplicitAndIsPreserved() {
         val preset = KaringRuleJson.parsePreset("""{"rules":[{"name":"default"},{"name":"explicit","or":false}]}""")
