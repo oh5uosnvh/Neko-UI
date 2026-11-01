@@ -18,10 +18,8 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
-// x365 wire protocol — verified against a live capture of the official client
-// (1.0.63, 2026-10) tunnelled over XHTTP/HTTP-2, see capture.md.
-//
-// The handshake is UNCHANGED from the original 365VPN reverse engineering:
+// X365 wire protocol tunneled over XHTTP/HTTP-2.
+// The request handshake has the following byte layout:
 //
 //	client -> server (first h2 DATA payload on a fresh stream)
 //	  [0:4]   magic "X365"        (0x58 0x33 0x36 0x35)
@@ -32,12 +30,9 @@ import (
 //	  [24]    atyp                (0x01 IPv4 / 0x02 domain[len] / 0x03 IPv6)
 //	  [25:]   address
 //
-// Live sample (DATA len=0x1d=29, stream 1):
-//
-//	58 33 36 35 01 01 e5 9d 60 ad 31 83 46 4e a1 74 04 98 d1 a3 a5 4a 14 66 01 5b6c3869
-//	X365          v  c  uuid .......................................  port=5222 atyp=IPv4 addr
-//
-//	4 + 1 + 1 + 16 + 2 + 1 + 4 == 29  (matches the h2 frame length exactly)
+// A request with an IPv4 destination has a 29-byte header:
+// 4-byte magic, 1-byte version, 1-byte command, 16-byte UUID,
+// 2-byte port, 1-byte address type and 4-byte address.
 //
 //	server -> client: first 4 bytes must equal "X365"; the 5th is consumed
 //	too (it is a version/status byte) so the relayed stream stays aligned.

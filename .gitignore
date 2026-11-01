@@ -8,6 +8,10 @@ build/
 .externalNativeBuild
 .cxx
 local.properties
+/release.keystore
+/mg-sign/
+/mg/
+/release/
 /app/libs/
 /app/src/main/assets/sing-box
 /service_account_credentials.json

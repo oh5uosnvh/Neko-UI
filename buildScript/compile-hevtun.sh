@@ -17,8 +17,7 @@
 # Optional environment overrides:
 #   HEV_SRC     path to a hev-socks5-tunnel checkout
 #               (default: <repo root>/hev-socks5-tunnel submodule)
-#   HEV_VERSION tag used when initializing the submodule is not possible
-#               (default: 2.17.1)
+# An override must be an already initialized source checkout.
 set -o errexit
 set -o pipefail
 set -o nounset
@@ -27,33 +26,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/init/env_ndk.sh"
 
-HEV_VERSION="${HEV_VERSION:-2.17.1}"
 HEV_SRC="${HEV_SRC:-$REPO_DIR/hev-socks5-tunnel}"
 ABIS="armeabi-v7a arm64-v8a x86 x86_64"
 OUT_DIR="$REPO_DIR/app/src/main/jniLibs"
 BUILD_DIR="$REPO_DIR/.hev-build"
 
 if [ ! -f "$HEV_SRC/Android.mk" ]; then
-    if [ -e "$REPO_DIR/.git" ] || [ -d "$REPO_DIR/.git" ]; then
-        echo ">> initializing hev-socks5-tunnel submodule"
+    if [ "$HEV_SRC" = "$REPO_DIR/hev-socks5-tunnel" ] && git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
         git -C "$REPO_DIR" submodule update --init --recursive hev-socks5-tunnel
-    else
-        echo ">> cloning hev-socks5-tunnel $HEV_VERSION into $HEV_SRC"
-        mkdir -p "$(dirname "$HEV_SRC")"
-        git clone --branch "$HEV_VERSION" --depth 1 --recursive \
-            https://github.com/heiher/hev-socks5-tunnel "$HEV_SRC"
     fi
 fi
+if [ ! -f "$HEV_SRC/Android.mk" ] || [ ! -f "$HEV_SRC/src/core/include/hev-socks5-server.h" ]; then
+    echo "Missing initialized hev source at $HEV_SRC (including nested submodules)" >&2
+    exit 1
+fi
+HEV_SRC="$(cd "$HEV_SRC" && pwd)"
 
-# Persistent obj/libs dirs so ndk-build stays incremental between runs.
+# Avoid stale objects when the source, flags or toolchain change.
+rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 pushd "$BUILD_DIR" > /dev/null
 
-if [ ! -e jni/hev-socks5-tunnel ]; then
-    mkdir -p jni
-    ln -sfn "$HEV_SRC" jni/hev-socks5-tunnel
-    echo 'include $(call all-subdir-makefiles)' > jni/Android.mk
-fi
+mkdir -p jni
+ln -sfn "$HEV_SRC" jni/hev-socks5-tunnel
+echo 'include $(call all-subdir-makefiles)' > jni/Android.mk
 
 "$ANDROID_NDK_HOME/ndk-build" \
     NDK_PROJECT_PATH=. \

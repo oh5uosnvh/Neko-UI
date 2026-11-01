@@ -1,30 +1,17 @@
-#!/bin/bash
-
-set -e
-
-DIR=app/src/main/assets/sing-box
-rm -rf $DIR
-mkdir -p $DIR
-cd $DIR
-
-get_latest_release() {
-  curl --silent "https://api.github.com/repos/$1/releases/latest" | # Get latest release from GitHub api
-    grep '"tag_name":' |                                            # Get tag line
-    sed -E 's/.*"([^"]+)".*/\1/'                                    # Pluck JSON value
-}
-
-####
-# 2026-09-09: GitHub API rate-limit on CI runners returns empty tag -> 404 download.
-# Pin versions instead of querying the API (geoip.db/geosite.db update rarely).
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+DIR="$ROOT/app/src/main/assets/sing-box"
+mkdir -p "$DIR"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+cd "$tmp"
 VERSION_GEOIP=20260812
-echo VERSION_GEOIP=$VERSION_GEOIP
-echo -n $VERSION_GEOIP > geoip.version.txt
-curl -fLSsO https://github.com/SagerNet/sing-geoip/releases/download/$VERSION_GEOIP/geoip.db
-xz -9 geoip.db
-
-####
-VERSION_GEOSITE=20260908094002
-echo VERSION_GEOSITE=$VERSION_GEOSITE
-echo -n $VERSION_GEOSITE > geosite.version.txt
-curl -fLSsO https://github.com/SagerNet/sing-geosite/releases/download/$VERSION_GEOSITE/geosite.db
-xz -9 geosite.db
+VERSION_GEOSITE=20261030132534
+curl -fLSs -o geoip.db "https://github.com/SagerNet/sing-geoip/releases/download/$VERSION_GEOIP/geoip.db"
+curl -fLSs -o geosite.db "https://github.com/SagerNet/sing-geosite/releases/download/$VERSION_GEOSITE/geosite.db"
+printf '%s\n' 'd8f4d22abee199b73c019df267e8dc649e868da3b130753640aa9b05d11040c0  geoip.db' '25ad53c7031b7210379d5c7f327b0a3bd17f74b270ea136c20dfd5ca0f21d226  geosite.db' | sha256sum -c -
+printf '%s' "$VERSION_GEOIP" > geoip.version.txt
+printf '%s' "$VERSION_GEOSITE" > geosite.version.txt
+xz -9 geoip.db geosite.db
+cp geoip.db.xz geosite.db.xz geoip.version.txt geosite.version.txt "$DIR/"

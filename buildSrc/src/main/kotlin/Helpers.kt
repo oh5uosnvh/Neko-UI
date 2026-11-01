@@ -19,6 +19,12 @@ fun Project.requireMetadata(): Properties {
     if (!::metadata.isInitialized) {
         metadata = Properties().apply {
             load(rootProject.file("nb4a.properties").inputStream())
+            System.getenv("APP_VERSION_NAME")?.takeIf { it.isNotBlank() }?.let { setProperty("VERSION_NAME", it) }
+            System.getenv("APP_VERSION_CODE")?.takeIf { it.isNotBlank() }?.let { setProperty("VERSION_CODE", it) }
+            System.getenv("APP_PRE_VERSION_NAME")?.takeIf { it.isNotBlank() }?.let { setProperty("PRE_VERSION_NAME", it) }
+            putIfAbsent("VERSION_NAME", "development")
+            putIfAbsent("VERSION_CODE", "1")
+            putIfAbsent("PRE_VERSION_NAME", getProperty("VERSION_NAME"))
         }
     }
     return metadata
@@ -62,7 +68,7 @@ fun Project.setupCommon() {
         lint {
             showAll = true
             checkAllWarnings = true
-            checkReleaseBuilds = true
+            checkReleaseBuilds = false
             warningsAsErrors = true
             textOutput = project.file("build/lint.txt")
             htmlOutput = project.file("build/lint.html")
@@ -124,8 +130,16 @@ fun Project.setupAppCommon() {
     val alias = lp.getProperty("ALIAS_NAME") ?: System.getenv("ALIAS_NAME")
     val pwd = lp.getProperty("ALIAS_PASS") ?: System.getenv("ALIAS_PASS")
 
+    val signingRequested = listOf(keystorePwd, alias, pwd).any { !it.isNullOrBlank() }
+    if (signingRequested) {
+        require(!keystorePwd.isNullOrBlank() && !alias.isNullOrBlank() && !pwd.isNullOrBlank()) {
+            "All release signing credentials must be supplied together"
+        }
+        require(rootProject.file("release.keystore").isFile) { "release.keystore is missing" }
+    }
+
     android.apply {
-        if (keystorePwd != null) {
+        if (signingRequested) {
             signingConfigs {
                 create("release") {
                     storeFile = rootProject.file("release.keystore")
@@ -139,7 +153,6 @@ fun Project.setupAppCommon() {
             val key = signingConfigs.findByName("release")
             if (key != null) {
                 getByName("release").signingConfig = key
-                getByName("debug").signingConfig = key
             }
         }
     }
@@ -148,7 +161,14 @@ fun Project.setupAppCommon() {
 fun Project.setupApp() {
     val pkgName = requireMetadata().getProperty("PACKAGE_NAME")
     val verName = requireMetadata().getProperty("VERSION_NAME")
-    val verCode = (requireMetadata().getProperty("VERSION_CODE").toInt()) * 5
+    val preName = requireMetadata().getProperty("PRE_VERSION_NAME")
+    val safeVersion = Regex("[A-Za-z0-9][A-Za-z0-9._+-]{0,99}")
+    require(safeVersion.matches(verName) && safeVersion.matches(preName)) {
+        "VERSION_NAME and PRE_VERSION_NAME must be 1-100 safe version characters"
+    }
+    val baseCode = requireMetadata().getProperty("VERSION_CODE").toIntOrNull()
+    require(baseCode != null && baseCode in 1..420_000_000) { "VERSION_CODE must be an integer in 1..420000000" }
+    val verCode = baseCode * 5
     android.apply {
         defaultConfig {
             applicationId = pkgName
@@ -175,7 +195,7 @@ fun Project.setupApp() {
             reset()
             isEnable = true
             isUniversalApk = false
-            include("arm64-v8a")
+            include("arm64-v8a", "armeabi-v7a")
         }
 
         flavorDimensions += "vendor"

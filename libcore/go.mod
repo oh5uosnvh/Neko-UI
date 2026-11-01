@@ -101,13 +101,13 @@ replace github.com/sagernet/sing-box => ../../sing-box
 
 replace github.com/anytls/sing-anytls => ../../sing-anytls-shanlian
 
-// viewTurbo 魔改 SS (密码 #viewTurbo 后缀触发三段式私有握手)
+// ViewTurbo Shadowsocks transport.
 replace github.com/sagernet/sing-shadowsocks2 => ../../sing-shadowsocks2-vt
 
 // FastUP 魔改 trojan (key=sha224hex(md5hex(password‖mpw)), mpw 为开关)
 replace github.com/oh5uosnvh/fastup-mod => ../../fastup-mod
 
-// Oppa 轻量 TLS 隧道 (标准Go TLS + 明文密码 + SOCKS地址, NekoBoxYF 移植)
+// Oppa TLS tunnel.
 replace github.com/oh5uosnvh/oppa-mod => ../../oppa-mod
 
 replace github.com/sagernet/sing-vmess => github.com/starifly/sing-vmess v0.2.8-mod.1

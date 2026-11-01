@@ -1,28 +1,16 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-chmod -R 777 .build 2>/dev/null
-rm -rf .build 2>/dev/null
-
-if [ -z "$GOPATH" ]; then
-    GOPATH=$(go env GOPATH)
-fi
-
-# Install gomobile
-if [ ! -f "$GOPATH/bin/gomobile-matsuri" ]; then
-    git clone https://github.com/MatsuriDayo/gomobile.git
-    pushd gomobile
-	git checkout origin/master2
-    pushd cmd
-    pushd gomobile
-    go install -v
-    popd
-    pushd gobind
-    go install -v
-    popd
-    popd
-    rm -rf gomobile
-    mv "$GOPATH/bin/gomobile" "$GOPATH/bin/gomobile-matsuri"
-    mv "$GOPATH/bin/gobind" "$GOPATH/bin/gobind-matsuri"
-fi
-
-GOBIND=gobind-matsuri gomobile-matsuri init
+# Build a known gomobile revision in an isolated temporary checkout. Never trust
+# an existing unversioned executable from GOPATH/bin.
+GOMOBILE_COMMIT=17d6af34f6bd6d7e1e428e0c652c8b54a46bda4f
+GOPATH="${GOPATH:-$(go env GOPATH)}"
+export PATH="$GOPATH/bin:$PATH"
+mkdir -p "$GOPATH/bin"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+git clone --quiet https://github.com/MatsuriDayo/gomobile.git "$tmp/gomobile"
+git -C "$tmp/gomobile" checkout --quiet --detach "$GOMOBILE_COMMIT"
+(cd "$tmp/gomobile" && go build -trimpath -o "$GOPATH/bin/gomobile-matsuri" ./cmd/gomobile && go build -trimpath -o "$GOPATH/bin/gobind-matsuri" ./cmd/gobind)
+# Do not run gomobile init: this revision installs gobind@latest, which
+# introduces an unpinned tool and is unnecessary for Android bind without OpenAL.

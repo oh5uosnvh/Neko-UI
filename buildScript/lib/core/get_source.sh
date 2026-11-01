@@ -1,33 +1,31 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-source "buildScript/init/env.sh"
-ENV_NB4A=1
-source "buildScript/lib/core/get_source_env.sh"
-pushd ..
+# libcore/go.mod resolves ../../<dependency> to a sibling of this repository.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "$ROOT/buildScript/lib/core/get_source_env.sh"
+DEPS="$(dirname "$ROOT")"
 
-####
+checkout_dep() {
+  local name="$1" url="$2" commit="$3" dir="$DEPS/$1"
+  if [ ! -e "$dir" ]; then
+    git clone "$url" "$dir"
+  fi
+  if [ ! -d "$dir/.git" ]; then
+    echo "Not a Git checkout: $dir" >&2; exit 1
+  fi
+  if [ -n "$(git -C "$dir" status --porcelain)" ]; then
+    echo "Refusing to overwrite dirty dependency: $dir" >&2; exit 1
+  fi
+  git -C "$dir" cat-file -e "$commit^{commit}" 2>/dev/null || git -C "$dir" fetch origin "$commit"
+  git -C "$dir" checkout --detach "$commit"
+}
+checkout_dep sing-box https://github.com/starifly/sing-box.git "$COMMIT_SING_BOX"
+checkout_dep libneko https://github.com/starifly/libneko.git "$COMMIT_LIBNEKO"
 
-if [ ! -d "sing-box" ]; then
-  git clone --no-checkout https://github.com/starifly/sing-box.git
-fi
-pushd sing-box
-git checkout "$COMMIT_SING_BOX"
-popd
-
-####
-
-if [ ! -d "libneko" ]; then
-  git clone --no-checkout https://github.com/starifly/libneko.git
-fi
-pushd libneko
-git checkout "$COMMIT_LIBNEKO"
-popd
-
-####
-
-# Optional modules are staged by the release workflow under the paths used by go.mod.
-# The source repository itself contains no credentials or generated binaries.
-####
-
-popd
+for name in sing-anytls-shanlian sing-shadowsocks2-vt fastup-mod oppa-mod; do
+  if [ ! -f "$DEPS/$name/go.mod" ]; then
+    echo "Missing $DEPS/$name/go.mod; stage the pinned protocol modules as documented in README.md" >&2
+    exit 1
+  fi
+done

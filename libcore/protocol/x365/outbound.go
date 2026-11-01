@@ -22,9 +22,8 @@ import (
 // TypeX365 is the private protocol name of 365VPN (VLESS-derived handshake).
 const TypeX365 = "x365"
 
-// The official 1.0.63 Rust XHTTP client sends this exact UA. The upstream
-// sing-box transport defaults to a newer randomized Chrome UA, which the
-// observed efan server rejects with HTTP 403 before it reads any X365 bytes.
+// This user agent is required for compatibility with the XHTTP endpoint.
+// Keep the transmitted value stable.
 const efanXHTTPUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 func prepareX365Transport(t *option.V2RayTransportOptions) *option.V2RayTransportOptions {

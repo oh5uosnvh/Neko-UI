@@ -1479,10 +1479,9 @@ class ConfigurationFragment @JvmOverloads constructor(
      *
      * 宽度收缩到内容：最宽项只有四个汉字，面板宽 = 最宽行实测宽。
      * 不用 MATCH_PARENT 行宽 —— WRAP_CONTENT 父布局里它会被
-     * getChildMeasureSpec 放大成整屏可用宽（r211 的过宽根因）。
+     * getChildMeasureSpec 放大成整屏可用宽。
      * 行右溢出屏幕时整体左移，保证不裁边。
-     * 清空 = 确认后删除该分组全部节点（保留分组本身），与分组卡片
-     * action_clear 完全同一套文案与 GroupManager.clearGroup。
+     * 清空操作由共享撤销流程处理，保留分组并允许还原节点。
      */
     private fun showTabGroupMenu(anchor: View, group: ProxyGroup) {
         val context = requireContext()
