@@ -207,6 +207,9 @@ class AssetsActivity : ThemedActivity() {
     }
 
     val updating = AtomicInteger()
+    private var aclInstalling = false
+    private var aclCompleted = 0
+    private var aclTotal = 0
 
     inner class AssetHolder(val binding: LayoutAssetItemBinding) :
         RecyclerView.ViewHolder(binding.root) {
@@ -231,7 +234,11 @@ class AssetsActivity : ThemedActivity() {
             if (file.name == "karing-acl-card") {
                 binding.assetName.setText(R.string.karing_acl_resources)
                 binding.assetStatus.setText(R.string.karing_acl_loading)
-                binding.rulesUpdate.isInvisible = true
+                binding.rulesUpdate.isInvisible = aclInstalling
+                binding.rulesUpdate.setText(R.string.karing_acl_install_all)
+                binding.rulesUpdate.setOnClickListener { installAllAcl() }
+                binding.subscriptionUpdateProgress.isInvisible = !aclInstalling
+                if (aclInstalling) binding.assetStatus.text = getString(R.string.karing_acl_progress, aclCompleted, aclTotal)
                 binding.root.setOnClickListener { showAclResources() }
                 runOnDefaultDispatcher {
                     val counts = runCatching {
@@ -240,7 +247,7 @@ class AssetsActivity : ThemedActivity() {
                         }
                     }
                     onMainDispatcher {
-                        if (this@AssetHolder.file != file) return@onMainDispatcher
+                        if (this@AssetHolder.file != file || aclInstalling) return@onMainDispatcher
                         binding.assetStatus.text = counts.fold(
                             { (bundled, valid) -> getString(R.string.karing_acl_status, bundled, valid) },
                             { it.readableMessage }
@@ -270,6 +277,7 @@ class AssetsActivity : ThemedActivity() {
 
             binding.assetStatus.text = getString(R.string.route_asset_status, localVersion)
 
+            binding.rulesUpdate.setText(R.string.group_update)
             binding.rulesUpdate.isInvisible = file.name !in assetNames
             binding.rulesUpdate.setOnClickListener {
                 updating.incrementAndGet()
@@ -297,6 +305,45 @@ class AssetsActivity : ThemedActivity() {
 
         }
 
+    }
+
+    private fun installAllAcl() {
+        if (aclInstalling) return
+        aclInstalling = true
+        aclCompleted = 0
+        aclTotal = 0
+        adapter.reloadAssets()
+        runOnDefaultDispatcher {
+            val result = runCatching {
+                KaringResourceManager(applicationContext).installAll(KaringRuleFamily.ACL) { completed, total ->
+                    onMainDispatcher {
+                        aclCompleted = completed
+                        aclTotal = total
+                        val position = adapter.assets.indexOfFirst { it.name == "karing-acl-card" }
+                        val holder = layout.recyclerView.findViewHolderForAdapterPosition(position) as? AssetHolder
+                        if (holder?.file?.name == "karing-acl-card") {
+                            holder.binding.assetStatus.text = getString(R.string.karing_acl_progress, completed, total)
+                        }
+                    }
+                }
+            }
+            onMainDispatcher {
+                aclInstalling = false
+                if (isFinishing || isDestroyed) return@onMainDispatcher
+                adapter.reloadAssets()
+                result.onSuccess { outcome ->
+                    if (outcome.failures.isEmpty()) {
+                        snackbar(getString(R.string.karing_acl_all_done, outcome.succeeded, outcome.total)).show()
+                    } else {
+                        val details = outcome.failures.entries.joinToString("\n") { "${it.key}: ${it.value}" }
+                        MaterialAlertDialogBuilder(this@AssetsActivity)
+                            .setTitle(R.string.karing_acl_partial_failure)
+                            .setMessage(getString(R.string.karing_acl_all_done, outcome.succeeded, outcome.total) + "\n\n" + details)
+                            .setPositiveButton(android.R.string.ok, null).show()
+                    }
+                }.onFailure { alert(it.readableMessage).tryToShow() }
+            }
+        }
     }
 
     private fun showAclResources() {

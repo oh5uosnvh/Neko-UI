@@ -8,4 +8,19 @@
     <string name="karing_rules_install_failed">Could not install selected rule sets; no changes applied</string>
     <string name="karing_outbound">Outbound</string>
     <string name="karing_select_profile">Select outbound profile</string>
+    <string name="karing_domain_suffix">Domain suffix</string>
+    <string name="karing_domain">Domain</string>
+    <string name="karing_domain_keyword">Domain keyword</string>
+    <string name="karing_domain_regex">Domain regex</string>
+    <string name="karing_port">Port</string>
+    <string name="karing_port_range">Port range</string>
+    <string name="karing_source_ip">Source IP</string>
+    <string name="karing_source_port">Source port</string>
+    <string name="karing_unsupported_wifi">Network Type and WIFI conditions are stored but unsupported by this backend. A rule containing them will be rejected, not applied.</string>
+    <string name="karing_wifi_unavailable">Current Wi-Fi information unavailable. Grant location permission and enable location, or enter it manually.</string>
+    <string name="karing_logic_review_title">Review imported rule logic</string>
+    <string name="karing_logic_review_message">This older imported rule contains AND although the preset did not specify logic. It may be an old default or your own edit; it cannot be distinguished safely. Choose OR (the preset default) or keep AND. Your choice is saved only when you save the rule.</string>
+    <string name="karing_use_or">Use OR</string>
+    <string name="karing_keep_and">Keep AND</string>
+    <string name="karing_port_range_warning">Open-ended port ranges shown in the Karing example are not supported by this backend; use both endpoints.</string>
 </resources>

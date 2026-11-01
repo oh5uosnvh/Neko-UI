@@ -91,9 +91,9 @@ class KaringResourceSettings(
         private const val USE_REMOTE = "use_remote"
 
         fun remoteBase(family: KaringRuleFamily): String = when (family) {
-            KaringRuleFamily.GEOSITE -> "https://github.com/KaringX/karing-ruleset/raw/sing/geo/geosite"
-            KaringRuleFamily.GEOIP -> "https://github.com/KaringX/karing-ruleset/raw/sing/geo/geoip"
-            KaringRuleFamily.ACL -> "https://github.com/KaringX/karing-ruleset/raw/sing/ACL4SSR"
+            KaringRuleFamily.GEOSITE -> "https://raw.githubusercontent.com/KaringX/karing-ruleset/sing/geo/geosite"
+            KaringRuleFamily.GEOIP -> "https://raw.githubusercontent.com/KaringX/karing-ruleset/sing/geo/geoip"
+            KaringRuleFamily.ACL -> "https://raw.githubusercontent.com/KaringX/karing-ruleset/sing/ACL4SSR"
         }
 
         fun remoteUrl(family: KaringRuleFamily, code: String): String {

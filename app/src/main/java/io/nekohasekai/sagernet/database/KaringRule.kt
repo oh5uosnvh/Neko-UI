@@ -251,3 +251,20 @@ const val KARING_CONFIG_KEY = "nekobox_route_v1"
 fun RuleEntity.hasKaringEnvelope(): Boolean = runCatching {
     JSONObject(config).optJSONObject(KARING_CONFIG_KEY) != null
 }.getOrDefault(false)
+
+/** Old imports can contain an AND generated before missing preset logic defaulted to OR.
+ * There is no reliable way to distinguish it from a later manual AND. */
+fun RuleEntity.hasAmbiguousImportedAnd(): Boolean = runCatching {
+    val env = JSONObject(config).optJSONObject(KARING_CONFIG_KEY) ?: return@runCatching false
+    val raw = env.optJSONObject("preset_raw")
+    !env.optString("import_id").isNullOrBlank() &&
+        env.optString("logic").equals("and", true) &&
+        !env.optBoolean("logic_reviewed", false) &&
+        (raw == null || !raw.has("or"))
+}.getOrDefault(false)
+
+fun RuleEntity.markKaringLogicReviewed() {
+    val root = JSONObject(config)
+    root.getJSONObject(KARING_CONFIG_KEY).put("logic_reviewed", true)
+    config = root.toString()
+}

@@ -85,6 +85,37 @@ class KaringRuleStorageTest {
         assertFalse(explicitAnd.toKaringRule().or)
     }
 
+    @Test fun legacyImportedAndRequiresExplicitReviewWithoutChangingLogic() {
+        val legacy = RuleEntity(config = """{"nekobox_route_v1":{"import_id":"karing-cn-v1","logic":"and","preset_raw":{"name":"test"}}}""")
+        assertTrue(legacy.hasAmbiguousImportedAnd())
+        assertFalse(legacy.toKaringRule().or)
+        legacy.applyKaringRule(legacy.toKaringRule()) // an unrelated edit must not mark a decision
+        assertTrue(legacy.hasAmbiguousImportedAnd())
+        legacy.markKaringLogicReviewed()
+        assertFalse(legacy.hasAmbiguousImportedAnd())
+        assertFalse(legacy.toKaringRule().or)
+        legacy.applyKaringRule(legacy.toKaringRule())
+        assertFalse(legacy.hasAmbiguousImportedAnd())
+    }
+
+    @Test fun explicitPresetAndAndNonImportedRulesAreNotConflicts() {
+        val explicit = RuleEntity(config = """{"nekobox_route_v1":{"import_id":"karing-cn-v1","logic":"and","preset_raw":{"or":false}}}""")
+        val manual = RuleEntity(config = """{"nekobox_route_v1":{"logic":"and"}}""")
+        assertFalse(explicit.hasAmbiguousImportedAnd())
+        assertFalse(manual.hasAmbiguousImportedAnd())
+        assertFalse(explicit.toKaringRule().or)
+        assertFalse(manual.toKaringRule().or)
+    }
+
+    @Test fun reviewCanConvertOldImportToOr() {
+        val entity = RuleEntity(config = """{"nekobox_route_v1":{"import_id":"old","logic":"and"}}""")
+        assertTrue(entity.hasAmbiguousImportedAnd())
+        entity.applyKaringRule(entity.toKaringRule().copy(or = true))
+        entity.markKaringLogicReviewed()
+        assertTrue(entity.toKaringRule().or)
+        assertFalse(entity.hasAmbiguousImportedAnd())
+    }
+
     @Test fun invalidCustomConfigIsNotOverwritten() {
         val entity = RuleEntity(config = "not-json")
         try {

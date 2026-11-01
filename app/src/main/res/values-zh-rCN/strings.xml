@@ -617,7 +617,7 @@
     <string name="sort_ascending">升序</string>
     <string name="sort_descending">降序</string>
     <string name="group_deleted_undo">已删除分组 %s</string>
-    <string name="route_preset_group">预设分流</string>
+    <string name="route_preset_group">预设置规则</string>
     <string name="route_custom_group">自定义分流</string>
     <string name="route_documentation">查看文档</string>
 </resources>

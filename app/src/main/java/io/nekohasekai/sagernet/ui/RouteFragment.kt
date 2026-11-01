@@ -6,8 +6,6 @@ import android.os.Bundle
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
-import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import androidx.appcompat.widget.PopupMenu
 import androidx.appcompat.widget.Toolbar
 import androidx.core.content.ContextCompat
@@ -365,12 +363,6 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
 
         inner class DocumentHolder(private val binding: LayoutEmptyRouteBinding) : RecyclerView.ViewHolder(binding.root) {
             fun bind() {
-                binding.routeWarning.background = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(Color.TRANSPARENT)
-                    setStroke((resources.displayMetrics.density * 2).toInt().coerceAtLeast(1),
-                        ContextCompat.getColor(itemView.context, R.color.color_route_block))
-                }
                 binding.routeWarning.setOnClickListener {
                     MaterialAlertDialogBuilder(it.context).setMessage(R.string.route_warn)
                         .setPositiveButton(android.R.string.ok, null)

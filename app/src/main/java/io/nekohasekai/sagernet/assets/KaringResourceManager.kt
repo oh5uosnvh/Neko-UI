@@ -49,6 +49,8 @@ class KaringResourceManager(context: Context, externalRoot: File? = null) {
     companion object {
         private const val MAX_DOWNLOAD_BYTES = 64L * 1024L * 1024L
         private const val MAX_CODE_LENGTH = 128
+        // Shared across manager instances so bulk, individual and config installs cannot collide.
+        private val locks = ConcurrentHashMap<String, Any>()
         private val SAFE_CODE = Regex("^[A-Za-z0-9][A-Za-z0-9@._!-]{0,127}$")
     }
 
@@ -58,7 +60,6 @@ class KaringResourceManager(context: Context, externalRoot: File? = null) {
     private val root = File(storageRoot, "karing")
     private val indexes = EnumMap<KaringRuleFamily, List<String>>(KaringRuleFamily::class.java)
     private val bundledCodes = EnumMap<KaringRuleFamily, Set<String>>(KaringRuleFamily::class.java)
-    private val locks = ConcurrentHashMap<String, Any>()
 
     init {
         require(root.canonicalFile.path == storageRoot.path || root.canonicalFile.path.startsWith(storageRoot.path + File.separator))
@@ -111,23 +112,39 @@ class KaringResourceManager(context: Context, externalRoot: File? = null) {
     suspend fun ensure(family: KaringRuleFamily, code: String): File {
         checkCode(code)
         require(indexes[family].orEmpty().contains(code)) { "code is not indexed" }
-        val key = family.wireName + ":" + code
+        val key = target(family, code).path
         synchronized(locks.getOrPut(key) { Any() }) {
             val current = validate(family, code)
             if (current.valid) return current.file!!
             val destination = target(family, code)
-            val part = File(destination.parentFile, destination.name + ".part")
-            part.delete()
-            extractEntry(family, code, part)
-            val checked = validatePath(family, code, part)
-            if (!checked.valid) {
+            destination.parentFile?.mkdirs()
+            // The native validator requires the exact basename; a private staging
+            // directory prevents other processes from sharing the same .part file.
+            val stage = File.createTempFile(".karing-", "", destination.parentFile)
+            check(stage.delete() && stage.mkdir()) { "cannot create resource staging directory" }
+            val part = File(stage, destination.name + ".part")
+            try {
+                extractEntry(family, code, part)
+                val checked = validatePath(family, code, part)
+                if (!checked.valid) throw IOException(checked.error ?: "packaged SRS failed validation")
+                if (!validate(family, code).valid) atomicReplace(part, destination)
+                return destination
+            } finally {
                 part.delete()
-                throw IOException(checked.error ?: "packaged SRS failed validation")
+                stage.delete()
             }
-            atomicReplace(part, destination)
-            return destination
         }
     }
+
+    data class InstallAllResult(val total: Int, val succeeded: Int, val failures: Map<String, String>)
+
+    /** Install independently: a failed entry never undoes successful entries. */
+    suspend fun installAll(
+        family: KaringRuleFamily,
+        progress: suspend (completed: Int, total: Int) -> Unit = { _, _ -> },
+    ): InstallAllResult = installKaringCodes(indexes[family].orEmpty(), { code ->
+        ensure(family, code)
+    }, progress)
 
     /** Downloads one SRS over HTTPS; URL filenames and redirects are ignored. */
     suspend fun download(url: String, family: KaringRuleFamily, code: String): File {
@@ -135,7 +152,7 @@ class KaringResourceManager(context: Context, externalRoot: File? = null) {
         require(indexes[family].orEmpty().contains(code)) { "code is not indexed" }
         val parsed = URL(url)
         require(parsed.protocol.equals("https", true)) { "Karing resource URL must use HTTPS" }
-        val key = family.wireName + ":" + code
+        val key = target(family, code).path
         synchronized(locks.getOrPut(key) { Any() }) {
             val destination = target(family, code)
             val part = File(destination.parentFile, destination.name + ".part")
@@ -261,10 +278,34 @@ class KaringResourceManager(context: Context, externalRoot: File? = null) {
 
     private fun atomicReplace(source: File, destination: File) {
         destination.parentFile?.mkdirs()
-        try {
-            java.nio.file.Files.move(source.toPath(), destination.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-        } catch (_: Exception) {
-            if (!source.renameTo(destination)) throw IOException("cannot commit Karing resource")
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            try {
+                java.nio.file.Files.move(source.toPath(), destination.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                return
+            } catch (_: Exception) {
+                // Both files are on the same filesystem; rename is the fallback.
+            }
         }
+        if (!source.renameTo(destination)) throw IOException("cannot commit Karing resource")
     }
+}
+
+/** Isolated loop makes per-item errors observable and testable without native code. */
+internal suspend fun installKaringCodes(
+    codes: List<String>,
+    install: suspend (String) -> Unit,
+    progress: suspend (Int, Int) -> Unit,
+): KaringResourceManager.InstallAllResult {
+    val failures = linkedMapOf<String, String>()
+    codes.forEachIndexed { index, code ->
+        try {
+            install(code)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            failures[code] = e.message ?: e.javaClass.simpleName
+        }
+        progress(index + 1, codes.size)
+    }
+    return KaringResourceManager.InstallAllResult(codes.size, codes.size - failures.size, failures)
 }

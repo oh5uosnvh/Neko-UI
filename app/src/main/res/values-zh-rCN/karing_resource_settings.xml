@@ -5,4 +5,8 @@
     <string name="karing_resource_remote">使用远程资源</string>
     <string name="karing_resource_remote_info">远程资源地址</string>
     <string name="karing_resource_reconnect_hint">资源设置将在重新连接后生效。</string>
+    <string name="karing_acl_install_all">一键安装</string>
+    <string name="karing_acl_progress">正在安装 ACL：%1$d / %2$d</string>
+    <string name="karing_acl_all_done">ACL 已安装且有效：%1$d / %2$d</string>
+    <string name="karing_acl_partial_failure">部分 ACL 资源安装失败</string>
 </resources>

@@ -29,6 +29,8 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.RuleEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.database.hasAmbiguousImportedAnd
+import io.nekohasekai.sagernet.database.markKaringLogicReviewed
 import io.nekohasekai.sagernet.database.hasKaringEnvelope
 import io.nekohasekai.sagernet.database.toKaringRule
 import io.nekohasekai.sagernet.database.applyKaringRule
@@ -109,6 +111,8 @@ class KaringRouteSettingsActivity(
     private fun multiline(value: String): List<String> = value.lineSequence()
         .map { it.trim() }.filter { it.isNotEmpty() }.distinct().toList()
 
+    private var logicReviewed = false
+
     fun RuleEntity.serialize() {
         // Read the original envelope before updating mirrors; copy retains process fields,
         // import metadata, unknown preset JSON and rule-set item types.
@@ -146,6 +150,7 @@ class KaringRouteSettingsActivity(
             port = edited(DataStore.routePort, previous.port),
             portRange = edited(DataStore.routePortRange, previous.portRange),
         ))
+        if (logicReviewed) markKaringLogicReviewed()
         if (DataStore.editingId == 0L) enabled = true
     }
 
@@ -198,12 +203,14 @@ class KaringRouteSettingsActivity(
         }
         if (savedInstanceState != null) {
             missingPackages = savedInstanceState.getStringArrayList("missingPackages")?.toList().orEmpty()
+            logicReviewed = savedInstanceState.getBoolean("logicReviewed")
             DataStore.profileCacheStore.registerChangeListener(this)
             return
         }
         val editingId = intent.getLongExtra(EXTRA_ROUTE_ID, 0L)
         DataStore.editingId = editingId
         runOnDefaultDispatcher {
+            var ambiguous = false
             if (editingId == 0L) init(intent.getStringExtra(EXTRA_PACKAGE_NAME)) else {
                 val entity = SagerDatabase.rulesDao.getById(editingId)
                 if (entity == null || !entity.hasKaringEnvelope()) {
@@ -213,16 +220,27 @@ class KaringRouteSettingsActivity(
                     }
                     return@runOnDefaultDispatcher
                 }
+                ambiguous = entity.hasAmbiguousImportedAnd()
                 entity.init()
             }
             onMainDispatcher {
                 supportFragmentManager.beginTransaction().replace(R.id.settings, EditorFragment()).commit()
                 DataStore.dirty = false
                 DataStore.profileCacheStore.registerChangeListener(this@KaringRouteSettingsActivity)
+                if (ambiguous) MaterialAlertDialogBuilder(this@KaringRouteSettingsActivity)
+                    .setTitle(R.string.karing_logic_review_title)
+                    .setMessage(R.string.karing_logic_review_message)
+                    .setPositiveButton(R.string.karing_use_or) { _, _ ->
+                        DataStore.routeLogic = "or"; logicReviewed = true; DataStore.dirty = true
+                        child?.refreshLogic()
+                    }.setNegativeButton(R.string.karing_keep_and) { _, _ ->
+                        logicReviewed = true; DataStore.dirty = true
+                    }.setNeutralButton(android.R.string.cancel, null).show()
             }
         }
     }
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("logicReviewed", logicReviewed)
         outState.putStringArrayList("missingPackages", ArrayList(missingPackages))
         super.onSaveInstanceState(outState)
     }
@@ -274,6 +292,41 @@ class KaringRouteSettingsActivity(
         private lateinit var packages: android.widget.EditText
         private lateinit var outbound: android.widget.Spinner
         private var updating = false
+        private lateinit var logicGroup: android.widget.RadioGroup
+        private var orId = 0
+        private var andId = 0
+        private var pendingWifi: ((String?) -> Unit)? = null
+        private val locationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            pendingWifi?.invoke(if (granted) readWifi(pendingWifiBssid) else null)
+            pendingWifi = null
+        }
+        private var pendingWifiBssid = false
+        @Suppress("DEPRECATION", "MissingPermission")
+        private fun readWifi(bssid: Boolean): String? = try {
+            val manager = requireContext().applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+            val info = manager.connectionInfo
+            (if (bssid) info?.bssid else info?.ssid)?.trim()?.trim('"')
+                ?.takeIf { it.isNotBlank() && it != "<unknown ssid>" && it != "02:00:00:00:00:00" }
+        } catch (_: SecurityException) { null }
+        private fun currentWifi(bssid: Boolean, callback: (String?) -> Unit) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(requireContext(), android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED) callback(readWifi(bssid))
+            else { pendingWifiBssid = bssid; pendingWifi = callback; locationPermission.launch(android.Manifest.permission.ACCESS_FINE_LOCATION) }
+        }
+        private fun choose(title: String, choices: List<String>, edit: android.widget.EditText) {
+            val existing = edit.text.toString().lineSequence().map(String::trim).filter(String::isNotEmpty).distinct().toList()
+            if (choices.isEmpty()) {
+                MaterialAlertDialogBuilder(requireContext()).setTitle(title).setMessage(R.string.karing_wifi_unavailable).setPositiveButton(android.R.string.ok, null).show(); return
+            }
+            val selected = choices.map { it in existing }.toBooleanArray()
+            MaterialAlertDialogBuilder(requireContext()).setTitle(title)
+                .setMultiChoiceItems(choices.toTypedArray(), selected) { _, index, checked -> selected[index] = checked }
+                .setPositiveButton(android.R.string.ok) { _, _ ->
+                    val retained = existing.filter { it !in choices }
+                    edit.setText((retained + choices.filterIndexed { index, _ -> selected[index] }).joinToString("\n"))
+                }.setNegativeButton(android.R.string.cancel, null).show()
+        }
+        fun refreshLogic() { if (::logicGroup.isInitialized) logicGroup.check(if (DataStore.routeLogic == "or") orId else andId) }
+
         private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
         override fun onCreateView(inflater: android.view.LayoutInflater, container: android.view.ViewGroup?, state: Bundle?): View {
@@ -298,12 +351,12 @@ class KaringRouteSettingsActivity(
                     gravity = android.view.Gravity.TOP or android.view.Gravity.START
                     setText(value)
                     setOnFocusChangeListener { _, focused ->
-                        box.hint = if (focused && text.isNullOrEmpty()) example else title
+                        box.placeholderText = if (focused && text.isNullOrEmpty()) example else null
                     }
                     addTextChangedListener(object : android.text.TextWatcher {
                         override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                         override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                            box.hint = if (isFocused && s.isNullOrEmpty()) example else title
+                            box.placeholderText = if (isFocused && s.isNullOrEmpty()) example else null
                             if (!updating) set(s?.toString().orEmpty())
                         }
                         override fun afterTextChanged(s: android.text.Editable?) {}
@@ -320,38 +373,55 @@ class KaringRouteSettingsActivity(
                 content.addView(row)
                 return edit
             }
-            field(getString(R.string.route_name), getString(R.string.karing_example_name), DataStore.routeName, { DataStore.routeName = it }, single = true)
+            val prompt = android.widget.TextView(context).apply {
+                text = "提示:保存后,请到[分流规则]设置相关规则,否则不会生效"
+                setPadding(0, 0, 0, dp(12))
+                textSize = 14f
+            }
+            content.addView(prompt)
+            field(getString(R.string.route_name), "", DataStore.routeName, { DataStore.routeName = it }, single = true)
             val logic = android.widget.RadioGroup(context).apply { orientation = android.widget.RadioGroup.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
             logic.addView(android.widget.TextView(context).apply { text = getString(R.string.route_logic); setPadding(0, 0, dp(12), 0) })
             val or = android.widget.RadioButton(context).apply { id = View.generateViewId(); text = "OR" }
             val and = android.widget.RadioButton(context).apply { id = View.generateViewId(); text = "AND" }
+            logicGroup = logic; orId = or.id; andId = and.id
             logic.addView(or); logic.addView(and); logic.check(if (DataStore.routeLogic == "or") or.id else and.id)
             logic.setOnCheckedChangeListener { _, id -> DataStore.routeLogic = if (id == or.id) "or" else "and" }
             content.addView(logic)
             lateinit var builtins: android.widget.EditText
-            builtins = field(getString(R.string.route_builtin_rulesets), "geosite:github\ngeoip:github", DataStore.routeBuiltinRulesets, { DataStore.routeBuiltinRulesets = it }, {
+            builtins = field(getString(R.string.route_builtin_rulesets), KaringEditorHints.BUILTIN, DataStore.routeBuiltinRulesets, { DataStore.routeBuiltinRulesets = it }, {
                 io.nekohasekai.sagernet.widget.RouteBuiltinPreference.showSelector(host, DataStore.routeBuiltinRulesets) { value ->
                     DataStore.routeBuiltinRulesets = value
                     updating = true; builtins.setText(value); updating = false
                 }
             })
-            field(getString(R.string.route_external_rulesets), "https://example.com/rules.srs", DataStore.routeExternalRulesets, { DataStore.routeExternalRulesets = it })
-            packages = field(getString(R.string.karing_package_ids), "com.example.app", DataStore.routePackages, { DataStore.routePackages = it }, { host.openApps() })
-            field(getString(R.string.route_packages_manual), "com.example.manual", DataStore.routePackagesManual, { DataStore.routePackagesManual = it })
-            field("domain", "example.com", DataStore.routeDomain, { DataStore.routeDomain = it })
-            field("domain suffix", "example.com", DataStore.routeDomainSuffix, { DataStore.routeDomainSuffix = it })
-            field("domain keyword", "example", DataStore.routeDomainKeyword, { DataStore.routeDomainKeyword = it })
-            field("domain regex", "^example\\.com$", DataStore.routeDomainRegex, { DataStore.routeDomainRegex = it })
-            field("IP CIDR", "192.0.2.0/24", DataStore.routeIpCidr, { DataStore.routeIpCidr = it })
-            field("dst port", "443", DataStore.routePort, { DataStore.routePort = it })
-            field("port range", "1000:2000", DataStore.routePortRange, { DataStore.routePortRange = it })
-            field("src ip", "192.0.2.0/24", DataStore.routeSource, { DataStore.routeSource = it })
-            field("src port", "53", DataStore.routeSourcePort, { DataStore.routeSourcePort = it })
-            field("network", "tcp\nudp", DataStore.routeNetwork, { DataStore.routeNetwork = it })
-            field("network type", "wifi", DataStore.routeNetworkType, { DataStore.routeNetworkType = it })
-            field("Wi-Fi SSID", "My Wi-Fi", DataStore.routeWifiSsid, { DataStore.routeWifiSsid = it })
-            field("Wi-Fi BSSID", "00:11:22:33:44:55", DataStore.routeWifiBssid, { DataStore.routeWifiBssid = it })
-            field("protocol", "http", DataStore.routeProtocol, { DataStore.routeProtocol = it })
+            field(getString(R.string.route_external_rulesets), KaringEditorHints.RULE_SET, DataStore.routeExternalRulesets, { DataStore.routeExternalRulesets = it })
+            packages = field(getString(R.string.karing_package_ids), KaringEditorHints.PACKAGE, DataStore.routePackages, { DataStore.routePackages = it }, { host.openApps() })
+            field(getString(R.string.route_packages_manual), "", DataStore.routePackagesManual, { DataStore.routePackagesManual = it })
+            field(getString(R.string.karing_domain_suffix), KaringEditorHints.DOMAIN_SUFFIX, DataStore.routeDomainSuffix, { DataStore.routeDomainSuffix = it })
+            field(getString(R.string.karing_domain), KaringEditorHints.DOMAIN, DataStore.routeDomain, { DataStore.routeDomain = it })
+            field(getString(R.string.karing_domain_keyword), KaringEditorHints.DOMAIN_KEYWORD, DataStore.routeDomainKeyword, { DataStore.routeDomainKeyword = it })
+            field(getString(R.string.karing_domain_regex), KaringEditorHints.DOMAIN_REGEX, DataStore.routeDomainRegex, { DataStore.routeDomainRegex = it })
+            field("IP Cidr", KaringEditorHints.IP_CIDR, DataStore.routeIpCidr, { DataStore.routeIpCidr = it })
+            fun selectable(title: String, example: String, value: String, set: (String) -> Unit, choices: List<String>) {
+                lateinit var edit: android.widget.EditText
+                edit = field(title, example, value, set, { choose(title, choices, edit) })
+            }
+            content.addView(android.widget.TextView(context).apply { text = getString(R.string.karing_unsupported_wifi) })
+            selectable("Network Type", KaringEditorHints.NETWORK_TYPE, DataStore.routeNetworkType, { DataStore.routeNetworkType = it }, listOf("wifi", "cellular", "ethernet", "other"))
+            selectable("Network", KaringEditorHints.NETWORK, DataStore.routeNetwork, { DataStore.routeNetwork = it }, listOf("tcp", "udp", "icmp"))
+            fun wifi(title: String, bssid: Boolean, value: String, set: (String) -> Unit, example: String) {
+                lateinit var edit: android.widget.EditText
+                edit = field(title, example, value, set, { currentWifi(bssid) { current -> if (isAdded) choose(title, listOfNotNull(current), edit) } })
+            }
+            wifi("WIFI SSID", false, DataStore.routeWifiSsid, { DataStore.routeWifiSsid = it }, KaringEditorHints.WIFI_SSID)
+            wifi("WIFI BSSID", true, DataStore.routeWifiBssid, { DataStore.routeWifiBssid = it }, KaringEditorHints.WIFI_BSSID)
+            field(getString(R.string.karing_port), KaringEditorHints.PORT, DataStore.routePort, { DataStore.routePort = it })
+            content.addView(android.widget.TextView(context).apply { text = getString(R.string.karing_port_range_warning) })
+            field(getString(R.string.karing_port_range), KaringEditorHints.PORT_RANGE, DataStore.routePortRange, { DataStore.routePortRange = it })
+            field(getString(R.string.karing_source_ip), "", DataStore.routeSource, { DataStore.routeSource = it })
+            field(getString(R.string.karing_source_port), "", DataStore.routeSourcePort, { DataStore.routeSourcePort = it })
+            selectable("Protocol", KaringEditorHints.PROTOCOL, DataStore.routeProtocol, { DataStore.routeProtocol = it }, listOf("http", "tls", "quic", "stun", "dns", "bittorrent", "dtls", "ssh", "rdp"))
             content.addView(android.widget.TextView(context).apply { text = getString(R.string.karing_outbound); setPadding(0, dp(12), 0, 0) })
             outbound = android.widget.Spinner(context).apply {
                 adapter = android.widget.ArrayAdapter.createFromResource(context, R.array.outbound_entry, android.R.layout.simple_spinner_dropdown_item)

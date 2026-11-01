@@ -5,4 +5,8 @@
     <string name="karing_resource_remote">Use remote resources</string>
     <string name="karing_resource_remote_info">Remote resource address</string>
     <string name="karing_resource_reconnect_hint">Reconnect to apply resource setting changes.</string>
+    <string name="karing_acl_install_all">Install all</string>
+    <string name="karing_acl_progress">Installing ACL: %1$d / %2$d</string>
+    <string name="karing_acl_all_done">ACL installed and valid: %1$d / %2$d</string>
+    <string name="karing_acl_partial_failure">Some ACL resources failed</string>
 </resources>
