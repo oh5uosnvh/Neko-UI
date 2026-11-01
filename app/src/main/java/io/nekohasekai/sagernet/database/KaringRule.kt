@@ -48,7 +48,7 @@ object KaringRuleJson {
         return preset.copy(rules = preset.rules.mapIndexed { i, rule ->
             val raw = rules.getJSONObject(i)
             require(!(raw.has("processName") && raw.has("process_name"))) { "Conflicting processName and process_name" }
-            rule.copy(rawPresetJson = raw.toString())
+            rule.copy(or = if (raw.has("or")) raw.getBoolean("or") else true, rawPresetJson = raw.toString())
         })
     }
     fun toJson(model: KaringRuleModel): String {

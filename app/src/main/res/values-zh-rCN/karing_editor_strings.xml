@@ -1,0 +1,11 @@
+<resources>
+    <string name="karing_wrong_editor">请在原路由编辑器中编辑此规则</string>
+    <string name="karing_select_description">选择%1$s</string>
+    <string name="karing_example_name">例如：GitHub</string>
+    <string name="karing_package_ids">应用包 ID</string>
+    <string name="karing_search_rules">搜索规则集</string>
+    <string name="karing_rules_load_failed">无法加载内置规则集</string>
+    <string name="karing_rules_install_failed">无法安装所选规则集，未应用选择</string>
+    <string name="karing_outbound">出站</string>
+    <string name="karing_select_profile">选择出站配置</string>
+</resources>

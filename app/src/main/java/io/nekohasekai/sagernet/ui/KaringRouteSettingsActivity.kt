@@ -87,8 +87,13 @@ class KaringRouteSettingsActivity(
         DataStore.routeSource = model.sourceIpCidr.joinToString("\n")
         DataStore.routeProtocol = model.protocol.joinToString("\n")
         DataStore.routePackages = model.packageNames.joinToString("\n")
+        // Keep the independent manual input separate from the installed-app picker.
+        // Existing package IDs are initially shown in the picker; IDs that are not
+        // installed are restored by the result callback instead of being discarded.
         DataStore.routePackagesManual = ""
-        DataStore.routeLogic = if (model.or) "or" else "and"
+        // New editor-created rules default to OR; existing envelopes (including
+        // explicit AND) are never reinterpreted by the UI.
+        DataStore.routeLogic = if (!hasKaringEnvelope() || model.or) "or" else "and"
         DataStore.routeBuiltinRulesets = model.ruleSetBuildIn.joinToString("\n")
         DataStore.routeExternalRulesets = model.ruleSetItems.joinToString("\n") { it.url }
         DataStore.routeDomainSuffix = model.domainSuffix.joinToString("\n")
@@ -118,27 +123,28 @@ class KaringRouteSettingsActivity(
             2 -> -2L
             else -> DataStore.routeOutboundRule
         }
+        fun edited(value: String, original: List<String>) = if (value == original.joinToString("\n")) original else multiline(value)
+        val external = if (DataStore.routeExternalRulesets == previous.ruleSetItems.joinToString("\n") { it.url }) previous.ruleSetItems else
+            multiline(DataStore.routeExternalRulesets).map { url -> previous.ruleSetItems.firstOrNull { it.url == url } ?: KaringRuleSetItem(url) }
         applyKaringRule(previous.copy(
             or = DataStore.routeLogic == "or",
-            ruleSetBuildIn = multiline(DataStore.routeBuiltinRulesets),
-            ruleSetItems = multiline(DataStore.routeExternalRulesets).map { url ->
-                previous.ruleSetItems.firstOrNull { it.url == url } ?: KaringRuleSetItem(url)
-            },
-            packageNames = multiline(DataStore.routePackages + "\n" + DataStore.routePackagesManual),
-            domain = multiline(DataStore.routeDomain),
-            domainSuffix = multiline(DataStore.routeDomainSuffix),
-            domainKeyword = multiline(DataStore.routeDomainKeyword),
-            domainRegex = multiline(DataStore.routeDomainRegex),
-            ipCidr = multiline(DataStore.routeIpCidr),
-            networkType = multiline(DataStore.routeNetworkType),
-            network = multiline(DataStore.routeNetwork),
-            sourceIpCidr = multiline(DataStore.routeSource),
-            sourcePorts = multiline(DataStore.routeSourcePort),
-            wifiSsid = multiline(DataStore.routeWifiSsid),
-            wifiBssid = multiline(DataStore.routeWifiBssid),
-            protocol = multiline(DataStore.routeProtocol),
-            port = multiline(DataStore.routePort),
-            portRange = multiline(DataStore.routePortRange),
+            ruleSetBuildIn = edited(DataStore.routeBuiltinRulesets, previous.ruleSetBuildIn),
+            ruleSetItems = external,
+            packageNames = edited(DataStore.routePackages + "\n" + DataStore.routePackagesManual, previous.packageNames),
+            domain = edited(DataStore.routeDomain, previous.domain),
+            domainSuffix = edited(DataStore.routeDomainSuffix, previous.domainSuffix),
+            domainKeyword = edited(DataStore.routeDomainKeyword, previous.domainKeyword),
+            domainRegex = edited(DataStore.routeDomainRegex, previous.domainRegex),
+            ipCidr = edited(DataStore.routeIpCidr, previous.ipCidr),
+            networkType = edited(DataStore.routeNetworkType, previous.networkType),
+            network = edited(DataStore.routeNetwork, previous.network),
+            sourceIpCidr = edited(DataStore.routeSource, previous.sourceIpCidr),
+            sourcePorts = edited(DataStore.routeSourcePort, previous.sourcePorts),
+            wifiSsid = edited(DataStore.routeWifiSsid, previous.wifiSsid),
+            wifiBssid = edited(DataStore.routeWifiBssid, previous.wifiBssid),
+            protocol = edited(DataStore.routeProtocol, previous.protocol),
+            port = edited(DataStore.routePort, previous.port),
+            portRange = edited(DataStore.routePortRange, previous.portRange),
         ))
         if (DataStore.editingId == 0L) enabled = true
     }
@@ -147,102 +153,34 @@ class KaringRouteSettingsActivity(
         return DataStore.dirty
     }
 
-    fun PreferenceFragmentCompat.createPreferences(
-        savedInstanceState: Bundle?,
-        rootKey: String?,
-    ) {
-        addPreferencesFromResource(R.xml.karing_route_preferences)
-
+    private var missingPackages = emptyList<String>()
+    private val selectApps = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { _, _ ->
+        // AppListActivity only writes installed packages. Preserve manually entered or
+        // uninstalled IDs that it cannot display or intentionally deselect.
+        DataStore.routePackages = (DataStore.routePackages.lineSequence().filter { it.isNotBlank() } + missingPackages.asSequence()).distinct().joinToString("\n")
+        child?.refreshPackages()
     }
-
-    val selectProfileForAdd = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { (resultCode, data) ->
-        if (resultCode == Activity.RESULT_OK) runOnDefaultDispatcher {
-            val profile = ProfileManager.getProfile(
-                data!!.getLongExtra(
-                    ProfileSelectActivity.EXTRA_PROFILE_ID, 0
-                )
-            ) ?: return@runOnDefaultDispatcher
-            DataStore.routeOutboundRule = profile.id
-            onMainDispatcher {
-                outbound.value = OutboundPreference.VALUE_SELECT_PROFILE
+    private val selectProfile = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { code, data ->
+        if (code == Activity.RESULT_OK && data != null) {
+            val id = data.getLongExtra(ProfileSelectActivity.EXTRA_PROFILE_ID, 0)
+            if (id > 0) {
+                DataStore.routeOutboundRule = id
+                DataStore.routeOutbound = OutboundPreference.VALUE_SELECT_PROFILE.toInt()
             }
-        }
+            child?.refreshOutbound()
+        } else child?.refreshOutbound()
     }
 
-    val selectAppList = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { (_, _) ->
-        apps.postUpdate()
+    fun openApps() {
+        missingPackages = DataStore.routePackages.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.filter {
+            try { packageManager.getApplicationInfo(it, 0); false } catch (_: android.content.pm.PackageManager.NameNotFoundException) { true }
+        }.toList()
+        selectApps.launch(Intent(this, AppListActivity::class.java))
     }
-
-    lateinit var outbound: OutboundPreference
-    lateinit var apps: AppListPreference
-
-    fun PreferenceFragmentCompat.viewCreated(view: View, savedInstanceState: Bundle?) {
-        outbound = findPreference(Key.ROUTE_OUTBOUND)!!
-        apps = findPreference(Key.ROUTE_PACKAGES)!!
-
-        outbound.setOnPreferenceChangeListener { _, newValue ->
-            if (newValue.toString() == OutboundPreference.VALUE_SELECT_PROFILE) {
-                selectProfileForAdd.launch(
-                    Intent(
-                        this@KaringRouteSettingsActivity, ProfileSelectActivity::class.java
-                    ).apply {
-                        ProfileManager.getProfile(DataStore.routeOutboundRule)?.let {
-                            putExtra(ProfileSelectActivity.EXTRA_SELECTED, it)
-                        }
-                    }
-                )
-                false
-            } else {
-                true
-            }
-        }
-
-        apps.setOnPreferenceClickListener {
-            selectAppList.launch(
-                Intent(
-                    this@KaringRouteSettingsActivity, AppListActivity::class.java
-                )
-            )
-            true
-        }
-    }
-
-    fun displayPreferenceDialog(preference: Preference): Boolean {
-        return false
-    }
-
-    class UnsavedChangesDialogFragment : AlertDialogFragment<Empty, Empty>() {
-        override fun AlertDialog.Builder.prepare(listener: DialogInterface.OnClickListener) {
-            setTitle(R.string.unsaved_changes_prompt)
-            setPositiveButton(R.string.yes) { _, _ ->
-                runOnDefaultDispatcher {
-                    (requireActivity() as KaringRouteSettingsActivity).saveAndExit()
-                }
-            }
-            setNegativeButton(R.string.no) { _, _ ->
-                requireActivity().finish()
-            }
-            setNeutralButton(android.R.string.cancel, null)
-        }
-    }
-
-    @Parcelize
-    data class ProfileIdArg(val ruleId: Long) : Parcelable
-    class DeleteConfirmationDialogFragment : AlertDialogFragment<ProfileIdArg, Empty>() {
-        override fun AlertDialog.Builder.prepare(listener: DialogInterface.OnClickListener) {
-            setTitle(R.string.delete_route_prompt)
-            setPositiveButton(R.string.yes) { _, _ ->
-                runOnDefaultDispatcher {
-                    ProfileManager.deleteRule(arg.ruleId)
-                }
-                requireActivity().finish()
-            }
-            setNegativeButton(R.string.no, null)
-        }
+    fun openProfile() {
+        selectProfile.launch(Intent(this, ProfileSelectActivity::class.java).apply {
+            ProfileManager.getProfile(DataStore.routeOutboundRule)?.let { putExtra(ProfileSelectActivity.EXTRA_SELECTED, it) }
+        })
     }
 
     companion object {
@@ -258,198 +196,181 @@ class KaringRouteSettingsActivity(
             setDisplayHomeAsUpEnabled(true)
             setHomeAsUpIndicator(R.drawable.ic_navigation_close)
         }
-
-        if (savedInstanceState == null) {
-            val editingId = intent.getLongExtra(EXTRA_ROUTE_ID, 0L)
-            DataStore.editingId = editingId
-            runOnDefaultDispatcher {
-                if (editingId == 0L) {
-                    init(intent.getStringExtra(EXTRA_PACKAGE_NAME))
-                } else {
-                    val ruleEntity = SagerDatabase.rulesDao.getById(editingId)
-                    if (ruleEntity == null) {
-                        onMainDispatcher {
-                            finish()
-                        }
-                        return@runOnDefaultDispatcher
-                    }
-                    if (!ruleEntity.hasKaringEnvelope()) {
-                        onMainDispatcher {
-                            Toast.makeText(this@KaringRouteSettingsActivity, "Use the original route editor for this rule", Toast.LENGTH_LONG).show()
-                            finish()
-                        }
-                        return@runOnDefaultDispatcher
-                    }
-                    ruleEntity.init()
-                }
-
-                onMainDispatcher {
-                    supportFragmentManager.beginTransaction()
-                        .replace(R.id.settings, MyPreferenceFragmentCompat())
-                        .commit()
-
-                    DataStore.dirty = false
-                    DataStore.profileCacheStore.registerChangeListener(this@KaringRouteSettingsActivity)
-                }
-            }
-
-
+        if (savedInstanceState != null) {
+            missingPackages = savedInstanceState.getStringArrayList("missingPackages")?.toList().orEmpty()
+            DataStore.profileCacheStore.registerChangeListener(this)
+            return
         }
-
+        val editingId = intent.getLongExtra(EXTRA_ROUTE_ID, 0L)
+        DataStore.editingId = editingId
+        runOnDefaultDispatcher {
+            if (editingId == 0L) init(intent.getStringExtra(EXTRA_PACKAGE_NAME)) else {
+                val entity = SagerDatabase.rulesDao.getById(editingId)
+                if (entity == null || !entity.hasKaringEnvelope()) {
+                    onMainDispatcher {
+                        Toast.makeText(this@KaringRouteSettingsActivity, R.string.karing_wrong_editor, Toast.LENGTH_LONG).show()
+                        finish()
+                    }
+                    return@runOnDefaultDispatcher
+                }
+                entity.init()
+            }
+            onMainDispatcher {
+                supportFragmentManager.beginTransaction().replace(R.id.settings, EditorFragment()).commit()
+                DataStore.dirty = false
+                DataStore.profileCacheStore.registerChangeListener(this@KaringRouteSettingsActivity)
+            }
+        }
     }
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putStringArrayList("missingPackages", ArrayList(missingPackages))
+        super.onSaveInstanceState(outState)
+    }
+    private val child: EditorFragment? get() = supportFragmentManager.findFragmentById(R.id.settings) as? EditorFragment
 
     suspend fun saveAndExit() {
-
+        if (!needSave() && DataStore.editingId != 0L) { onMainDispatcher { finish() }; return }
         if (!needSave()) {
-            onMainDispatcher {
-                MaterialAlertDialogBuilder(this@KaringRouteSettingsActivity).setTitle(R.string.empty_route)
-                    .setMessage(R.string.empty_route_notice)
-                    .setPositiveButton(android.R.string.ok, null)
-                    .show()
-            }
+            onMainDispatcher { MaterialAlertDialogBuilder(this@KaringRouteSettingsActivity).setTitle(R.string.empty_route).setMessage(R.string.empty_route_notice).setPositiveButton(android.R.string.ok, null).show() }
             return
         }
-
-        val editingId = DataStore.editingId
         try {
-        if (editingId == 0L) {
-            if (intent.hasExtra(EXTRA_PACKAGE_NAME)) {
-                setResult(RESULT_OK, Intent())
+            if (DataStore.editingId == 0L) {
+                ProfileManager.createRule(RuleEntity().apply { serialize() })
+                if (intent.hasExtra(EXTRA_PACKAGE_NAME)) setResult(RESULT_OK, Intent())
+            } else {
+                val entity = SagerDatabase.rulesDao.getById(DataStore.editingId) ?: return
+                ProfileManager.updateRule(entity.apply { serialize() })
             }
-
-            ProfileManager.createRule(RuleEntity().apply { serialize() })
-        } else {
-            val entity = SagerDatabase.rulesDao.getById(DataStore.editingId)
-            if (entity == null) {
-                finish()
-                return
-            }
-            ProfileManager.updateRule(entity.apply { serialize() })
-        }
         } catch (error: IllegalArgumentException) {
-            onMainDispatcher {
-                MaterialAlertDialogBuilder(this@KaringRouteSettingsActivity)
-                    .setTitle(R.string.error_title).setMessage(error.message)
-                    .setPositiveButton(android.R.string.ok, null).show()
-            }
+            onMainDispatcher { MaterialAlertDialogBuilder(this@KaringRouteSettingsActivity).setTitle(R.string.error_title).setMessage(error.message).setPositiveButton(android.R.string.ok, null).show() }
             return
         }
-        finish()
-
+        onMainDispatcher { finish() }
     }
-
-    // 015: 见 GroupSettingsActivity —— fragment 未 attach 时防 NPE。
-    val child: MyPreferenceFragmentCompat?
-        get() = supportFragmentManager.findFragmentById(R.id.settings) as? MyPreferenceFragmentCompat
-
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.profile_config_menu, menu)
+        menu.add(0, 1, 0, R.string.apply).setIcon(R.drawable.ic_action_done).setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
         return true
     }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean =
-        child?.onOptionsItemSelected(item) ?: super.onOptionsItemSelected(item)
-
+    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        1 -> { currentFocus?.clearFocus(); runOnDefaultDispatcher { saveAndExit() }; true }
+        else -> super.onOptionsItemSelected(item)
+    }
     override fun onBackPressed() {
-        if (needSave()) {
-            UnsavedChangesDialogFragment().apply { key() }.show(supportFragmentManager, null)
-        } else super.onBackPressed()
+        if (!needSave()) { super.onBackPressed(); return }
+        MaterialAlertDialogBuilder(this).setTitle(R.string.unsaved_changes_prompt)
+            .setPositiveButton(R.string.yes) { _, _ -> runOnDefaultDispatcher { saveAndExit() } }
+            .setNegativeButton(R.string.no) { _, _ -> finish() }
+            .setNeutralButton(android.R.string.cancel, null).show()
     }
-
-    override fun onSupportNavigateUp(): Boolean {
-        if (!super.onSupportNavigateUp()) finish()
-        return true
-    }
-
-    override fun onDestroy() {
-        DataStore.profileCacheStore.unregisterChangeListener(this)
-        super.onDestroy()
-    }
-
+    override fun onSupportNavigateUp(): Boolean { onBackPressed(); return true }
+    override fun onDestroy() { DataStore.profileCacheStore.unregisterChangeListener(this); super.onDestroy() }
     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
-        if (key != Key.PROFILE_DIRTY) {
-            DataStore.dirty = true
-        }
+        if (key != Key.PROFILE_DIRTY) DataStore.dirty = true
     }
 
-    class MyPreferenceFragmentCompat : PreferenceFragmentCompat() {
+    class EditorFragment : androidx.fragment.app.Fragment() {
+        private val host get() = requireActivity() as KaringRouteSettingsActivity
+        private lateinit var packages: android.widget.EditText
+        private lateinit var outbound: android.widget.Spinner
+        private var updating = false
+        private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
-        var activity: KaringRouteSettingsActivity? = null
-
-        override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
-            preferenceManager.preferenceDataStore = DataStore.profileCacheStore
-            try {
-                activity = (requireActivity() as KaringRouteSettingsActivity).apply {
-                    createPreferences(savedInstanceState, rootKey)
+        override fun onCreateView(inflater: android.view.LayoutInflater, container: android.view.ViewGroup?, state: Bundle?): View {
+            val context = requireContext()
+            val scroll = android.widget.ScrollView(context)
+            val content = android.widget.LinearLayout(context).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                setPadding(dp(16), dp(8), dp(16), dp(32))
+                isFocusableInTouchMode = true
+            }
+            scroll.addView(content)
+            fun field(title: String, example: String, value: String, set: (String) -> Unit, select: (() -> Unit)? = null, single: Boolean = false): android.widget.EditText {
+                val row = android.widget.LinearLayout(context).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+                val box = com.google.android.material.textfield.TextInputLayout(context, null, com.google.android.material.R.attr.textInputOutlinedStyle).apply {
+                    hint = title
+                    layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    setPadding(0, dp(6), 0, dp(6))
                 }
-            } catch (e: Exception) {
-                Toast.makeText(
-                    SagerNet.application,
-                    "Error on createPreferences, please try again.",
-                    Toast.LENGTH_SHORT
-                ).show()
-                Logs.e(e)
-            }
-        }
-
-        override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-            super.onViewCreated(view, savedInstanceState)
-
-            ViewCompat.setOnApplyWindowInsetsListener(listView, ListListener)
-
-            activity?.apply {
-                viewCreated(view, savedInstanceState)
-            }
-        }
-
-        override fun onOptionsItemSelected(item: MenuItem) = when (item.itemId) {
-            R.id.action_delete -> {
-                if (DataStore.editingId == 0L) {
-                    requireActivity().finish()
-                } else {
-                    DeleteConfirmationDialogFragment().apply {
-                        arg(ProfileIdArg(DataStore.editingId))
-                        key()
-                    }.show(parentFragmentManager, null)
+                val edit = com.google.android.material.textfield.TextInputEditText(context).apply {
+                    inputType = if (single) android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES else android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                    minLines = if (single) 1 else 3
+                    gravity = android.view.Gravity.TOP or android.view.Gravity.START
+                    setText(value)
+                    setOnFocusChangeListener { _, focused ->
+                        box.hint = if (focused && text.isNullOrEmpty()) example else title
+                    }
+                    addTextChangedListener(object : android.text.TextWatcher {
+                        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                            box.hint = if (isFocused && s.isNullOrEmpty()) example else title
+                            if (!updating) set(s?.toString().orEmpty())
+                        }
+                        override fun afterTextChanged(s: android.text.Editable?) {}
+                    })
                 }
-                true
+                box.addView(edit); row.addView(box)
+                if (select != null) row.addView(android.widget.ImageButton(context).apply {
+                    setImageResource(R.drawable.karing_editor_chevron)
+                    background = null
+                    contentDescription = getString(R.string.karing_select_description, title)
+                    setOnClickListener { select() }
+                    layoutParams = android.widget.LinearLayout.LayoutParams(dp(48), dp(48))
+                })
+                content.addView(row)
+                return edit
             }
-
-            R.id.action_apply -> {
-                runOnDefaultDispatcher {
-                    activity?.saveAndExit()
+            field(getString(R.string.route_name), getString(R.string.karing_example_name), DataStore.routeName, { DataStore.routeName = it }, single = true)
+            val logic = android.widget.RadioGroup(context).apply { orientation = android.widget.RadioGroup.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+            logic.addView(android.widget.TextView(context).apply { text = getString(R.string.route_logic); setPadding(0, 0, dp(12), 0) })
+            val or = android.widget.RadioButton(context).apply { id = View.generateViewId(); text = "OR" }
+            val and = android.widget.RadioButton(context).apply { id = View.generateViewId(); text = "AND" }
+            logic.addView(or); logic.addView(and); logic.check(if (DataStore.routeLogic == "or") or.id else and.id)
+            logic.setOnCheckedChangeListener { _, id -> DataStore.routeLogic = if (id == or.id) "or" else "and" }
+            content.addView(logic)
+            lateinit var builtins: android.widget.EditText
+            builtins = field(getString(R.string.route_builtin_rulesets), "geosite:github\ngeoip:github", DataStore.routeBuiltinRulesets, { DataStore.routeBuiltinRulesets = it }, {
+                io.nekohasekai.sagernet.widget.RouteBuiltinPreference.showSelector(host, DataStore.routeBuiltinRulesets) { value ->
+                    DataStore.routeBuiltinRulesets = value
+                    updating = true; builtins.setText(value); updating = false
                 }
-                true
+            })
+            field(getString(R.string.route_external_rulesets), "https://example.com/rules.srs", DataStore.routeExternalRulesets, { DataStore.routeExternalRulesets = it })
+            packages = field(getString(R.string.karing_package_ids), "com.example.app", DataStore.routePackages, { DataStore.routePackages = it }, { host.openApps() })
+            field(getString(R.string.route_packages_manual), "com.example.manual", DataStore.routePackagesManual, { DataStore.routePackagesManual = it })
+            field("domain", "example.com", DataStore.routeDomain, { DataStore.routeDomain = it })
+            field("domain suffix", "example.com", DataStore.routeDomainSuffix, { DataStore.routeDomainSuffix = it })
+            field("domain keyword", "example", DataStore.routeDomainKeyword, { DataStore.routeDomainKeyword = it })
+            field("domain regex", "^example\\.com$", DataStore.routeDomainRegex, { DataStore.routeDomainRegex = it })
+            field("IP CIDR", "192.0.2.0/24", DataStore.routeIpCidr, { DataStore.routeIpCidr = it })
+            field("dst port", "443", DataStore.routePort, { DataStore.routePort = it })
+            field("port range", "1000:2000", DataStore.routePortRange, { DataStore.routePortRange = it })
+            field("src ip", "192.0.2.0/24", DataStore.routeSource, { DataStore.routeSource = it })
+            field("src port", "53", DataStore.routeSourcePort, { DataStore.routeSourcePort = it })
+            field("network", "tcp\nudp", DataStore.routeNetwork, { DataStore.routeNetwork = it })
+            field("network type", "wifi", DataStore.routeNetworkType, { DataStore.routeNetworkType = it })
+            field("Wi-Fi SSID", "My Wi-Fi", DataStore.routeWifiSsid, { DataStore.routeWifiSsid = it })
+            field("Wi-Fi BSSID", "00:11:22:33:44:55", DataStore.routeWifiBssid, { DataStore.routeWifiBssid = it })
+            field("protocol", "http", DataStore.routeProtocol, { DataStore.routeProtocol = it })
+            content.addView(android.widget.TextView(context).apply { text = getString(R.string.karing_outbound); setPadding(0, dp(12), 0, 0) })
+            outbound = android.widget.Spinner(context).apply {
+                adapter = android.widget.ArrayAdapter.createFromResource(context, R.array.outbound_entry, android.R.layout.simple_spinner_dropdown_item)
+                setSelection(DataStore.routeOutbound.coerceIn(0, 3))
+                onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                    override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+                    override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                        if (updating || position == DataStore.routeOutbound) return
+                        if (position == 3) host.openProfile() else DataStore.routeOutbound = position
+                    }
+                }
             }
-
-            else -> false
+            content.addView(outbound)
+            // An explicit button permits re-selecting a profile when already selected.
+            content.addView(android.widget.Button(context).apply { text = getString(R.string.karing_select_profile); setOnClickListener { host.openProfile() } })
+            content.requestFocus()
+            return scroll
         }
-
-        override fun onDisplayPreferenceDialog(preference: Preference) {
-            activity?.apply {
-                if (displayPreferenceDialog(preference)) return
-            }
-            if (preference is EditTextPreference) {
-                CopyableEditTextPreferenceDialog.newInstance(preference.key, this)
-                    .show(parentFragmentManager, CopyableEditTextPreferenceDialog.DIALOG_TAG)
-                return
-            }
-            super.onDisplayPreferenceDialog(preference)
-        }
-
+        fun refreshPackages() { if (::packages.isInitialized) { updating = true; packages.setText(DataStore.routePackages); updating = false } }
+        fun refreshOutbound() { if (::outbound.isInitialized) { updating = true; outbound.setSelection(DataStore.routeOutbound.coerceIn(0, 3)); updating = false } }
     }
-
-    object PasswordSummaryProvider : Preference.SummaryProvider<EditTextPreference> {
-
-        override fun provideSummary(preference: EditTextPreference): CharSequence {
-            val text = preference.text
-            return if (text.isNullOrBlank()) {
-                preference.context.getString(androidx.preference.R.string.not_set)
-            } else {
-                "\u2022".repeat(text.length)
-            }
-        }
-
-    }
-
 }

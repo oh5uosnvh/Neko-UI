@@ -6,7 +6,9 @@ import android.os.Bundle
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
-import android.widget.EditText
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import androidx.appcompat.widget.PopupMenu
 import androidx.appcompat.widget.Toolbar
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -26,6 +28,14 @@ import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.widget.ListListener
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
 
+/** Reassign only the visible group's existing order slots; other rows keep their priority. */
+internal fun moveVisibleRoute(rules: MutableList<RuleEntity>, from: Int, to: Int) {
+    val orders = rules.map { it.userOrder }.sorted()
+    val item = rules.removeAt(from)
+    rules.add(to, item)
+    rules.forEachIndexed { index, rule -> rule.userOrder = orders[index] }
+}
+
 class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItemClickListener {
 
     lateinit var activity: MainActivity
@@ -44,6 +54,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
         }
     }
     private var pendingOutboundRule: RuleEntity? = null
+    private var showPresets = true
 
     private fun saveOutbound(rule: RuleEntity, outbound: Long) {
         runOnDefaultDispatcher {
@@ -125,6 +136,12 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
         }).attachToRecyclerView(ruleListView)
     }
 
+    override fun onDestroyView() {
+        if (::undoManager.isInitialized) undoManager.flush()
+        if (::ruleAdapter.isInitialized) ruleAdapter.commitMove()
+        super.onDestroyView()
+    }
+
     override fun onDestroy() {
         if (::ruleAdapter.isInitialized) {
             ProfileManager.removeListener(ruleAdapter)
@@ -200,12 +217,27 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
     inner class RuleAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>(), ProfileManager.RuleListener, UndoSnackbarManager.Interface<RuleEntity> {
 
         val ruleList = ArrayList<RuleEntity>()
+        private val allRules = ArrayList<RuleEntity>()
+        private val pendingRemoval = HashSet<Long>()
+
+        private fun refreshVisible() {
+            ruleList.clear()
+            ruleList.addAll(allRules.filter { it.hasKaringEnvelope() == showPresets && it.id !in pendingRemoval }.sortedBy { it.userOrder })
+            notifyDataSetChanged()
+        }
+
+        fun selectGroup(presets: Boolean) {
+            if (showPresets == presets) return
+            commitMove()
+            showPresets = presets
+            refreshVisible()
+        }
         suspend fun reload() {
             val rules = ProfileManager.getRules()
             ruleListView.post {
-                ruleList.clear()
-                ruleList.addAll(rules)
-                ruleAdapter.notifyDataSetChanged()
+                allRules.clear()
+                allRules.addAll(rules)
+                refreshVisible()
             }
         }
 
@@ -251,10 +283,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
         private var moved = false
         fun move(from: Int, to: Int) {
             if (from !in 1..ruleList.size || to !in 1..ruleList.size || from == to) return
-            val orders = ruleList.map { it.userOrder }.sorted()
-            val item = ruleList.removeAt(from - 1)
-            ruleList.add(to - 1, item)
-            ruleList.forEachIndexed { index, rule -> rule.userOrder = orders[index] }
+            moveVisibleRoute(ruleList, from - 1, to - 1)
             moved = true
             notifyItemMoved(from, to)
         }
@@ -277,66 +306,89 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
         }
 
         fun remove(index: Int) {
-            ruleList.removeAt(index - 1)
+            val rule = ruleList.removeAt(index - 1)
+            pendingRemoval.add(rule.id)
             notifyItemRemoved(index)
         }
 
         override fun undo(actions: List<Pair<Int, RuleEntity>>) {
-            for ((index, item) in actions) {
-                ruleList.add(index - 1, item)
-                notifyItemInserted(index)
+            actions.forEach { (_, item) ->
+                pendingRemoval.remove(item.id)
+                if (allRules.none { it.id == item.id }) allRules.add(item)
             }
+            refreshVisible()
         }
 
         override fun commit(actions: List<Pair<Int, RuleEntity>>) {
             val rules = actions.map { it.second }
             runOnDefaultDispatcher {
                 ProfileManager.deleteRules(rules)
+                ruleListView.post {
+                    rules.forEach { pendingRemoval.remove(it.id) }
+                }
             }
         }
 
         override suspend fun onAdd(rule: RuleEntity) {
             ruleListView.post {
-                ruleList.add(rule)
-                ruleAdapter.notifyItemInserted(ruleList.size)
+                allRules.removeAll { it.id == rule.id }
+                allRules.add(rule)
+                refreshVisible()
                 needReload()
             }
         }
 
         override suspend fun onUpdated(rule: RuleEntity) {
             ruleListView.post {
-                val index = ruleList.indexOfFirst { it.id == rule.id }
-                if (index >= 0) {
-                    ruleList[index] = rule
-                    ruleAdapter.notifyItemChanged(index + 1)
-                }
+                val index = allRules.indexOfFirst { it.id == rule.id }
+                if (index >= 0) allRules[index] = rule else allRules.add(rule)
+                refreshVisible()
                 needReload()
             }
         }
 
         override suspend fun onRemoved(ruleId: Long) {
             ruleListView.post {
-                val index = ruleList.indexOfFirst { it.id == ruleId }
-                if (index >= 0) {
-                    ruleList.removeAt(index)
-                    ruleAdapter.notifyItemRemoved(index + 1)
-                }
+                allRules.removeAll { it.id == ruleId }
+                refreshVisible()
                 needReload()
             }
         }
 
         override suspend fun onCleared() {
             ruleListView.post {
-                ruleList.clear()
-                ruleAdapter.notifyDataSetChanged()
+                allRules.clear()
+                refreshVisible()
                 needReload()
             }
         }
 
-        inner class DocumentHolder(binding: LayoutEmptyRouteBinding) : RecyclerView.ViewHolder(binding.root) {
+        inner class DocumentHolder(private val binding: LayoutEmptyRouteBinding) : RecyclerView.ViewHolder(binding.root) {
             fun bind() {
-                itemView.setOnClickListener {
-                    it.context.launchCustomTab("https://matsuridayo.github.io/nb4a-route/")
+                binding.routeWarning.background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.TRANSPARENT)
+                    setStroke((resources.displayMetrics.density * 2).toInt().coerceAtLeast(1),
+                        ContextCompat.getColor(itemView.context, R.color.color_route_block))
+                }
+                binding.routeWarning.setOnClickListener {
+                    MaterialAlertDialogBuilder(it.context).setMessage(R.string.route_warn)
+                        .setPositiveButton(android.R.string.ok, null)
+                        .setNeutralButton(R.string.route_documentation) { _, _ ->
+                            it.context.launchCustomTab("https://matsuridayo.github.io/nb4a-route/")
+                        }.show()
+                }
+                binding.routePresets.isChecked = showPresets
+                binding.routeCustom.isChecked = !showPresets
+                binding.routePresets.setOnClickListener {
+                    selectGroup(true)
+                    binding.routePresets.isChecked = showPresets
+                    binding.routeCustom.isChecked = !showPresets
+                }
+                binding.routeCustom.setOnClickListener {
+                    selectGroup(false)
+                    binding.routePresets.isChecked = showPresets
+                    binding.routeCustom.isChecked = !showPresets
                 }
             }
         }
@@ -366,48 +418,31 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 }
                 routeOutbound.setTextColor(ContextCompat.getColor(itemView.context, colorRes))
 
-                profileName.setOnClickListener {
-                    val input = EditText(it.context).apply {
-                        setSingleLine(true)
-                        setText(rule.name)
-                        selectAll()
-                        setPadding(48, 0, 48, 0)
+                routeOutbound.setOnClickListener { anchor ->
+                    val selectedRule = rule
+                    PopupMenu(anchor.context, anchor).apply {
+                        menu.add(0, 0, 0, R.string.route_proxy)
+                        menu.add(0, 1, 1, R.string.route_bypass)
+                        menu.add(0, 2, 2, R.string.route_block)
+                        menu.add(0, 3, 3, R.string.select_profile)
+                        setOnMenuItemClickListener { item ->
+                            when (item.itemId) {
+                                0 -> saveOutbound(selectedRule, 0L)
+                                1 -> saveOutbound(selectedRule, -1L)
+                                2 -> saveOutbound(selectedRule, -2L)
+                                3 -> {
+                                    pendingOutboundRule = selectedRule
+                                    selectProfile.launch(Intent(anchor.context, ProfileSelectActivity::class.java).apply {
+                                        ProfileManager.getProfile(selectedRule.outbound)?.let { selected ->
+                                            putExtra(ProfileSelectActivity.EXTRA_SELECTED, selected)
+                                        }
+                                    })
+                                }
+                            }
+                            true
+                        }
+                        show()
                     }
-                    MaterialAlertDialogBuilder(it.context)
-                        .setTitle(R.string.route_name)
-                        .setView(input)
-                        .setPositiveButton(android.R.string.ok) { _, _ ->
-                            val name = input.text.toString().trim()
-                            if (name.isNotEmpty()) {
-                                val id = rule.id
-                                runOnDefaultDispatcher {
-                                    SagerDatabase.rulesDao.getById(id)?.let { current ->
-                                        current.name = name
-                                        ProfileManager.updateRule(current)
-                                    }
-                                }
-                            }
-                        }.setNegativeButton(android.R.string.cancel, null).show()
-                }
-                routeOutbound.setOnClickListener {
-                    val labels = arrayOf(
-                        it.context.getString(R.string.route_proxy),
-                        it.context.getString(R.string.route_bypass),
-                        it.context.getString(R.string.route_block),
-                        it.context.getString(R.string.select_profile)
-                    )
-                    MaterialAlertDialogBuilder(it.context).setTitle(R.string.cag_route)
-                        .setItems(labels) { _, which ->
-                            when (which) {
-                                0 -> saveOutbound(rule, 0L)
-                                1 -> saveOutbound(rule, -1L)
-                                2 -> saveOutbound(rule, -2L)
-                                3 -> { pendingOutboundRule = rule; selectProfile.launch(Intent(it.context, ProfileSelectActivity::class.java).apply {
-                                    ProfileManager.getProfile(rule.outbound)?.let { selected -> putExtra(ProfileSelectActivity.EXTRA_SELECTED, selected) }
-                                })
-                                }
-                            }
-                        }.show()
                 }
                 itemView.setOnClickListener {
                     editButton.performClick()

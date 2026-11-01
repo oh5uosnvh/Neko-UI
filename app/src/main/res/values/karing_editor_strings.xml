@@ -1,0 +1,11 @@
+<resources>
+    <string name="karing_wrong_editor">Use the original route editor for this rule</string>
+    <string name="karing_select_description">Select %1$s</string>
+    <string name="karing_example_name">Example: GitHub</string>
+    <string name="karing_package_ids">Application package IDs</string>
+    <string name="karing_search_rules">Search rule sets</string>
+    <string name="karing_rules_load_failed">Could not load built-in rule sets</string>
+    <string name="karing_rules_install_failed">Could not install selected rule sets; no changes applied</string>
+    <string name="karing_outbound">Outbound</string>
+    <string name="karing_select_profile">Select outbound profile</string>
+</resources>

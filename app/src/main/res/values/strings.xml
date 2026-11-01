@@ -740,4 +740,7 @@
     <string name="karing_acl_unavailable">未打包</string>
     <string name="karing_acl_ready">已安装</string>
     <string name="karing_acl_bundled">可安装</string>
+    <string name="route_preset_group">Preset routing</string>
+    <string name="route_custom_group">Custom routing</string>
+    <string name="route_documentation">Documentation</string>
 </resources>

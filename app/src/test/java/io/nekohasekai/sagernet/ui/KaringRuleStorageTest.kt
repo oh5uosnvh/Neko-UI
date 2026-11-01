@@ -11,6 +11,11 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28])
 class KaringRuleStorageTest {
+    @Test fun presetDefaultsToOrButExplicitAndIsPreserved() {
+        val preset = KaringRuleJson.parsePreset("""{"rules":[{"name":"default"},{"name":"explicit","or":false}]}""")
+        assertTrue(preset.rules[0].or)
+        assertFalse(preset.rules[1].or)
+    }
     @Test fun presetCamelCaseAndUnknownFieldsSurviveStorage() {
         val preset = KaringRuleJson.parsePreset("""{"rules":[{"processName":["app.exe"],"future":{"x":1},"rule_set_items":[{"url":"https://example.com/a.json","type":"source","future":true}]}]}""")
         val input = preset.rules.single()
@@ -53,6 +58,31 @@ class KaringRuleStorageTest {
         assertEquals(1, root.getJSONObject("custom").getInt("foo"))
         assertEquals(5, root.getJSONObject(KARING_CONFIG_KEY).getInt("future"))
         assertEquals("x", root.getJSONObject(KARING_CONFIG_KEY).getJSONArray("process_name").getString(0))
+    }
+
+    @Test fun storedLogicAndOpaqueFieldsSurviveNameEdit() {
+        for (or in listOf(true, false)) {
+            val original = KaringRuleJson.parsePreset("""{"rules":[{"or":$or,"processName":["demo.exe"],"future":{"keep":true},"rule_set_items":[{"url":"https://example.com/rules","type":"source","extra":7}]}]}""").rules.single()
+            val entity = RuleEntity(name = "old").apply { applyKaringRule(original) }
+            val read = entity.toKaringRule()
+            entity.name = "renamed"
+            entity.applyKaringRule(read)
+            val result = entity.toKaringRule()
+            assertEquals(or, result.or)
+            assertEquals("renamed", entity.name)
+            assertEquals(listOf("demo.exe"), result.processName)
+            assertEquals("source", result.ruleSetItems.single().type)
+            val json = JSONObject(KaringRuleJson.toJson(result))
+            assertTrue(json.getJSONObject("future").getBoolean("keep"))
+            assertEquals(7, json.getJSONArray("rule_set_items").getJSONObject(0).getInt("extra"))
+        }
+    }
+
+    @Test fun missingEnvelopeLogicDefaultsToOrButExplicitAndStaysAnd() {
+        val default = RuleEntity(config = """{"nekobox_route_v1":{}}""")
+        val explicitAnd = RuleEntity(config = """{"nekobox_route_v1":{"logic":"and"}}""")
+        assertTrue(default.toKaringRule().or)
+        assertFalse(explicitAnd.toKaringRule().or)
     }
 
     @Test fun invalidCustomConfigIsNotOverwritten() {
