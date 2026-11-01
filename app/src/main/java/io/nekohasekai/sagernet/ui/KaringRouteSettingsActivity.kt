@@ -154,15 +154,15 @@ class KaringRouteSettingsActivity(
     }
 
     private var missingPackages = emptyList<String>()
-    private val selectApps = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { _, _ ->
+    private val selectApps = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { _ ->
         // AppListActivity only writes installed packages. Preserve manually entered or
         // uninstalled IDs that it cannot display or intentionally deselect.
         DataStore.routePackages = (DataStore.routePackages.lineSequence().filter { it.isNotBlank() } + missingPackages.asSequence()).distinct().joinToString("\n")
         child?.refreshPackages()
     }
-    private val selectProfile = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { code, data ->
-        if (code == Activity.RESULT_OK && data != null) {
-            val id = data.getLongExtra(ProfileSelectActivity.EXTRA_PROFILE_ID, 0)
+    private val selectProfile = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            val id = result.data!!.getLongExtra(ProfileSelectActivity.EXTRA_PROFILE_ID, 0)
             if (id > 0) {
                 DataStore.routeOutboundRule = id
                 DataStore.routeOutbound = OutboundPreference.VALUE_SELECT_PROFILE.toInt()
