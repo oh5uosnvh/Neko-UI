@@ -32,7 +32,7 @@ func validKaringPart(value string) bool {
 
 // ValidateKaringSRS parses the complete compressed SRS body, not merely its
 // three-byte magic. family is acl, geosite, or geoip; code excludes .srs.
-func ValidateKaringSRS(path, family, code string) (ruleCount int32, digest string, err error) {
+func validateKaringSRS(path, family, code string) (ruleCount int32, digest string, err error) {
 	if !validKaringPart(family) || (family != "acl" && family != "geosite" && family != "geoip") {
 		return 0, "", fmt.Errorf("invalid Karing SRS family")
 	}
@@ -63,7 +63,7 @@ func ValidateKaringSRS(path, family, code string) (ruleCount int32, digest strin
 // ValidateKaringSRSFile is the gomobile-friendly structured entry point.
 // The returned object retains rule count and digest for UI diagnostics.
 func ValidateKaringSRSFile(path, family, code string) *KaringSRSValidation {
-	count, digest, err := ValidateKaringSRS(path, family, code)
+	count, digest, err := validateKaringSRS(path, family, code)
 	result := &KaringSRSValidation{Valid: err == nil, RuleCount: count, Sha256: digest}
 	if err != nil {
 		result.Error = err.Error()
@@ -73,7 +73,7 @@ func ValidateKaringSRSFile(path, family, code string) *KaringSRSValidation {
 
 // KaringSRSResource resolves only the manager-owned external asset tree.
 // It intentionally does not search arbitrary filesystem locations.
-func KaringSRSResource(reference string) (path string, ruleCount int32, err error) {
+func karingSRSResource(reference string) (path string, ruleCount int32, err error) {
 	parts := strings.Split(reference, ":")
 	if len(parts) != 2 || !validKaringPart(parts[0]) || !validKaringPart(parts[1]) {
 		return "", 0, fmt.Errorf("invalid Karing rule reference")
@@ -91,7 +91,7 @@ func KaringSRSResource(reference string) (path string, ruleCount int32, err erro
 	if err != nil || filepath.Dir(candidate) != root {
 		return "", 0, fmt.Errorf("unsafe Karing rule path")
 	}
-	count, _, err := ValidateKaringSRS(candidate, family, code)
+	count, _, err := validateKaringSRS(candidate, family, code)
 	if err != nil {
 		return "", 0, err
 	}
