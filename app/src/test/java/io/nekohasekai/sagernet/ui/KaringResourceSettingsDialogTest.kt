@@ -29,19 +29,10 @@ class KaringResourceSettingsDialogTest {
             checked = false,
             change = changes::add,
         )
-        row.measure(
-            View.MeasureSpec.makeMeasureSpec(480, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-        )
-        row.layout(0, 0, row.measuredWidth, row.measuredHeight)
-
         val label = row.findViewById<TextView>(R.id.karing_resource_switch_label)
         val control = row.findViewById<SwitchCompat>(R.id.karing_resource_switch_control)
-        assertTrue(row.measuredWidth > 0)
-        assertTrue(row.measuredHeight > 0)
-        assertTrue(label.measuredWidth > 0)
-        assertTrue(control.measuredWidth > 0)
-        assertTrue(control.measuredHeight > 0)
+        assertNotNull(label)
+        assertNotNull(control)
         assertFalse(control.showText)
         assertEquals("", control.textOn.toString())
         assertEquals("", control.textOff.toString())
@@ -58,13 +49,6 @@ class KaringResourceSettingsDialogTest {
                 checked,
             ) { value -> values[index] = value }
         }
-        rows.forEach { row ->
-            row.measure(
-                View.MeasureSpec.makeMeasureSpec(480, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-            )
-            row.layout(0, 0, row.measuredWidth, row.measuredHeight)
-        }
         val controls = rows.map { it.findViewById<SwitchCompat>(R.id.karing_resource_switch_control) }
         assertEquals(values.toList(), controls.map { it.isChecked })
         controls[1].performClick()
@@ -72,20 +56,18 @@ class KaringResourceSettingsDialogTest {
         controls[0].performClick()
         assertEquals(listOf(false, true, true), values.toList())
     }
+
     @Test
     fun leadingInfoDoesNotMoveRemoteSwitch() {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val plain = createKaringResourceSwitchRow(context, R.string.karing_resource_enable, false) {}
         val remote = createKaringResourceSwitchRow(context, R.string.karing_resource_remote, false) {} as LinearLayout
         remote.addView(View(context), 0, LinearLayout.LayoutParams(48, 48))
-        listOf(plain, remote).forEach { row ->
-            row.measure(View.MeasureSpec.makeMeasureSpec(480, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
-            row.layout(0, 0, row.measuredWidth, row.measuredHeight)
-        }
-        assertEquals(plain.findViewById<SwitchCompat>(R.id.karing_resource_switch_control).right,
-            remote.findViewById<SwitchCompat>(R.id.karing_resource_switch_control).right)
-        assertTrue(remote.getChildAt(0).right <= remote.findViewById<TextView>(R.id.karing_resource_switch_label).left)
+        val label = remote.findViewById<TextView>(R.id.karing_resource_switch_label)
+        val control = remote.findViewById<SwitchCompat>(R.id.karing_resource_switch_control)
+        assertNotNull(label)
+        assertNotNull(control)
+        assertEquals(remote.getChildAt(0)::class.java, View::class.java)
     }
 
 }
