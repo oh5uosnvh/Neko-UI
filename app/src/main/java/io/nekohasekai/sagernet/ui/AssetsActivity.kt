@@ -228,7 +228,7 @@ class AssetsActivity : ThemedActivity() {
                         }
                     }
                     onMainDispatcher {
-                        if (this.file != file) return@onMainDispatcher
+                        if (this@AssetHolder.file != file) return@onMainDispatcher
                         binding.assetStatus.text = counts.fold(
                             { (bundled, valid) -> getString(R.string.karing_acl_status, bundled, valid) },
                             { it.readableMessage }
@@ -307,7 +307,7 @@ class AssetsActivity : ThemedActivity() {
                         }
                         "${entry.code} · $status"
                     }.toTypedArray()
-                    MaterialAlertDialogBuilder(this).setTitle(R.string.karing_acl_resources)
+                    MaterialAlertDialogBuilder(this@AssetsActivity).setTitle(R.string.karing_acl_resources)
                         .setItems(labels) { _, which ->
                             val entry = entries[which]
                             if (!entry.bundled && !entry.valid) {
