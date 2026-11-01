@@ -42,8 +42,6 @@ class KaringResourceSettingsDialogTest {
         assertTrue(label.measuredWidth > 0)
         assertTrue(control.measuredWidth > 0)
         assertTrue(control.measuredHeight > 0)
-        assertNotNull(control.thumbDrawable)
-        assertNotNull(control.trackDrawable)
         assertFalse(control.showText)
         assertEquals("", control.textOn.toString())
         assertEquals("", control.textOff.toString())

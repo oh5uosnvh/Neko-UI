@@ -120,7 +120,7 @@ jobs:
             unset KEYSTORE_PASS ALIAS_NAME ALIAS_PASS
           fi
           ./run init action gradle
-          ./gradlew --no-daemon app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.ui.KaringRuleStorageTest' --tests 'io.nekohasekai.sagernet.ui.RouteListRegressionTest' --tests 'io.nekohasekai.sagernet.ui.KaringResourceSettingsDialogTest' --tests 'io.nekohasekai.sagernet.ui.KaringEditorHintsTest'
+          ./gradlew --no-daemon app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.ui.KaringRuleStorageTest' --tests 'io.nekohasekai.sagernet.ui.RouteListRegressionTest' --tests 'io.nekohasekai.sagernet.ui.KaringResourceSettingsDialogTest' --tests 'io.nekohasekai.sagernet.ui.KaringEditorHintsTest' --tests 'io.nekohasekai.sagernet.assets.KaringResourceInstallTest'
           ./gradlew --no-daemon app:assemblePreviewRelease
           mkdir -p release
           shopt -s nullglob
