@@ -192,59 +192,83 @@ object ProfileManager {
         }
     }
 
+    /**
+     * Reads routes and performs the built-in initialization/reconciliation before
+     * returning them. The defaults and the CN preset are inserted in one Room
+     * transaction; existing rows are never updated or reordered.
+     */
     suspend fun getRules(): List<RuleEntity> {
-        var rules = SagerDatabase.rulesDao.allRules()
-        if (rules.isEmpty() && !DataStore.rulesFirstCreate) {
-            DataStore.rulesFirstCreate = true
-            createRule(
-                RuleEntity(
-                    name = app.getString(R.string.route_opt_block_quic),
-                    port = "443",
-                    network = "udp",
-                    outbound = -2
-                )
-            )
-            createRule(
-                RuleEntity(
-                    name = app.getString(R.string.route_opt_block_ads),
-                    domains = "geosite:category-ads-all",
-                    outbound = -2
-                )
-            )
-            val fuckedCountry = mutableListOf("cn:中国")
-            if (Locale.getDefault().country != Locale.CHINA.country) {
-                // 非中文用户
-                fuckedCountry += "ir:Iran"
-                fuckedCountry += "ru:Russia"
+        try {
+            SagerDatabase.instance.runInTransaction {
+                val db = SagerDatabase.instance.openHelper.writableDatabase
+                // Stored in the same database as rules: marker and inserts commit together.
+                db.execSQL("CREATE TABLE IF NOT EXISTS `karing_initialization` (`key` TEXT NOT NULL PRIMARY KEY)")
+                val completed = db.query("SELECT 1 FROM `karing_initialization` WHERE `key` = 'cn-v1'").use { it.moveToFirst() }
+                if (!completed) {
+                    val preset = app.assets.open(KaringPresetImporter.CHINA_PRESET_ASSET).bufferedReader()
+                        .use { KaringPresetImporter.parse(it.readText()) }
+                    require(preset.rules.size == 28) { "CN preset must contain 28 rules" }
+                    val dao = SagerDatabase.rulesDao
+                    val existing = dao.allRules()
+                    val defaults = mutableListOf<RuleEntity>()
+                    @Suppress("DEPRECATION")
+                    val packageInfo = app.packageManager.getPackageInfo(app.packageName, 0)
+                    // The old rulesFirstCreate lives in an in-memory database and is
+                    // lost on restart; do not recreate legacy defaults on upgrade.
+                    val freshInstall = packageInfo.firstInstallTime == packageInfo.lastUpdateTime
+                    if (existing.isEmpty() && freshInstall && !DataStore.rulesFirstCreate) {
+                        defaults += RuleEntity(
+                            name = app.getString(R.string.route_opt_block_quic),
+                            port = "443", network = "udp", outbound = -2
+                        )
+                        defaults += RuleEntity(
+                            name = app.getString(R.string.route_opt_block_ads),
+                            domains = "geosite:category-ads-all", outbound = -2
+                        )
+                        val countries = mutableListOf("cn:中国")
+                        if (Locale.getDefault().country != Locale.CHINA.country) {
+                            countries += "ir:Iran"
+                            countries += "ru:Russia"
+                        }
+                        countries.forEach { countryEntry ->
+                            val country = countryEntry.substringBefore(":")
+                            val displayCountry = countryEntry.substringAfter(":")
+                            if (country == "cn") defaults += RuleEntity(
+                                name = app.getString(R.string.route_play_store, displayCountry),
+                                domains = "domain:googleapis.cn\ndomain:xn--ngstr-lra8j.com\ndomain:xn--ngstr-cn-8za9o.com"
+                            )
+                            defaults += RuleEntity(
+                                name = app.getString(R.string.route_bypass_domain, displayCountry),
+                                domains = "geosite:$country", outbound = -1
+                            )
+                            defaults += RuleEntity(
+                                name = app.getString(R.string.route_bypass_ip, displayCountry),
+                                ip = "geoip:$country", outbound = -1
+                            )
+                        }
+                    }
+                    var order = dao.nextOrder() ?: 1L
+                    defaults.forEach { rule ->
+                        rule.userOrder = order++
+                        rule.id = dao.createRule(rule)
+                    }
+                    val plan = KaringPresetImporter.importInto(
+                        dao.allRules(), preset, KaringPresetImporter.CHINA_PRESET_IMPORT_ID
+                    )
+                    plan.newRules.forEach { rule ->
+                        rule.userOrder = order++
+                        rule.id = dao.createRule(rule)
+                    }
+                    db.execSQL("INSERT INTO `karing_initialization` (`key`) VALUES ('cn-v1')")
+                }
             }
-            for (c in fuckedCountry) {
-                val country = c.substringBefore(":")
-                val displayCountry = c.substringAfter(":")
-                //
-                if (country == "cn") createRule(
-                    RuleEntity(
-                        name = app.getString(R.string.route_play_store, displayCountry),
-                        domains = "domain:googleapis.cn\ndomain:xn--ngstr-lra8j.com\ndomain:xn--ngstr-cn-8za9o.com",
-                    ), false
-                )
-                createRule(
-                    RuleEntity(
-                        name = app.getString(R.string.route_bypass_domain, displayCountry),
-                        domains = "geosite:$country",
-                        outbound = -1
-                    ), false
-                )
-                createRule(
-                    RuleEntity(
-                        name = app.getString(R.string.route_bypass_ip, displayCountry),
-                        ip = "geoip:$country",
-                        outbound = -1
-                    ), false
-                )
+        } catch (error: Exception) {
+            Logs.e("Karing CN preset initialization failed; retry on next route refresh", error)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                android.widget.Toast.makeText(app, "CN 预设初始化失败，下次打开路由时重试: ${error.message}", android.widget.Toast.LENGTH_LONG).show()
             }
-            rules = SagerDatabase.rulesDao.allRules()
         }
-        return rules
+        return SagerDatabase.rulesDao.allRules()
     }
 
 }

@@ -15,6 +15,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.KaringPresetImporter
+import io.nekohasekai.sagernet.database.hasKaringEnvelope
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.RuleEntity
@@ -425,7 +426,9 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                     }
                 }
                 editButton.setOnClickListener {
-                    startActivity(Intent(it.context, RouteSettingsActivity::class.java).apply {
+                    val editor = if (rule.hasKaringEnvelope()) KaringRouteSettingsActivity::class.java
+                        else RouteSettingsActivity::class.java
+                    startActivity(Intent(it.context, editor).apply {
                         putExtra(RouteSettingsActivity.EXTRA_ROUTE_ID, rule.id)
                     })
                 }

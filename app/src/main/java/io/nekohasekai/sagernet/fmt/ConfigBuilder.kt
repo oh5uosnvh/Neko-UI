@@ -171,6 +171,8 @@ fun buildConfig(
     }
 
     val extraRules = if (forTest) listOf() else SagerDatabase.rulesDao.enabledRules()
+    // A single snapshot is shared by explicit and automatically appended Karing rules.
+    val karingResolver = if (!forTest && !DataStore.globalMode) KaringResourceResolver(SagerNet.application) else null
     val extraProxies =
         if (forTest) mapOf() else SagerDatabase.proxyDao.getEntities(extraRules.mapNotNull { rule ->
             rule.outbound.takeIf { it > 0 && it != proxy.id }
@@ -702,17 +704,7 @@ fun buildConfig(
                 // the legacy single Rule_DefaultOptions path: sing-box address matching ORs
                 // domain/CIDR, while rule_set is an additional AND operand.
                 if (rule.hasKaringEnvelope()) {
-                    val resolver = object : KaringRuleSetResolver {
-                        override fun resolveBuiltIn(code: String): KaringRuleSetRef? =
-                            try { KaringResourceResolver(SagerNet.application).resolveBuiltIn(code) } catch (_: Exception) { null }
-
-                        override fun resolveRemote(item: io.nekohasekai.sagernet.database.KaringRuleSetItem): KaringRuleSetRef {
-                            val url = item.url.substringBefore('?')
-                            val tag = "ruleset-${kotlin.math.abs(item.url.hashCode())}"
-                            val format = if (url.endsWith(".json", true)) "source" else "binary"
-                            return KaringRuleSetRef(tag, format, item.url, remote = true)
-                        }
-                    }
+                    val resolver = checkNotNull(karingResolver)
                     var karingOutbound = when (rule.outbound) {
                         0L -> mainProxyTag
                         -1L -> TAG_BYPASS
@@ -720,6 +712,9 @@ fun buildConfig(
                         else -> if (rule.outbound == proxy.id) mainProxyTag else tagMap[rule.outbound] ?: ""
                     }
                     val karingModel = envelopeModel ?: error("Karing envelope disappeared while building route")
+                    // Check before the legacy warning-and-skip catch, including rows
+                    // that also contain other unsupported/invalid conditions.
+                    karingModel.ruleSetBuildIn.forEach { resolver.requireEnabledReference(it.trim()) }
                     val karingRule = try {
                         KaringRuleCompiler.compile(karingModel, resolver, karingOutbound, ruleSets, uidList)
                     } catch (error: IllegalArgumentException) {
@@ -743,7 +738,7 @@ fun buildConfig(
                     // turns AND into a broader DNS match and can bypass block/direct
                     // policy. External and acl rule-sets are also not known to be
                     // domain sets, so only geosite is safe to project.
-                    val dnsSets = karingModel.ruleSetBuildIn.filter { it.startsWith("geosite:") }
+                    val dnsSets = karingModel.ruleSetBuildIn.filter { it.startsWith("geosite:") }.map { "karing:$it" }
                     val hasExplicitDnsAddress = karingModel.domain.isNotEmpty() ||
                         karingModel.domainSuffix.isNotEmpty() || karingModel.domainKeyword.isNotEmpty() ||
                         karingModel.domainRegex.isNotEmpty() || dnsSets.isNotEmpty()
@@ -980,6 +975,43 @@ fun buildConfig(
             }
         }
 
+        if (!forTest && !DataStore.globalMode) {
+            // This app has no route-region setting. As with ProfileManager's default
+            // route initialization, use the device locale country, never SIM/IP geo.
+            // Regional direct rules are appended after user rules, not inserted before them.
+            val resolver = checkNotNull(karingResolver)
+            for (code in resolver.regionalReferences(java.util.Locale.getDefault().country)) {
+                val alreadyDirect = route.rules.any { existing ->
+                    if (existing !is Rule_DefaultOptions || existing.outbound != TAG_BYPASS) false
+                    else {
+                        val fields = existing.asMap().filterValues { it != null }
+                        fields.keys.all { it in setOf("type", "outbound", "rule_set") } &&
+                            existing.rule_set?.any { it == code || it == "karing:$code" } == true
+                    }
+                }
+                if (!alreadyDirect) {
+                    val sets = mutableListOf<RuleSet>()
+                    val regional = KaringRuleCompiler.compile(
+                        io.nekohasekai.sagernet.database.KaringRuleModel(ruleSetBuildIn = listOf(code)),
+                        resolver, TAG_BYPASS, sets
+                    )
+                    route.rules.add(regional)
+                    route.rule_set.addAll(sets)
+                    if (code.startsWith("geosite:")) userDNSRuleList += DNSRule_DefaultOptions().apply {
+                        rule_set = listOf("karing:$code")
+                        server = "dns-direct"
+                    }
+                }
+            }
+            // Built-in remote refs pass through the compiler's built-in branch;
+            // set the same 24-hour update period and an explicit proxy detour here.
+            route.rule_set.filter { it.type == "remote" &&
+                it.tag?.startsWith("karing:") == true
+            }.forEach {
+                it.update_interval = "1d"
+                it._hack_config_map["download_detour"] = mainProxyTag
+            }
+        }
         // 对 rule_set tag 去重
         if (route.rule_set != null) {
             route.rule_set = route.rule_set.distinctBy { it.tag }

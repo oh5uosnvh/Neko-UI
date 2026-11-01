@@ -4,15 +4,24 @@ import io.nekohasekai.sagernet.fmt.KaringRuleSetValidation
 import org.json.JSONObject
 import java.net.URI
 
-class KaringPresetException(message: String) : IllegalArgumentException(message)
+class KaringPresetException(message: String, cause: Throwable? = null) : IllegalArgumentException(message, cause)
 
 data class KaringImportResult(
+    /** The complete ordered view after applying the plan. */
     val rules: List<RuleEntity>,
+    /** Rows which the caller must insert, in their preset order. */
+    val newRules: List<RuleEntity> = emptyList(),
     val skippedDuplicates: Int = 0,
 )
 
-/** Pure parser/import planner. The caller writes the returned rows in one Room transaction. */
+/**
+ * Pure parser/import planner.  It deliberately does not touch Room: callers can
+ * insert [KaringImportResult.newRules] in the same transaction as their own
+ * initialization work.
+ */
 object KaringPresetImporter {
+    const val CHINA_PRESET_ASSET = "karing/cn.json"
+    const val CHINA_PRESET_IMPORT_ID = "karing-cn-v1"
     fun parse(json: String): KaringPreset {
         val preset = KaringRuleJson.parsePreset(json)
         if (preset.rules.any { it.ruleSetBuildIn.any { code -> !KaringRuleSetValidation.builtIn(code) } }) {
@@ -29,6 +38,7 @@ object KaringPresetImporter {
         preset: KaringPreset,
         importId: String,
         policy: KaringImportPolicy = KaringImportPolicy.APPEND,
+        excludedEntries: Set<String> = emptySet(),
     ): KaringImportResult {
         val current = if (policy == KaringImportPolicy.REPLACE_IMPORTED) {
             existing.filterNot { it.karingImportMarker() == importId }
@@ -36,9 +46,8 @@ object KaringPresetImporter {
         val seen = current.mapTo(mutableSetOf()) { fingerprint(it.toKaringRule()) }
         val result = mutableListOf<RuleEntity>()
         var skipped = 0
-        val existingEntries = current.mapNotNull { rule ->
-            runCatching { JSONObject(rule.config).optString("karing_preset_entry").takeIf { it.isNotBlank() } }.getOrNull()
-        }.toMutableSet()
+        val existingEntries = current.mapNotNull { rule -> rule.karingPresetEntry() }.toMutableSet()
+        existingEntries += excludedEntries
         preset.rules.forEachIndexed { index, model ->
             val entry = "$importId:$index"
             val id = fingerprint(model)
@@ -61,7 +70,7 @@ object KaringPresetImporter {
                 }.toString(),
             ).apply { applyKaringRule(model) }
         }
-        return KaringImportResult(current + result, skipped)
+        return KaringImportResult(current + result, result, skipped)
     }
 
     private fun validRemote(value: String): Boolean = try {
@@ -78,5 +87,9 @@ object KaringPresetImporter {
         model.protocol, model.or, model.outbound, model.rawPresetJson,
     ).toString()
 }
+
+private fun RuleEntity.karingPresetEntry(): String? = runCatching {
+    JSONObject(config).optString("karing_preset_entry").takeIf { it.isNotBlank() }
+}.getOrNull()
 
 enum class KaringImportPolicy { APPEND, REPLACE_IMPORTED }

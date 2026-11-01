@@ -226,7 +226,6 @@
         },
         {
             "rule_set_build_in": [
-                "geoip:bing",
                 "geosite:bing"
             ],
             "outbound": "currentSelected",

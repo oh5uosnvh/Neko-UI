@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <EditTextPreference app:icon="@drawable/ic_social_emoji_symbols" app:key="routeName" app:title="@string/route_name" app:useSimpleSummaryProvider="true" />
+    <PreferenceCategory app:title="@string/cag_route">
+        <moe.matsuri.nb4a.ui.SimpleMenuPreference app:entries="@array/route_logic_entries" app:entryValues="@array/route_logic_values" app:key="routeLogic" app:title="@string/route_logic" app:useSimpleSummaryProvider="true" />
+        <io.nekohasekai.sagernet.widget.RouteBuiltinPreference app:key="routeBuiltinRulesets" app:title="@string/route_builtin_rulesets" />
+        <EditTextPreference app:key="routeExternalRulesets" app:title="@string/route_external_rulesets" app:useSimpleSummaryProvider="true" />
+        <io.nekohasekai.sagernet.widget.AppListPreference app:icon="@drawable/ic_baseline_legend_toggle_24" app:key="routePackages" app:title="@string/apps" />
+        <EditTextPreference app:key="routePackagesManual" app:title="@string/route_packages_manual" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="routeDomain" app:title="domain" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="routeDomainSuffix" app:title="domain suffix" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="routeDomainKeyword" app:title="domain keyword" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="routeDomainRegex" app:title="domain regex" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="routeIpCidr" app:title="IP CIDR" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="routePort" app:title="dst port" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="routePortRange" app:title="port range" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="routeSource" app:title="src ip" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="routeSourcePort" app:title="src port" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="routeNetwork" app:title="network" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="routeNetworkType" app:title="network type" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="routeWifiSsid" app:title="Wi-Fi SSID" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="routeWifiBssid" app:title="Wi-Fi BSSID" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="routeProtocol" app:title="protocol" app:useSimpleSummaryProvider="true" />
+        <io.nekohasekai.sagernet.widget.OutboundPreference app:key="routeOutbound" app:title="outbound" app:useSimpleSummaryProvider="true" />
+    </PreferenceCategory>
+</PreferenceScreen>

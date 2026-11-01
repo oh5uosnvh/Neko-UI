@@ -5,7 +5,7 @@
     android:id="@+id/content"
     style="@style/Widget.SagerNet.CardView.Elevated"
     android:layout_width="match_parent"
-    android:layout_height="148dp"
+    android:layout_height="104dp"
     android:layout_margin="4dp">
 
     <LinearLayout

@@ -8,6 +8,7 @@ import moe.matsuri.nb4a.SingBoxOptions
 import moe.matsuri.nb4a.SingBoxOptions.RuleSet
 import moe.matsuri.nb4a.utils.JavaUtil
 import java.net.URI
+import java.security.MessageDigest
 import org.json.JSONObject
 
 interface KaringRuleSetResolver {

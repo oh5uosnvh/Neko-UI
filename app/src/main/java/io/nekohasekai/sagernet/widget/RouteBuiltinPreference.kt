@@ -27,7 +27,8 @@ class RouteBuiltinPreference @JvmOverloads constructor(
         val choices = KaringRuleFamily.values().flatMap { family ->
             manager.list(family).filter { it.bundled }.map { "${family.wireName}:${it.code}" }
         }
-        val selected = DataStore.routeBuiltinRulesets.linesClean().toMutableSet()
+        val original = DataStore.routeBuiltinRulesets.linesClean().toSet()
+        val selected = original.toMutableSet()
         val checked = choices.map { selected.contains(it) }.toBooleanArray()
         AlertDialog.Builder(context).setTitle(title).setMultiChoiceItems(
             choices.toTypedArray(), checked
@@ -37,10 +38,13 @@ class RouteBuiltinPreference @JvmOverloads constructor(
             val owner = context as? LifecycleOwner
             if (owner == null) return@setPositiveButton
             owner.lifecycleScope.launch(Dispatchers.IO) {
+                // Keep existing references, including entries not currently bundled; only
+                // newly selected choices need installation. Never erase an old rule silently.
                 val usable = selected.filter { reference ->
+                    if (reference in original) return@filter true
                     val split = reference.split(":", limit = 2)
                     val family = KaringRuleFamily.parse(split[0])
-                    family != null && runCatching {
+                    split.size == 2 && family != null && runCatching {
                         manager.ensure(family, split[1])
                     }.isSuccess
                 }

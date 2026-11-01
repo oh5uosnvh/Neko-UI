@@ -218,6 +218,9 @@
             android:name="io.nekohasekai.sagernet.ui.RouteSettingsActivity"
             android:configChanges="uiMode" />
         <activity
+            android:name="io.nekohasekai.sagernet.ui.KaringRouteSettingsActivity"
+            android:configChanges="uiMode" />
+        <activity
             android:name="io.nekohasekai.sagernet.ui.AssetsActivity"
             android:configChanges="uiMode" />
         <activity

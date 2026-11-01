@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="karing_resource_enable">Enable</string>
+    <string name="karing_resource_auto_append">Auto attach basic rules</string>
+    <string name="karing_resource_remote">Use remote resources</string>
+    <string name="karing_resource_remote_info">Remote resource address</string>
+    <string name="karing_resource_reconnect_hint">Reconnect to apply resource setting changes.</string>
+</resources>

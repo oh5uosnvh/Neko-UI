@@ -215,6 +215,18 @@ class AssetsActivity : ThemedActivity() {
         fun bind(file: File) {
             this.file = file
             binding.root.setOnClickListener(null)
+            val family = when (file.name) {
+                "geoip.db" -> KaringRuleFamily.GEOIP
+                "geosite.db" -> KaringRuleFamily.GEOSITE
+                "karing-acl-card" -> KaringRuleFamily.ACL
+                else -> null
+            }
+            binding.edit.isInvisible = family == null
+            binding.edit.setOnClickListener {
+                if (family != null && !supportFragmentManager.isStateSaved) {
+                    KaringResourceSettingsDialog.newInstance(family).show(supportFragmentManager, "resource-settings")
+                }
+            }
             binding.subscriptionUpdateProgress.isInvisible = true
             if (file.name == "karing-acl-card") {
                 binding.assetName.setText(R.string.karing_acl_resources)
