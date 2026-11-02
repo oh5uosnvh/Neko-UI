@@ -123,7 +123,6 @@ internal class GroupPickerAdapter(
         holder.nameCard.isSelected = selected
         holder.nameCard.background = card(selected)
         holder.label.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-        holder.label.paint.isFakeBoldText = selected
         val name = group.displayName()
         val count = counts[group.id]
         holder.label.text = if (count == null) name else {

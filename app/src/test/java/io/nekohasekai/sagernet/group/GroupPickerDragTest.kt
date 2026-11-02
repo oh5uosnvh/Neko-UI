@@ -175,11 +175,21 @@ class GroupPickerDragTest {
             assertEquals(2L, holder.groupId)
             assertEquals("Group 2·34", holder.label.text.toString())
             assertTrue(holder.row.isSelected)
-            assertTrue(holder.label.paint.isFakeBoldText)
+            assertTrue(holder.nameCard.isSelected)
+            assertEquals(Color.RED, (holder.nameCard.background as ColorDrawable).color)
+            // LEGACY graphics does not implement Paint.nSetFakeBoldText or Typeface.nativeGetStyle.
+            // Verify the font requested by the actual TextView, not the native no-op getters.
+            assertEquals(android.graphics.Typeface.BOLD,
+                shadowOf(holder.label.typeface).fontDescription.style)
             f.adapter.onBindViewHolder(holder, 2)
+            assertEquals(1L, holder.groupId)
             assertEquals("Group 1·12", holder.label.text.toString())
             assertFalse(holder.row.isSelected)
-            assertFalse(holder.label.paint.isFakeBoldText)
+            assertFalse(holder.nameCard.isSelected)
+            assertEquals(Color.GRAY, (holder.nameCard.background as ColorDrawable).color)
+            assertEquals(android.graphics.Typeface.NORMAL,
+                shadowOf(holder.label.typeface).fontDescription.style)
+            assertEquals(2L, f.selectedId)
         }
     }
 }
