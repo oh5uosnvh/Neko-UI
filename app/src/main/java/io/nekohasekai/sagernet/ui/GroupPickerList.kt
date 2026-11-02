@@ -14,14 +14,25 @@ import android.view.MotionEvent
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.ProxyGroup
 
+/** Same move/recovery timing as the group page, without change cross-fades/recycled holders. */
+internal fun groupPickerItemAnimator() = DefaultItemAnimator().apply {
+    supportsChangeAnimations = false
+    moveDuration = 250L
+}
+
 /** Observe cancellation of the entire gesture, not the synthetic child CANCEL on interception. */
 internal class GroupPickerRecyclerView(context: Context) : RecyclerView(context) {
     var cancelDrag: (() -> Unit)? = null
+
+    // notifyItemMoved is pending until the next layout, BEFORE ItemAnimator.isRunning is true.
+    val isSettling: Boolean
+        get() = isComputingLayout || hasPendingAdapterUpdates() || itemAnimator?.isRunning == true
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_CANCEL) cancelDrag?.invoke()
@@ -41,6 +52,19 @@ internal class GroupPickerAdapter(
 ) : RecyclerView.Adapter<GroupPickerAdapter.Holder>() {
     private val rows = ArrayList(groups)
     private val counts = HashMap<Long, Long>()
+    private var recycler: GroupPickerRecyclerView? = null
+    private var countsDirty = false
+    private val flushCounts = object : Runnable {
+        override fun run() {
+            val list = recycler ?: return
+            if (!countsDirty || dragging) return
+            if (list.isSettling) list.postOnAnimation(this)
+            else {
+                countsDirty = false
+                notifyItemRangeChanged(0, itemCount, COUNTS)
+            }
+        }
+    }
     var startDrag: ((Holder) -> Unit)? = null
     var dragging = false
         private set
@@ -48,6 +72,20 @@ internal class GroupPickerAdapter(
 
     init {
         setHasStableIds(true)
+    }
+
+    private companion object { val COUNTS = Any() }
+
+    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
+        super.onAttachedToRecyclerView(recyclerView)
+        recycler = recyclerView as? GroupPickerRecyclerView
+        if (countsDirty) recycler?.postOnAnimation(flushCounts)
+    }
+
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        recyclerView.removeCallbacks(flushCounts)
+        recycler = null
+        super.onDetachedFromRecyclerView(recyclerView)
     }
 
     class Holder(val row: LinearLayout, val nameCard: LinearLayout,
@@ -123,6 +161,15 @@ internal class GroupPickerAdapter(
         holder.nameCard.isSelected = selected
         holder.nameCard.background = card(selected)
         holder.label.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        bindLabel(holder, group)
+    }
+
+    override fun onBindViewHolder(holder: Holder, position: Int, payloads: MutableList<Any>) {
+        if (payloads.isNotEmpty() && payloads.all { it === COUNTS }) bindLabel(holder, rows[position])
+        else super.onBindViewHolder(holder, position, payloads)
+    }
+
+    private fun bindLabel(holder: Holder, group: ProxyGroup) {
         val name = group.displayName()
         val count = counts[group.id]
         holder.label.text = if (count == null) name else {
@@ -149,19 +196,33 @@ internal class GroupPickerAdapter(
     }
 
     fun restore(ids: List<Long>) {
-        val byId = rows.associateBy { it.id }
-        replace(GroupOrderStore.mergeOrder(this.ids, ids).map { byId.getValue(it) })
+        // Cancellation rolls back through moves, not a full invalidation during recovery.
+        GroupOrderStore.mergeOrder(this.ids, ids).forEachIndexed { to, id ->
+            val from = rows.indexOfFirst { it.id == id }
+            if (from != to) move(from, to)
+        }
     }
 
     fun updateCounts(fresh: Map<Long, Long>) {
         counts.putAll(fresh)
-        if (!dragging) notifyItemRangeChanged(0, itemCount)
+        countsDirty = true
+        if (!dragging) recycler?.let {
+            it.removeCallbacks(flushCounts)
+            it.postOnAnimation(flushCounts)
+        }
+    }
+
+    fun prepareDrag(holder: RecyclerView.ViewHolder) {
+        // ItemTouchHelper owns the selected row's translation; do not let a neighbour's
+        // previous move animator keep writing to it after a quick second handle-down.
+        recycler?.itemAnimator?.endAnimation(holder)
     }
 
     fun updateDraggingState(value: Boolean) {
         dragging = value
-        // Rebinding during ItemTouchHelper.onMove can jerk the active row back to its origin.
-        if (!value) notifyItemRangeChanged(0, itemCount)
+        // No end-of-drag range rebind: it would cancel a still-running neighbour move.
+        recycler?.removeCallbacks(flushCounts)
+        if (!value && countsDirty) recycler?.postOnAnimation(flushCounts)
     }
 }
 
@@ -174,9 +235,11 @@ internal class GroupPickerDragCallback(
 ) : ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0) {
     private var before: List<Long>? = null
     private var activeHolder: RecyclerView.ViewHolder? = null
+    private var selectedHolder: RecyclerView.ViewHolder? = null
     private var cancelledGesture = false
     private var closed = false
     val isDragging: Boolean get() = before != null
+    val isSelected: Boolean get() = selectedHolder != null
 
     override fun isLongPressDragEnabled() = false
     override fun isItemViewSwipeEnabled() = false
@@ -185,11 +248,15 @@ internal class GroupPickerDragCallback(
         if (!closed && actionState == ItemTouchHelper.ACTION_STATE_DRAG && viewHolder != null) {
             // A new down can arrive during the previous recovery animation. Settle it first;
             // a late clearView for its holder must not commit this new gesture.
-            if (before != null) finish()
+            if (before != null) finish(notifySettled = false)
             before = adapter.ids
             cancelledGesture = false
             activeHolder = viewHolder
+            selectedHolder = viewHolder
+            adapter.prepareDrag(viewHolder)
             adapter.updateDraggingState(true)
+        } else if (actionState == ItemTouchHelper.ACTION_STATE_IDLE) {
+            selectedHolder = null
         }
         super.onSelectedChanged(viewHolder, actionState)
     }
@@ -216,10 +283,11 @@ internal class GroupPickerDragCallback(
         finish()
     }
 
-    private fun finish() {
+    private fun finish(notifySettled: Boolean = true) {
         val original = before ?: return
         before = null
         activeHolder = null
+        selectedHolder = null
         adapter.updateDraggingState(false)
         val finalIds = adapter.ids
         if (cancelledGesture) {
@@ -228,6 +296,6 @@ internal class GroupPickerDragCallback(
         } else if (finalIds != original) {
             commit(finalIds)
         }
-        settled()
+        if (notifySettled) settled()
     }
 }

@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <corners android:radius="12dp" />
-    <solid android:color="@color/preference_simple_menu_background" />
+    <corners android:radius="@dimen/popup_corner_radius" />
+    <solid android:color="?android:attr/colorBackground" />
+    <stroke android:width="@dimen/card_stroke_width" android:color="@color/card_stroke" />
+    <!-- Keep all option cards inside the top/bottom curve, even when the first row is selected. -->
+    <padding android:left="1dp" android:right="1dp" android:top="6dp" android:bottom="6dp" />
 </shape>

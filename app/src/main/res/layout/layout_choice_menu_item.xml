@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Transparent row margins prevent a selected item's paint from flattening popup corners. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingStart="8dp"
+    android:paddingEnd="8dp"
+    android:paddingTop="2dp"
+    android:paddingBottom="2dp">
+
+    <TextView
+        android:id="@+id/choice_menu_label"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minWidth="120dp"
+        android:minHeight="48dp"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:gravity="start|center_vertical"
+        android:textSize="16sp"
+        android:textColor="?android:attr/textColorPrimary"
+        android:accessibilityLiveRegion="none" />
+</FrameLayout>

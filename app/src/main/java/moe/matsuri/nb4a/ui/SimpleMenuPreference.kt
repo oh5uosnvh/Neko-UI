@@ -17,16 +17,14 @@
 package moe.matsuri.nb4a.ui
 
 import android.content.Context
-import android.graphics.drawable.GradientDrawable
 import android.util.AttributeSet
-import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Spinner
 import androidx.preference.DropDownPreference
 import androidx.preference.PreferenceViewHolder
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.ktx.getColorAttr
+import io.nekohasekai.sagernet.widget.ThemedChoiceAdapter
 
 /**
  * Bend [DropDownPreference] to support
@@ -42,7 +40,7 @@ open class SimpleMenuPreference
     defStyleRes: Int = 0
 ) : DropDownPreference(context!!, attrs, defStyleAttr, defStyleRes) {
 
-    private lateinit var mAdapter: SimpleMenuAdapter
+    private lateinit var mAdapter: ThemedChoiceAdapter
 
     override fun onBindViewHolder(holder: PreferenceViewHolder) {
         super.onBindViewHolder(holder)
@@ -52,59 +50,12 @@ open class SimpleMenuPreference
     }
 
     override fun createAdapter(): ArrayAdapter<CharSequence?> {
-        mAdapter = SimpleMenuAdapter(getContext(), R.layout.simple_menu_dropdown_item)
+        mAdapter = ThemedChoiceAdapter(getContext()) { findIndexOfValue(value) }
         return mAdapter
     }
 
     override fun setValue(value: String?) {
         super.setValue(value)
-        if (::mAdapter.isInitialized) {
-            mAdapter.currentPosition = entryValues.indexOf(value)
-            mAdapter.notifyDataSetChanged()
-        }
-    }
-
-    private class SimpleMenuAdapter(context: Context, resource: Int) :
-        ArrayAdapter<CharSequence?>(context, resource) {
-
-        var currentPosition = -1
-
-        private val radius = 12f * context.resources.displayMetrics.density
-        private val selectedColor = context.getColorAttr(R.attr.colorMaterial100)
-
-        private val topDrawable = GradientDrawable().apply {
-            setColor(selectedColor)
-            cornerRadii = floatArrayOf(radius, radius, radius, radius, 0f, 0f, 0f, 0f)
-        }
-
-        private val bottomDrawable = GradientDrawable().apply {
-            setColor(selectedColor)
-            cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, radius, radius, radius, radius)
-        }
-
-        private val middleDrawable = GradientDrawable().apply {
-            setColor(selectedColor)
-        }
-
-        private val singleDrawable = GradientDrawable().apply {
-            setColor(selectedColor)
-            cornerRadii = floatArrayOf(radius, radius, radius, radius, radius, radius, radius, radius)
-        }
-
-        override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View {
-            val view: View = super.getDropDownView(position, convertView, parent)
-
-            if (position == currentPosition) {
-                view.background = when {
-                    position == 0 && count == 1 -> singleDrawable
-                    position == 0 -> topDrawable
-                    position == count - 1 -> bottomDrawable
-                    else -> middleDrawable
-                }
-            } else {
-                view.background = null
-            }
-            return view
-        }
+        if (::mAdapter.isInitialized) mAdapter.notifyDataSetChanged()
     }
 }

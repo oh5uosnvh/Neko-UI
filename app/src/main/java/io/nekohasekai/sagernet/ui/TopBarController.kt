@@ -593,6 +593,18 @@ internal class TopBarController(
         private var counting: Job? = null
         private var deferredResult: Pair<Long, GroupOrderWriter.Result>? = null
         private var confirmed = initial
+        private var settlePosted = false
+        private val settleRefresh = Runnable {
+            settlePosted = false
+            onSettled()
+        }
+        private fun displayBusy() = drag.isDragging || list.isSettling
+        private fun awaitSettled() {
+            if (!closed && !settlePosted) {
+                settlePosted = true
+                list.postOnAnimation(settleRefresh)
+            }
+        }
         private val layout = LinearLayoutManager(popupContext)
         private val list = GroupPickerRecyclerView(popupContext)
         private val adapter = GroupPickerAdapter(
@@ -637,13 +649,13 @@ internal class TopBarController(
         init {
             list.layoutManager = layout
             list.adapter = adapter
-            list.itemAnimator = null
+            list.itemAnimator = groupPickerItemAnimator()
             list.isVerticalScrollBarEnabled = false
             list.setPadding(0, dp(6), 0, dp(6))
             list.clipToPadding = true
             touch.attachToRecyclerView(list)
             adapter.startDrag = { holder ->
-                if (!closed && !drag.isDragging) touch.startDrag(holder)
+                if (!closed && !drag.isSelected) touch.startDrag(holder)
             }
             list.cancelDrag = { drag.cancelGesture() }
             popup.setOnDismissListener {
@@ -712,7 +724,7 @@ internal class TopBarController(
                 }
                 // A previous save/failure must never replace a more recent local gesture.
                 if (generation == editGeneration) {
-                    if (drag.isDragging) deferredResult = generation to result
+                    if (displayBusy()) deferredResult = generation to result
                     else accept(result)
                 } else if (result.error != null) showFailure()
                 onSettled()
@@ -734,6 +746,10 @@ internal class TopBarController(
 
         private fun onSettled() {
             if (closed || drag.isDragging) return
+            if (list.isSettling) {
+                awaitSettled()
+                return
+            }
             deferredResult?.let { (generation, result) ->
                 deferredResult = null
                 if (generation == editGeneration) accept(result)
@@ -744,7 +760,10 @@ internal class TopBarController(
         private fun requestRefresh() {
             if (closed) return
             refreshNeeded = true
-            if (drag.isDragging || pendingSaves > 0) return
+            if (displayBusy() || pendingSaves > 0) {
+                if (!drag.isDragging) awaitSettled()
+                return
+            }
             refreshNeeded = false
             val generation = ++refreshGeneration
             val edits = editGeneration
@@ -756,8 +775,9 @@ internal class TopBarController(
                     }
                     onMainDispatcher {
                         if (closed || generation != refreshGeneration) return@onMainDispatcher
-                        if (drag.isDragging || pendingSaves > 0 || edits != editGeneration) {
+                        if (displayBusy() || pendingSaves > 0 || edits != editGeneration) {
                             refreshNeeded = true
+                            if (!drag.isDragging) awaitSettled()
                         } else {
                             confirmed = fresh
                             adapter.replace(fresh)
@@ -798,6 +818,7 @@ internal class TopBarController(
             closed = true
             GroupManager.removeListener(this)
             list.removeCallbacks(scrollToSelected)
+            list.removeCallbacks(settleRefresh)
             refreshing?.cancel()
             counting?.cancel()
             deferredResult?.second?.error?.let { showFailure() }
@@ -806,6 +827,7 @@ internal class TopBarController(
             adapter.startDrag = null
             // Explicit finalization is idempotent with a late clearView/exit animation.
             drag.close()
+            list.itemAnimator?.endAnimations()
             touch.attachToRecyclerView(null)
             list.adapter = null
             deferredResult = null
@@ -845,24 +867,8 @@ internal class TopBarController(
      *
      * 注意不要改成 setColor(固定值)：一旦写死，切主题就不会跟着变了。
      */
-    private fun groupItemCard(selected: Boolean): Drawable = GradientDrawable().apply {
-        shape = GradientDrawable.RECTANGLE
-        cornerRadius = context.resources.getDimension(R.dimen.nav_item_corner_radius)
-        // 解析当前主题的 colorPrimary，再按 nav_item_fill 的 16% 上透明
-        val primary = themeColor(android.R.attr.colorPrimary)
-        setColor(
-            ColorUtils.setAlphaComponent(
-                primary,
-                (Color.alpha(primary) * NAV_ITEM_FILL_ALPHA).toInt(),
-            )
-        )
-        if (selected) {
-            setStroke(
-                context.resources.getDimensionPixelSize(R.dimen.card_stroke_width_selected),
-                primary,
-            )
-        }
-    }
+    private fun groupItemCard(selected: Boolean): Drawable =
+        io.nekohasekai.sagernet.widget.ThemedChoiceStyle.itemCard(context, selected)
 
     private fun roundedCard(): Drawable = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
