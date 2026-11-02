@@ -14,6 +14,14 @@ The source includes:
 - OPPA and Shanlian protocol integration;
 - source and APK regression checks.
 
+## Subscription DNS (pre2)
+
+This iteration starts at the published **1.4.2-mg-pre1** commit `53f1f18`.
+It adds group-scoped direct DNS, private domain policies and domain/IP hosts
+mapping without changing node TLS identities. See [usage, behavior and tests](docs/subscription-dns.md).
+The candidate default is `1.4.2-mg-pre2`, base code 50 (Android 250).
+Parser, pinned-core DNS/TLS and Android JVM tests are mandatory build gates.
+
 ## Candidate build
 
 `Build UI candidate` is a manually dispatched workflow; it uploads artifacts only
@@ -34,11 +42,11 @@ Local prerequisites: JDK 21, Go 1.24.9, Android SDK 35/build-tools 35.0.1,
 NDK r25c and Linux x86_64; initialize recursive submodules. The Go replacements
 in `libcore/go.mod` resolve to directories **beside** this repository. Stage
 Neko-shanlian, Neko-viewTurbo, Neko-fastup and Neko-oppa from Nekobox-MG commit
-`2df930666f5f815a3fd1a1699c5b1adf5eba24d0` respectively as sibling directories
+`c91b33856ce5827a9a39e8d5d83188c505a15f32` respectively as sibling directories
 `sing-anytls-shanlian`, `sing-shadowsocks2-vt`, `fastup-mod`, `oppa-mod`.
 `./run lib core` fetches the pinned sing-box and libneko siblings and builds
 the AAR; it refuses to overwrite dirty checkouts. Then run
-`./run init action gradle` and `APP_VERSION_NAME=1.4.2-mg-pre1 APP_PRE_VERSION_NAME=1.4.2-mg-pre1 APP_VERSION_CODE=49 ./gradlew app:assemblePreviewRelease`.
+`./run init action gradle` and `APP_VERSION_NAME=1.4.2-mg-pre2 APP_PRE_VERSION_NAME=1.4.2-mg-pre2 APP_VERSION_CODE=50 ./gradlew app:assemblePreviewRelease`.
 
 These pins make source selection repeatable, not a claim of byte-identical APKs:
 external action tags, Maven/Go dependencies and hosted runner images are not

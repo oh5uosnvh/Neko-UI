@@ -32,8 +32,6 @@ import org.ini4j.Ini
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
-import org.yaml.snakeyaml.TypeDescription
-import org.yaml.snakeyaml.Yaml
 import org.yaml.snakeyaml.error.YAMLException
 import java.io.StringReader
 import androidx.core.net.toUri
@@ -129,7 +127,16 @@ object RawUpdater : GroupUpdater() {
         }
         proxies = proxiesMap.values.toList()
 
-        if (subscription.forceResolve) forceResolve(proxies, proxyGroup.id)
+        // Empty on non-Clash updates deliberately removes stale imported rules.
+        val importedDnsConfig = proxies.firstOrNull()?.subscriptionDns ?: ""
+        val resolution = SubscriptionDns.effective(
+            importedDnsConfig, subscription.privateDnsConfig, subscription.hostsConfig,
+            subscription.serverDnsResolver,
+        )
+        // Do not let system DNS permanently replace a domain whose runtime policy is private.
+        if (subscription.forceResolve && !resolution.hasNodeConfig()) {
+            forceResolve(proxies, proxyGroup.id)
+        }
 
         val filterMode = subscription.filterMode ?: SubscriptionFilterMode.DISABLED
         val filterRegex = subscription.filterRegex ?: ""
@@ -257,6 +264,7 @@ object RawUpdater : GroupUpdater() {
             Logs.e("Exist profiles: $existCount, new profiles: ${proxies.size}")
         }
 
+        subscription.importedDnsConfig = importedDnsConfig
         subscription.lastUpdated = (System.currentTimeMillis() / 1000).toInt()
         SagerDatabase.groupDao.updateGroup(proxyGroup)
         finishUpdate(proxyGroup)
@@ -291,9 +299,10 @@ object RawUpdater : GroupUpdater() {
 
             try {
 
-                val yaml = Yaml().apply {
-                    addTypeDescription(TypeDescription(String::class.java, "str"))
-                }.loadAs(text, Map::class.java)
+                val yaml = SubscriptionDns.loadDocument(text)
+                val importedDns = SubscriptionDns.fromDocument(yaml)
+                importedDns.warnings.forEach { Logs.w(it) }
+                val dnsSnapshot = importedDns.snapshot()
 
                 val globalClientFingerprint = yaml["global-client-fingerprint"]?.toString() ?: ""
 
@@ -964,6 +973,8 @@ object RawUpdater : GroupUpdater() {
                 // Fix ent
                 proxies.forEach {
                     it.initializeDefaultValues()
+                    // Keep resolution metadata even for direct file/clipboard imports.
+                    it.subscriptionDns = dnsSnapshot
                     if (it is StandardV2RayBean) {
                         // 1. SNI
                         if (it.isTLS() && it.sni.isNullOrBlank() && !it.host.isNullOrBlank() && !it.host.isIpAddress()) {

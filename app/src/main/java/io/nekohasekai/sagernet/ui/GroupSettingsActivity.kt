@@ -6,6 +6,7 @@ import android.content.DialogInterface
 import android.content.Intent
 import android.os.Bundle
 import android.os.Parcelable
+import android.text.InputType
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -25,6 +26,7 @@ import io.nekohasekai.sagernet.SubscriptionFilterMode
 import io.nekohasekai.sagernet.database.*
 import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
 import io.nekohasekai.sagernet.group.GroupUpdater
+import io.nekohasekai.sagernet.group.SubscriptionDns
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.applyDefaultValues
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
@@ -68,6 +70,9 @@ class GroupSettingsActivity(
         DataStore.subscriptionFilterMode = subscription.filterMode
         DataStore.subscriptionFilterRegex = subscription.filterRegex
         DataStore.subscriptionServerDns = subscription.serverDnsResolver ?: ""
+        DataStore.subscriptionDirectDns = subscription.directDnsResolver ?: ""
+        DataStore.subscriptionPrivateDns = subscription.privateDnsConfig ?: ""
+        DataStore.subscriptionHosts = subscription.hostsConfig ?: ""
     }
 
     fun ProxyGroup.serialize() {
@@ -102,6 +107,10 @@ class GroupSettingsActivity(
                 filterMode = DataStore.subscriptionFilterMode
                 filterRegex = DataStore.subscriptionFilterRegex
                 serverDnsResolver = DataStore.subscriptionServerDns
+                directDnsResolver = DataStore.subscriptionDirectDns
+                privateDnsConfig = DataStore.subscriptionPrivateDns
+                hostsConfig = DataStore.subscriptionHosts
+                // Preserve importedDnsConfig: only subscription updates own that snapshot.
             }
         }
     }
@@ -211,26 +220,60 @@ class GroupSettingsActivity(
             true
         }
 
-        val subscriptionServerDns =
-            findPreference<EditTextPreference>(Key.SUBSCRIPTION_SERVER_DNS)!!
-        subscriptionServerDns.setOnPreferenceChangeListener { pref, newValue ->
-            val value = (newValue as String).trim()
-            if (isValidServerDns(value)) {
-                if (value != newValue) {
-                    (pref as EditTextPreference).text = value
-                    false
-                } else {
-                    true
+        fun configureDnsPreference(key: String, supportsDisable: Boolean = false) {
+            findPreference<EditTextPreference>(key)!!.apply {
+                // Never show resolver URLs or YAML in the list: DoH paths may contain keys.
+                summaryProvider = Preference.SummaryProvider<EditTextPreference> { preference ->
+                    val value = preference.text.orEmpty().trim()
+                    preference.context.getString(
+                        when {
+                            value.isEmpty() && key == Key.SUBSCRIPTION_DIRECT_DNS -> R.string.subscription_direct_dns_inherit
+                            value.isEmpty() -> R.string.subscription_dns_inherit
+                            supportsDisable && value == "{}" -> R.string.subscription_dns_disabled
+                            else -> R.string.subscription_dns_custom
+                        }
+                    )
                 }
-            } else {
-                Toast.makeText(
-                    requireContext(),
-                    R.string.server_dns_invalid,
-                    Toast.LENGTH_LONG,
-                ).show()
-                false
+                setOnBindEditTextListener { editText ->
+                    editText.inputType = InputType.TYPE_CLASS_TEXT or
+                            InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                            InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                    editText.setSingleLine(false)
+                    editText.setHorizontallyScrolling(false)
+                    editText.minLines = 3
+                }
+                setOnPreferenceChangeListener { _, newValue ->
+                    // Keep YAML indentation intact; the validators handle empty/whitespace input.
+                    val error = subscriptionDnsError(key, newValue as String)
+                    if (error == null) {
+                        true
+                    } else {
+                        Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show()
+                        false
+                    }
+                }
             }
         }
+        configureDnsPreference(Key.SUBSCRIPTION_SERVER_DNS)
+        configureDnsPreference(Key.SUBSCRIPTION_DIRECT_DNS)
+        configureDnsPreference(Key.SUBSCRIPTION_PRIVATE_DNS, supportsDisable = true)
+        configureDnsPreference(Key.SUBSCRIPTION_HOSTS, supportsDisable = true)
+    }
+
+    private fun subscriptionDnsError(key: String, raw: String): String? = when (key) {
+        Key.SUBSCRIPTION_SERVER_DNS -> {
+            if (SubscriptionDns.isValidEndpointList(raw)) null else getString(R.string.subscription_server_dns_invalid)
+        }
+        Key.SUBSCRIPTION_DIRECT_DNS -> {
+            if (SubscriptionDns.isValidEndpointList(raw)) null else getString(R.string.subscription_direct_dns_invalid)
+        }
+        Key.SUBSCRIPTION_PRIVATE_DNS -> SubscriptionDns.validatePrivateConfig(raw)?.let { error ->
+            getString(R.string.subscription_dns_config_invalid, getString(R.string.subscription_private_dns), error)
+        }
+        Key.SUBSCRIPTION_HOSTS -> SubscriptionDns.validateHostsConfig(raw)?.let { error ->
+            getString(R.string.subscription_dns_config_invalid, getString(R.string.subscription_hosts), error)
+        }
+        else -> null
     }
 
     class UnsavedChangesDialogFragment : AlertDialogFragment<Empty, Empty>() {
@@ -326,6 +369,22 @@ class GroupSettingsActivity(
     }
 
     suspend fun saveAndExit() {
+        if (DataStore.groupType == GroupType.SUBSCRIPTION) {
+            // Revalidate the cache as well, including restored values and existing groups.
+            val dnsValues = listOf(
+                Key.SUBSCRIPTION_SERVER_DNS to DataStore.subscriptionServerDns,
+                Key.SUBSCRIPTION_DIRECT_DNS to DataStore.subscriptionDirectDns,
+                Key.SUBSCRIPTION_PRIVATE_DNS to DataStore.subscriptionPrivateDns,
+                Key.SUBSCRIPTION_HOSTS to DataStore.subscriptionHosts,
+            )
+            for ((key, value) in dnsValues) {
+                val error = subscriptionDnsError(key, value) ?: continue
+                onMainDispatcher {
+                    Toast.makeText(this@GroupSettingsActivity, error, Toast.LENGTH_LONG).show()
+                }
+                return
+            }
+        }
 
         val editingId = DataStore.editingId
         if (editingId == 0L) {
@@ -492,22 +551,4 @@ class GroupSettingsActivity(
         }
     }
 
-}
-
-private fun isValidServerDns(raw: String): Boolean {
-    val value = raw.trim()
-    if (value.isEmpty()) return true
-    if (value.any { it.isISOControl() || it.isWhitespace() }) return false
-
-    if (value.contains("://")) {
-        val scheme = value.substringBefore("://").lowercase()
-        if (scheme !in setOf("https", "tls", "quic")) return false
-        val rest = value.substringAfter("://")
-        val host = rest.substringBefore("/").substringBefore("?")
-        val bare = host.substringBeforeLast(":").trim('[', ']')
-        return bare.isNotEmpty()
-    }
-
-    val host = value.substringBeforeLast(":").trim('[', ']')
-    return host.isNotEmpty()
 }

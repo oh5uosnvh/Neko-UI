@@ -25,6 +25,12 @@ public class SubscriptionBean extends Serializable {
     public Integer filterMode;
     public String filterRegex;
     public String serverDnsResolver;
+    public String directDnsResolver;
+    public String privateDnsConfig;
+    public String hostsConfig;
+
+    // Snapshot from subscription updates; never edited by group settings.
+    public String importedDnsConfig;
 
     // SIP008
 
@@ -47,7 +53,7 @@ public class SubscriptionBean extends Serializable {
 
     @Override
     public void serializeToBuffer(ByteBufferOutput output) {
-        output.writeInt(3);
+        output.writeInt(4);
 
         output.writeInt(type);
 
@@ -69,6 +75,12 @@ public class SubscriptionBean extends Serializable {
 
         // v3
         output.writeString(serverDnsResolver);
+
+        // v4
+        output.writeString(directDnsResolver);
+        output.writeString(privateDnsConfig);
+        output.writeString(hostsConfig);
+        output.writeString(importedDnsConfig);
     }
 
     public void serializeForShare(ByteBufferOutput output) {
@@ -108,6 +120,18 @@ public class SubscriptionBean extends Serializable {
         if (version >= 3) {
             serverDnsResolver = input.readString();
         }
+
+        // v0-v3 contain no subscription DNS overrides or imported snapshot.
+        directDnsResolver = "";
+        privateDnsConfig = "";
+        hostsConfig = "";
+        importedDnsConfig = "";
+        if (version >= 4) {
+            directDnsResolver = input.readString();
+            privateDnsConfig = input.readString();
+            hostsConfig = input.readString();
+            importedDnsConfig = input.readString();
+        }
     }
 
     public void deserializeFromShare(ByteBufferInput input) {
@@ -136,6 +160,10 @@ public class SubscriptionBean extends Serializable {
         if (filterMode == null) filterMode = 0;
         if (filterRegex == null) filterRegex = "";
         if (serverDnsResolver == null) serverDnsResolver = "";
+        if (directDnsResolver == null) directDnsResolver = "";
+        if (privateDnsConfig == null) privateDnsConfig = "";
+        if (hostsConfig == null) hostsConfig = "";
+        if (importedDnsConfig == null) importedDnsConfig = "";
 
         if (bytesUsed == null) bytesUsed = 0L;
         if (bytesRemaining == null) bytesRemaining = 0L;

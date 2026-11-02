@@ -34,6 +34,8 @@ import io.nekohasekai.sagernet.fmt.snell.SnellBean
 import io.nekohasekai.sagernet.fmt.snell.buildSingBoxOutboundSnellBean
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
 import io.nekohasekai.sagernet.fmt.wireguard.buildSingBoxOutboundWireguardBean
+import io.nekohasekai.sagernet.group.SubscriptionDns
+import io.nekohasekai.sagernet.group.SubscriptionDnsBuilder
 import io.nekohasekai.sagernet.ktx.isIpAddress
 import io.nekohasekai.sagernet.ktx.mkPort
 import io.nekohasekai.sagernet.utils.PackageCache
@@ -177,11 +179,10 @@ fun buildConfig(
     val userDNSRuleList = mutableListOf<DNSRule_DefaultOptions>()
     val domainListDNSDirectForce = mutableListOf<String>()
     val bypassDNSBeans = hashSetOf<AbstractBean>()
-    val perGroupResolver = HashMap<Long, String>()
-    val perGroupServerHosts = HashMap<Long, MutableSet<String>>()
-    val hostResolvers = HashMap<String, MutableSet<String>>()
-    val nonCustomFinalHosts = hashSetOf<String>()
+    val subscriptionDns = SubscriptionDnsBuilder()
     val groupCache = HashMap<Long, ProxyGroup?>()
+    val activeSubscription = group?.takeIf { it.type == GroupType.SUBSCRIPTION }?.subscription
+    val subscriptionDirectDns = SubscriptionDns.endpointList(activeSubscription?.directDnsResolver ?: "")
     val isVPN = DataStore.serviceMode == Key.MODE_VPN
     val deviceInboundTag = if (isVPN && DataStore.enableHevTun) TAG_MIXED else "tun-in"
     val bind = if (!forTest && DataStore.allowAccess) "0.0.0.0" else LOCALHOST
@@ -349,6 +350,14 @@ fun buildConfig(
 
             profileList.forEachIndexed { index, proxyEntity ->
                 val bean = proxyEntity.requireBean()
+                val nodeGroup = groupCache.getOrPut(proxyEntity.groupId) {
+                    SagerDatabase.groupDao.getById(proxyEntity.groupId)
+                }
+                val nodeSubscription = nodeGroup?.takeIf { it.type == GroupType.SUBSCRIPTION }?.subscription
+                val nodeResolver = subscriptionDns.node(bean, nodeSubscription)
+                if (nodeResolver != null && proxyEntity.needExternal() && !bean.canMapping()) {
+                    throw IllegalArgumentException("This external protocol cannot use subscription DNS safely; use a built-in protocol or disable its subscription DNS settings")
+                }
 
                 // tagOut: v2ray outbound tag for a profile
                 // profile2 (in) (global)   tag g-(id)
@@ -364,41 +373,6 @@ fun buildConfig(
                     needGlobal = true
                     tagOut = "g-" + proxyEntity.id
                     bypassDNSBeans += proxyEntity.requireBean()
-
-                    if (!forTest) {
-                        val ownerGid = entity.groupId
-                        val ownerGroup = groupCache.getOrPut(ownerGid) {
-                            SagerDatabase.groupDao.getById(ownerGid)
-                        }
-                        val resolver = ownerGroup
-                            ?.takeIf { it.type == GroupType.SUBSCRIPTION }
-                            ?.subscription?.serverDnsResolver
-                            ?.let { sanitizeDnsEntry(it) }
-                            ?.takeIf { it.isNotBlank() }
-
-                        if (resolver != null) {
-                            profileList.forEach { hop ->
-                                val host = serverHostOf(hop.requireBean())
-                                if (host != null && !host.isIpAddress()) {
-                                    if (hop.groupId == ownerGid) {
-                                        perGroupResolver[ownerGid] = resolver
-                                        perGroupServerHosts.getOrPut(ownerGid) { mutableSetOf() }
-                                            .add(host)
-                                        hostResolvers.getOrPut(host) { mutableSetOf() }.add(resolver)
-                                    } else {
-                                        nonCustomFinalHosts.add(host)
-                                    }
-                                }
-                            }
-                        } else {
-                            profileList.forEach { hop ->
-                                val host = serverHostOf(hop.requireBean())
-                                if (host != null && !host.isIpAddress()) {
-                                    nonCustomFinalHosts.add(host)
-                                }
-                            }
-                        }
-                    }
                 }
 
                 if (index == 0) {
@@ -528,6 +502,12 @@ fun buildConfig(
                     }
                     _hack_config_map["domain_strategy"] =
                         if (forTest) "" else defaultServerDomainStrategy
+                    if (nodeResolver != null && !proxyEntity.needExternal()) {
+                        _hack_config_map["domain_resolver"] = mapOf(
+                            "server" to nodeResolver,
+                            "strategy" to genDomainStrategy(true),
+                        )
+                    }
 
                     _hack_config_map["tag"] = tagOut
 
@@ -546,9 +526,9 @@ fun buildConfig(
                             is HysteriaBean -> if (bean.protocolVersion == 1) "hysteria-plugin" else "hysteria2-plugin"
                             else -> ""
                         }
-                        if (Plugins.isUsingMatsuriExe(pluginId)) {
+                        if (Plugins.isUsingMatsuriExe(pluginId) && nodeResolver == null) {
                             needExternal = false
-                        } else if (Plugins.getPluginExternal(pluginId) != null) {
+                        } else if (!Plugins.isUsingMatsuriExe(pluginId) && Plugins.getPluginExternal(pluginId) != null) {
                             throw Exception("You are using an unsupported $pluginId, please download the correct plugin.")
                         }
                     }
@@ -567,6 +547,15 @@ fun buildConfig(
                             override_port = bean.serverPort
 
                             pastInboundTag = tag
+                            if (nodeResolver != null) {
+                                // Resolve before routing a plugin's mapping inbound; applies to every chain hop.
+                                route.rules.add(Rule_DefaultOptions().apply {
+                                    inbound = listOf(tag)
+                                    action = "resolve"
+                                    _hack_config_map["server"] = nodeResolver
+                                    _hack_config_map["strategy"] = genDomainStrategy(true)
+                                })
+                            }
 
                             // no chain rule and not outbound, so need to set to direct
                             if (index == profileList.lastIndex) {
@@ -891,10 +880,6 @@ fun buildConfig(
             outbounds.add(fragmentOutbound)
         }
 
-        fun isExclusiveCustomHost(host: String): Boolean {
-            return hostResolvers[host]?.size == 1 && !nonCustomFinalHosts.contains(host)
-        }
-
         // Bypass Lookup for the first profile
         bypassDNSBeans.forEach {
             var serverAddr = it.serverAddress
@@ -908,9 +893,7 @@ fun buildConfig(
             }
 
             if (!serverAddr.isIpAddress()) {
-                if (!isExclusiveCustomHost(serverAddr)) {
-                    domainListDNSDirectForce.add("full:${serverAddr}")
-                }
+                domainListDNSDirectForce.add("full:${serverAddr}")
             }
         }
 
@@ -937,7 +920,13 @@ fun buildConfig(
             detour = TAG_DIRECT
         })
 
-        directDNS.firstOrNull().let {
+        if (subscriptionDirectDns.isNotEmpty()) {
+            subscriptionDns.direct(subscriptionDirectDns)
+            // Legacy remote DNS resolves its address_resolver during construction, not Start.
+            // Materialize dns-direct before dns-remote so a group override is already available.
+            dns.servers.addAll(subscriptionDns.servers)
+            subscriptionDns.servers.clear()
+        } else directDNS.firstOrNull().let {
             dns.servers.add(DNSServerOptions().apply {
                 address = it ?: throw Exception("No direct DNS, check your settings!")
                 tag = "dns-direct"
@@ -1034,29 +1023,12 @@ fun buildConfig(
                     server = "dns-direct"
                 })
             }
-            perGroupResolver.forEach { (gid, resolver) ->
-                val hosts = perGroupServerHosts[gid]
-                    ?.filter { it.isNotBlank() && isExclusiveCustomHost(it) }
-                    ?.map { "full:$it" }
-                if (hosts.isNullOrEmpty()) return@forEach
-
-                val serverTag = "dns-sub-$gid"
-                dns.servers.add(DNSServerOptions().apply {
-                    address = resolver
-                    tag = serverTag
-                    detour = TAG_DIRECT
-                    if (!resolver.isIpAddress()) {
-                        address_resolver = "dns-direct"
-                    }
-                    strategy = autoDnsDomainStrategy(SingBoxOptionsUtil.domainStrategy("server"))
-                })
-                dns.rules.add(0, DNSRule_DefaultOptions().apply {
-                    makeSingBoxRule(hosts)
-                    server = serverTag
-                })
-            }
+            // Subscription policy is scoped to the active group. Only matched domains override app DNS.
+            val subscriptionRules = subscriptionDns.general(proxy.requireBean(), activeSubscription, "dns-remote")
+            dns.rules.addAll(0, subscriptionRules)
         }
 
+        dns.servers.addAll(subscriptionDns.servers)
         if (!forTest) _hack_custom_config = DataStore.globalCustomConfig
     }.let {
         val configMap = it.asMap()

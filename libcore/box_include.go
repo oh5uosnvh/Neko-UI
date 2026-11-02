@@ -40,11 +40,12 @@ import (
 	"github.com/sagernet/sing-box/protocol/vmess"
 	"github.com/sagernet/sing-box/protocol/wireguard"
 
+	fastupmod "github.com/oh5uosnvh/fastup-mod/fastup"
+	oppamod "github.com/oh5uosnvh/oppa-mod/oppa"
+	"libcore/dnspolicy"
 	"libcore/protocol/juicity"
 	libcoreX365 "libcore/protocol/x365"
 	libcoreXhttp "libcore/protocol/xhttp"
-	fastupmod "github.com/oh5uosnvh/fastup-mod/fastup"
-	oppamod "github.com/oh5uosnvh/oppa-mod/oppa"
 
 	_ "github.com/sagernet/sing-box/experimental/clashapi"
 	_ "github.com/sagernet/sing-box/transport/v2rayquic"
@@ -120,6 +121,7 @@ func nekoboxAndroidDNSTransportRegistry(localTransport LocalDNSTransport) *dns.T
 	transport.RegisterTLS(registry)
 	transport.RegisterHTTPS(registry)
 	hosts.RegisterTransport(registry)
+	dnspolicy.RegisterTransport(registry)
 	// local.RegisterTransport(registry)
 	fakeip.RegisterTransport(registry)
 

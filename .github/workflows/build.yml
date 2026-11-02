@@ -6,11 +6,11 @@ on:
       release_tag:
         description: 'Candidate version name'
         required: true
-        default: '1.4.2-mg-pre1'
+        default: '1.4.2-mg-pre2'
       version_code:
         description: 'Base version code (>=49; Android code is base x 5)'
         required: true
-        default: '49'
+        default: '50'
       signed:
         description: 'Sign with the verified legacy key (requires secrets)'
         type: boolean
@@ -56,6 +56,13 @@ jobs:
           cp -a mg/Neko-viewTurbo ../sing-shadowsocks2-vt
           cp -a mg/Neko-fastup ../fastup-mod
           cp -a mg/Neko-oppa ../oppa-mod
+      - name: Validate subscription DNS parser before building
+        run: python3 buildScript/test-subscription-dns.py
+      - name: Verify pinned DNS runtime and TLS identity
+        run: |
+          bash buildScript/lib/core/get_source.sh
+          cd libcore
+          go test -race -count=1 ./dnspolicy
       - name: Build libcore
         run: ./run lib core
       - uses: actions/upload-artifact@v4
@@ -120,6 +127,7 @@ jobs:
             unset KEYSTORE_PASS ALIAS_NAME ALIAS_PASS
           fi
           ./run init action gradle
+          ./gradlew --no-daemon app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.group.*'
           ./gradlew --no-daemon app:assemblePreviewRelease
           mkdir -p release
           shopt -s nullglob

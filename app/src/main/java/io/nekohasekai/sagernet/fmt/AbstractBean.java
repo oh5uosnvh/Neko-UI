@@ -23,6 +23,7 @@ public abstract class AbstractBean extends Serializable {
 
     public String customOutboundJson;
     public String customConfigJson;
+    public String subscriptionDns;
 
     //
     public transient String finalAddress;
@@ -73,6 +74,7 @@ public abstract class AbstractBean extends Serializable {
 
         if (customOutboundJson == null) customOutboundJson = "";
         if (customConfigJson == null) customConfigJson = "";
+        if (subscriptionDns == null) subscriptionDns = "";
     }
 
 
@@ -82,12 +84,13 @@ public abstract class AbstractBean extends Serializable {
     public void serializeToBuffer(@NonNull ByteBufferOutput output) {
         serialize(output);
 
-        output.writeInt(1);
+        output.writeInt(2);
         if (!serializeWithoutName) {
             output.writeString(name);
         }
         output.writeString(customOutboundJson);
         output.writeString(customConfigJson);
+        output.writeString(subscriptionDns);
     }
 
     @Override
@@ -99,6 +102,7 @@ public abstract class AbstractBean extends Serializable {
         name = input.readString();
         customOutboundJson = input.readString();
         customConfigJson = input.readString();
+        subscriptionDns = extraVersion >= 2 ? input.readString() : "";
     }
 
     public void serialize(ByteBufferOutput output) {
