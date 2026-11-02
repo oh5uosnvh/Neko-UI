@@ -145,7 +145,7 @@ public final class SubscriptionDns {
             config.policy.clear(); config.policy.putAll(custom.policy);
             config.serverPolicy.clear(); config.serverPolicy.putAll(custom.serverPolicy);
             // Private policy editor does not silently erase the separate server-DNS field.
-            Map<?, ?> customDocument = loadDocument(privateOverride);
+            Map<?, ?> customDocument = loadEditorDocument(privateOverride, true);
             Map<?, ?> customDns = customDocument.containsKey("dns") ? asMap(customDocument.get("dns"), "dns") : customDocument;
             if (customDns.containsKey("proxy-server-nameserver")) {
                 config.serverDns.clear(); config.serverDns.addAll(custom.serverDns);
@@ -164,7 +164,7 @@ public final class SubscriptionDns {
     }
 
     private static Config parsePrivate(String text) {
-        Map<?, ?> root = loadDocument(text);
+        Map<?, ?> root = loadEditorDocument(text, true);
         Map<?, ?> dns;
         if (root.containsKey("dns")) dns = asMap(root.get("dns"), "dns");
         else if (root.containsKey("nameserver-policy") || root.containsKey("proxy-server-nameserver-policy") ||
@@ -174,11 +174,69 @@ public final class SubscriptionDns {
     }
 
     private static Map<String, List<String>> parseHosts(String text) {
-        Map<?, ?> root = loadDocument(text);
+        Map<?, ?> root = loadEditorDocument(text, false);
         Map<String, List<String>> result = new LinkedHashMap<>();
         readHosts(root.containsKey("hosts") ? root.get("hosts") : root, result);
         validateAliases(result);
         return result;
+    }
+
+    /** Relax only flat editor snippets; full subscription YAML keeps its strict parser. */
+    private static Map<?, ?> loadEditorDocument(String text, boolean dnsValues) {
+        if (text == null || text.trim().isEmpty()) return Collections.emptyMap();
+        if (text.length() > 16 * 1024 * 1024) throw invalid("YAML exceeds 16 MiB");
+        Map<String, Object> flat = new LinkedHashMap<>();
+        boolean eligible = true;
+        for (String line : text.split("\\r?\\n")) {
+            String row = line.trim();
+            if (row.isEmpty() || row.startsWith("#")) continue;
+            int split = editorColon(row);
+            if (split < 1 || row.substring(split + 1).trim().isEmpty()) { eligible = false; break; }
+            String rawKey = row.substring(0, split).trim();
+            String key;
+            try {
+                if (rawKey.startsWith("\"") || rawKey.startsWith("'")) {
+                    Object parsed = loadDocument("key: " + rawKey + "\n").get("key");
+                    key = pattern(parsed);
+                } else key = pattern(rawKey);
+            } catch (IllegalArgumentException e) { eligible = false; break; }
+            String valueText = row.substring(split + 1).trim();
+            Object value;
+            try {
+                value = loadDocument("value: " + valueText + "\n").get("value");
+                if (dnsValues && value instanceof String && valueText.contains(",")) {
+                    try { endpoint(((String) value).trim()); }
+                    catch (IllegalArgumentException e) {
+                        value = loadDocument("value: [" + valueText + "]\n").get("value");
+                    }
+                }
+            } catch (IllegalArgumentException e) {
+                if (!dnsValues || !valueText.contains(",")) { eligible = false; break; }
+                try { value = loadDocument("value: [" + valueText + "]\n").get("value"); }
+                catch (IllegalArgumentException badList) { eligible = false; break; }
+            }
+            if (flat.containsKey(key)) throw invalid("Duplicate normalized editor key");
+            flat.put(key, value);
+            if (flat.size() > MAX_ENTRIES) throw invalid("Editor exceeds 4096 entries");
+        }
+        if (eligible && !flat.isEmpty()) return flat;
+        return loadDocument(text);
+    }
+
+    private static int editorColon(String text) {
+        char quote = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (quote != 0) {
+                if (c == '\\' && quote == '\"') { i++; continue; }
+                if (c == quote) {
+                    if (quote == '\'' && i + 1 < text.length() && text.charAt(i + 1) == '\'') { i++; continue; }
+                    quote = 0;
+                }
+            } else if (c == '\'' || c == '\"') quote = c;
+            else if (c == ':' && (i + 1 == text.length() || Character.isWhitespace(text.charAt(i + 1)))) return i;
+        }
+        return -1;
     }
 
     public static String validatePrivateConfig(String text) {
@@ -248,6 +306,13 @@ public final class SubscriptionDns {
         options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
         return new Yaml(options).dump(value);
     }
+    public static String dumpFlow(Object value) {
+        DumperOptions options = new DumperOptions();
+        options.setDefaultFlowStyle(DumperOptions.FlowStyle.FLOW);
+        options.setSplitLines(false);
+        return new Yaml(options).dump(value).trim();
+    }
+
     public static String domain(String raw) {
         if (raw == null) throw invalid("Missing domain");
         String s = raw.trim();

@@ -108,6 +108,7 @@ import io.nekohasekai.sagernet.ui.profile.TuicSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.VMessSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.WireGuardSettingsActivity
 import io.nekohasekai.sagernet.widget.QRCodeDialog
+import io.nekohasekai.sagernet.widget.QuickLongPress
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -164,6 +165,11 @@ class ConfigurationFragment @JvmOverloads constructor(
     lateinit var tabLayout: TabLayout
     lateinit var groupPager: ViewPager2
     private var isRestoringGroup = false
+    private val groupProfileExport = GroupProfileExport(this)
+    private var groupTabsMediator: TabLayoutMediator? = null
+    // TabLayout pools/recreates TabViews. Weak entries must not retain removed tabs.
+    private val tabLongPressBindings =
+        java.util.WeakHashMap<View, java.lang.ref.WeakReference<QuickLongPress>>()
 
     /** 顶栏 ⊙ / 分组 控件，见 TopBarController */
     private val topBar = TopBarController(this)
@@ -445,6 +451,7 @@ class ConfigurationFragment @JvmOverloads constructor(
     @SuppressLint("DetachAndAttachSameFragment")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        groupProfileExport.restoreState(savedInstanceState)
         setHasOptionsMenu(true)
         startProfileStateActor()
         refreshProfileState()
@@ -456,6 +463,11 @@ class ConfigurationFragment @JvmOverloads constructor(
                 .attach(this)
                 .commit()
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        groupProfileExport.saveState(outState)
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -523,19 +535,23 @@ class ConfigurationFragment @JvmOverloads constructor(
         groupPager.adapter = adapter
         groupPager.offscreenPageLimit = 2
 
-        TabLayoutMediator(tabLayout, groupPager) { tab, position ->
-            if (adapter.groupList.size > position) {
-                tab.text = adapter.groupList[position].displayName()
-            }
-            tab.view.setOnLongClickListener { v ->
-                if (position in adapter.groupList.indices) {
-                    val group = adapter.groupList[position]
-                    // 018: 长按分组标签 → 编辑 / 跳转分组 / ┄┄ / 清空 / 删除（自绘菜单）
+        groupTabsMediator = TabLayoutMediator(tabLayout, groupPager) { tab, position ->
+            val groupId = adapter.groupList.getOrNull(position)?.id
+            tab.text = adapter.groupList.getOrNull(position)?.displayName()
+            tabLongPressBindings.remove(tab.view)?.get()?.unbind()
+            val binding = QuickLongPress(tab.view) { v ->
+                // Resolve the stable ID at trigger time, not a captured position
+                // or the selected tab; another group may have moved/been deleted.
+                val group = adapter.groupList.firstOrNull { it.id == groupId }
+                if (isAdded && viewLifecycleOwnerLiveData.value != null &&
+                    tab.position >= 0 && group != null
+                ) {
                     showTabGroupMenu(v, group)
-                }
-                true
+                    true
+                } else false
             }
-        }.attach()
+            tabLongPressBindings[tab.view] = java.lang.ref.WeakReference(binding)
+        }.also { it.attach() }
 
         toolbar.setOnClickListener {
             val fragment = getCurrentGroupFragment()
@@ -599,6 +615,14 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
     }
 
+    override fun onDestroyView() {
+        groupTabsMediator?.detach()
+        groupTabsMediator = null
+        tabLongPressBindings.values.mapNotNull { it.get() }.forEach { it.unbind() }
+        tabLongPressBindings.clear()
+        super.onDestroyView()
+    }
+
     override fun onDestroy() {
         DataStore.profileCacheStore.unregisterChangeListener(this)
         DataStore.configurationStore.unregisterChangeListener(displayPrefListener)
@@ -645,6 +669,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
             }
 
+            refreshAddressDisplayPreferences()
             // 顺序兜底：分组页拖动排序的广播若因竞态未生效，按数据库顺序校正
             adapter.syncOrderFromDb()
         }
@@ -1474,11 +1499,14 @@ class ConfigurationFragment @JvmOverloads constructor(
      * 规格：
      *   编辑
      *   跳转分组
-     *   ┄┄┄┄┄┄（只在清空之上画一条虚线分隔）
+     *   ┄┄┄┄┄┄
+     *   导出到剪切板
+     *   导出到文件
+     *   ┄┄┄┄┄┄
      *   清空
      *   删除
      *
-     * 宽度收缩到内容：最宽项只有四个汉字，面板宽 = 最宽行实测宽。
+     * 宽度收缩到内容：面板宽 = 最宽行实测宽。
      * 不用 MATCH_PARENT 行宽 —— WRAP_CONTENT 父布局里它会被
      * getChildMeasureSpec 放大成整屏可用宽。
      * 行右溢出屏幕时整体左移，保证不裁边。
@@ -1519,7 +1547,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             return item
         }
 
-        // 「跳转分组」与「清空」之间的那条虚线（左右各留 16dp，不顶满）
+        // 操作 / 导出 / 清理之间的虚线（左右各留 16dp，不顶满）
         fun dashedDivider(): View {
             val view = object : View(context) {
                 override fun onDraw(canvas: android.graphics.Canvas) {
@@ -1575,6 +1603,17 @@ class ConfigurationFragment @JvmOverloads constructor(
         addRow {
             menuItem(getString(R.string.jump_to_group)) {
                 (activity as? MainActivity)?.openGroupAt(group.id)
+            }
+        }
+        addRow { dashedDivider() }
+        addRow {
+            menuItem(getString(R.string.action_export_clipboard)) {
+                groupProfileExport.toClipboard(group.id)
+            }
+        }
+        addRow {
+            menuItem(getString(R.string.action_export_file)) {
+                groupProfileExport.toFile(group.id, group.displayName())
             }
         }
         addRow { dashedDivider() }
@@ -1695,31 +1734,24 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        // 030/031: 兜底——从设置返回时若开关变化，立即刷新当前页卡片
-        if (lastAppliedAlwaysShowAddress != DataStore.alwaysShowAddress) {
+    private fun refreshAddressDisplayPreferences() {
+        runOnMainDispatcher {
+            if (!isAdded) return@runOnMainDispatcher
             lastAppliedAlwaysShowAddress = DataStore.alwaysShowAddress
-            runOnMainDispatcher {
-                if (!isAdded) return@runOnMainDispatcher
-                adapter.groupFragments.values.forEach { page ->
-                    runCatching { page.adapter?.reloadProfiles() }
-                }
-            }
+            val cached = if (::adapter.isInitialized) adapter.groupFragments.values.toList() else emptyList()
+            val restored = childFragmentManager.fragments.filterIsInstance<GroupFragment>()
+            (cached + restored).distinct().forEach { it.refreshAddressDisplay() }
         }
     }
 
-    // 031: 显示开关变化 → 刷新所有已创建分组页的卡片（地址行显隐 + 行高）
+    override fun onResume() {
+        super.onResume()
+        if (lastAppliedAlwaysShowAddress != DataStore.alwaysShowAddress) refreshAddressDisplayPreferences()
+    }
+
     private val displayPrefListener = object : OnPreferenceDataStoreChangeListener {
         override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
-            if (key != Key.ALWAYS_SHOW_ADDRESS) return
-            lastAppliedAlwaysShowAddress = DataStore.alwaysShowAddress
-            runOnMainDispatcher {
-                if (!isAdded || !::adapter.isInitialized) return@runOnMainDispatcher
-                adapter.groupFragments.values.forEach { page ->
-                    runCatching { page.adapter?.reloadProfiles() }
-                }
-            }
+            if (key == Key.ALWAYS_SHOW_ADDRESS) refreshAddressDisplayPreferences()
         }
     }
 
@@ -1920,46 +1952,45 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
         }
 
+        private var reorderGeneration = 0L
+
         override suspend fun groupUpdated(group: ProxyGroup) {
-            val index = groupList.indexOfFirst { it.id == group.id }
-            if (index == -1) return
-
-            // 关键：把新对象写回 groupList。
-            //
-            // 改分组名后返回，☴ 快速列表读的是 groupList（TopBarController#groups()
-            // 直接拿 adapter.groupList），而这里原先只更新了 tab 文案、没动 groupList，
-            // 于是拿到的还是改名前那个旧对象 —— 表现就是「名字像没改一样」，
-            // 直到列表被整体重建（切页/进设置再回来）才刷新。
-            // 就地替换保持原有顺序，同时把 ☴ 列表和 tab 一起更新掉。
-            val orderChanged = groupList[index].userOrder != group.userOrder
-            groupList[index] = group
-
-            if (orderChanged) {
-                // 分组页拖动排序（003：松手落库后广播一次）：就地重排
-                // （标签栏 + ☴ 快速列表），保持当前分组选中。
-                // 只发 notifyItemMoved 平移既有页面——pager 已用分组 id 作稳定 ID，
-                // 页面原位跟随不重建；禁止 notifyDataSetChanged（FragmentStateAdapter
-                // 会销毁重建全部分组页，松手后必卡一下）。
+            onMainDispatcher {
+                if (viewLifecycleOwnerLiveData.value == null || !isCurrentGroupPagerAdapter(this@GroupPagerAdapter)) return@onMainDispatcher
+                val index = groupList.indexOfFirst { it.id == group.id }
+                if (index == -1) return@onMainDispatcher
+                val orderChanged = groupList[index].userOrder != group.userOrder
+                groupList[index] = group
+                if (!orderChanged) {
+                    tabLayout.getTabAt(index)?.text = group.displayName()
+                    return@onMainDispatcher
+                }
                 val currentId = DataStore.selectedGroup
+                val generation = ++reorderGeneration
+                isRestoringGroup = true
                 tabLayout.post {
-                    val target = groupList.sortedBy { it.userOrder }
-                    if (target.map { it.id } != groupList.map { it.id }) {
-                        for (i in target.indices) {
-                            val cur = groupList.indexOfFirst { it.id == target[i].id }
-                            if (cur != i) {
-                                groupList.add(i, groupList.removeAt(cur))
-                                notifyItemMoved(cur, i)
-                            }
+                    if (generation != reorderGeneration || viewLifecycleOwnerLiveData.value == null ||
+                        !isCurrentGroupPagerAdapter(this@GroupPagerAdapter)) return@post
+                    val target = groupList.sortedWith(compareBy({ it.userOrder }, { it.id }))
+                    for (i in target.indices) {
+                        val old = groupList.indexOfFirst { it.id == target[i].id }
+                        if (old != i) {
+                            groupList.add(i, groupList.removeAt(old))
+                            notifyItemMoved(old, i)
                         }
                     }
-                    val newIndex = groupList.indexOfFirst { it.id == currentId }
-                    if (newIndex >= 0) {
-                        groupPager.setCurrentItem(newIndex, false)
+                    val selected = groupList.indexOfFirst { it.id == currentId }
+                    if (selected >= 0) {
+                        DataStore.selectedGroup = currentId
+                        selectedGroupIndex = selected
+                        groupPager.setCurrentItem(selected, false)
+                        tabLayout.setScrollPosition(selected, 0f, true)
                     }
-                }
-            } else {
-                tabLayout.post {
-                    tabLayout.getTabAt(index)?.text = group.displayName()
+                    tabLayout.post {
+                        if (generation == reorderGeneration && isCurrentGroupPagerAdapter(this@GroupPagerAdapter)) {
+                            isRestoringGroup = false
+                        }
+                    }
                 }
             }
         }
@@ -2181,8 +2212,19 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
         }
 
+        private var lastAddressPreference = DataStore.alwaysShowAddress
+
+        fun refreshAddressDisplay() {
+            lastAddressPreference = DataStore.alwaysShowAddress
+            if (!::configurationListView.isInitialized || view == null) return
+            val currentAdapter = adapter ?: return
+            // A reload/DiffUtil of unchanged nodes is insufficient for display-only preferences.
+            io.nekohasekai.sagernet.widget.ProfileDisplayRefresh.apply(configurationListView, currentAdapter)
+        }
+
         override fun onResume() {
             super.onResume()
+            if (lastAddressPreference != DataStore.alwaysShowAddress) refreshAddressDisplay()
 
             if (::configurationListView.isInitialized && configurationListView.size == 0) {
                 configurationListView.adapter = adapter

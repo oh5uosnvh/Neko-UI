@@ -43,10 +43,10 @@ class HostsSwapPreference @JvmOverloads constructor(
         super.onBindViewHolder(holder)
         val button = holder.findViewById(R.id.hosts_swap) as Button
         button.isEnabled = isEnabled && canSwap
-        button.isActivated = mapped
+        button.isActivated = false
         button.alpha = if (button.isEnabled) 1f else 0.38f
         val colors = context.obtainStyledAttributes(
-            intArrayOf(if (mapped) R.attr.colorPrimary else android.R.attr.textColorSecondary),
+            intArrayOf(R.attr.colorPrimary),
         )
         try {
             colors.getColorStateList(0)?.let { button.setTextColor(it) }

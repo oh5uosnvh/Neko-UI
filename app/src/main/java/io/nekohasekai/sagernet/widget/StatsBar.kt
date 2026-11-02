@@ -2,14 +2,13 @@ package io.nekohasekai.sagernet.widget
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Parcelable
 import android.text.format.Formatter
 import android.util.AttributeSet
 import android.view.View
 import android.widget.TextView
 import androidx.appcompat.widget.TooltipCompat
 import androidx.coordinatorlayout.widget.CoordinatorLayout
-import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.whenStarted
 import com.google.android.material.bottomappbar.BottomAppBar
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.bg.BaseService
@@ -17,17 +16,12 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.ui.MainActivity
 import kotlin.math.abs
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 class StatsBar @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null,
     defStyleAttr: Int = R.attr.bottomAppBarStyle,
 ) : BottomAppBar(context, attrs, defStyleAttr) {
     companion object {
-        private const val INITIAL_HIDE_DELAY_MS = 100L
         private const val SCROLL_TOGGLE_THRESHOLD_DP = 8f
     }
 
@@ -35,7 +29,6 @@ class StatsBar @JvmOverloads constructor(
         ShowImmediate,
         ShowAnimated,
         HideImmediate,
-        HideAfterStart,
     }
 
     private lateinit var statusText: TextView
@@ -45,7 +38,6 @@ class StatsBar @JvmOverloads constructor(
     private lateinit var behavior: YourBehavior
     private var currentState = BaseService.State.Idle
     private var pendingTransition: Transition? = Transition.HideImmediate
-    private var transitionJob: Job? = null
 
     private var scrollHidden = false
     private var scrollDirection = 0 // 1 = hide (dy>0), -1 = show (dy<0), 0 = none
@@ -87,7 +79,7 @@ class StatsBar @JvmOverloads constructor(
             nestedScrollAxes: Int,
             type: Int,
         ): Boolean {
-            if (useExternalScrollDriver) return false
+            if (useExternalScrollDriver || !shouldShow()) return false
             return super.onStartNestedScroll(
                 coordinatorLayout,
                 child,
@@ -99,20 +91,43 @@ class StatsBar @JvmOverloads constructor(
         }
 
         override fun slideUp(child: BottomAppBar) {
-            if (!allowShow) return
-            super.slideUp(child)
+            slideUp(child, true)
+        }
+
+        override fun slideUp(child: BottomAppBar, animate: Boolean) {
+            if (!shouldShow()) { commitHidden(); return }
+            super.slideUp(child, animate)
+        }
+
+        override fun onLayoutChild(parent: CoordinatorLayout, child: BottomAppBar, layoutDirection: Int): Boolean {
+            val handled = super.onLayoutChild(parent, child, layoutDirection)
+            // Material updates its hidden height after child.onLayout; enforce our gate afterwards.
+            if (!shouldShow()) commitHidden()
+            return handled
         }
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
+        if (!shouldShow()) {
+            pendingTransition = null
+            commitHidden()
+            return
+        }
         val transition = pendingTransition
         if (transition != null) {
             pendingTransition = null
-            applyTransition(transition)
-        } else if (alpha == 0f) {
-            alpha = 1f
+            if (transition == Transition.HideImmediate) commitHidden()
+            else commitVisible(animated = transition == Transition.ShowAnimated)
         }
+    }
+
+    override fun onFinishInflate() {
+        super.onFinishInflate()
+        statusText = findViewById(R.id.status)
+        txText = findViewById(R.id.tx)
+        rxText = findViewById(R.id.rx)
+        if (!shouldShow()) commitHidden()
     }
 
     override fun setOnClickListener(l: OnClickListener?) {
@@ -179,11 +194,7 @@ class StatsBar @JvmOverloads constructor(
         currentState = state
         allowShow = showControls
         when {
-            !showControls || state != BaseService.State.Connected -> {
-                applyTransition(
-                    if (animate && showControls) Transition.HideAfterStart else Transition.HideImmediate
-                )
-            }
+            !showControls || state != BaseService.State.Connected -> applyTransition(Transition.HideImmediate)
 
             showWhenConnected -> applyTransition(
                 if (animate) Transition.ShowAnimated else Transition.ShowImmediate
@@ -193,93 +204,70 @@ class StatsBar @JvmOverloads constructor(
     }
 
     private fun applyTransition(transition: Transition) {
-        if (transition == Transition.HideImmediate && hasPendingDelayedHide()) return
-        cancelPendingTransition()
+        if (transition == Transition.HideImmediate || !shouldShow()) {
+            pendingTransition = null
+            commitHidden()
+            return
+        }
         if (!isLaidOut || height == 0) {
             pendingTransition = transition
-            alpha = if (transition == Transition.HideImmediate && !allowShow) 0f else 1f
+            alpha = 0f
             return
         }
         pendingTransition = null
-        when (transition) {
-            Transition.ShowImmediate -> commitVisible(animated = false)
-            Transition.ShowAnimated -> commitVisible(animated = true)
-            Transition.HideImmediate -> commitHidden(animated = false)
-            Transition.HideAfterStart -> commitHidden(animated = true)
-        }
+        commitVisible(animated = transition == Transition.ShowAnimated)
     }
 
     private fun commitVisible(animated: Boolean) {
+        if (!shouldShow()) { commitHidden(); return }
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+        isClickable = true
         alpha = 1f
         scrollHidden = false
         resetScrollDriverState()
         if (animated) {
             performShow()
         } else {
-            getBehavior().slideUp(this)
+            getBehavior().slideUp(this, false)
             animate().cancel()
             translationY = 0f
         }
     }
 
-    private fun commitHidden(animated: Boolean) {
-        alpha = 1f
+    private fun commitHidden() {
+        // Alpha gates the very first frame; preserve VISIBLE as the FAB's layout anchor.
+        alpha = 0f
+        isClickable = false
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         scrollHidden = true
         resetScrollDriverState()
-        if (!animated) {
-            syncHiddenPosition()
-            return
-        }
-        val activity = context as? MainActivity
-        if (activity == null) {
-            post {
-                if (shouldShow()) {
-                    commitVisible(animated = false)
-                } else if (isLaidOut && height > 0) {
-                    performHide()
-                } else {
-                    pendingTransition = Transition.HideAfterStart
-                }
-            }
-            return
-        }
-        transitionJob = activity.lifecycleScope.launch(Dispatchers.Main) {
-            delay(INITIAL_HIDE_DELAY_MS)
-            activity.whenStarted {
-                transitionJob = null
-                if (shouldShow()) {
-                    commitVisible(animated = false)
-                } else if (isLaidOut && height > 0) {
-                    performHide()
-                } else {
-                    pendingTransition = Transition.HideAfterStart
-                }
-            }
-        }
-    }
-
-    private fun syncHiddenPosition() {
-        getBehavior().slideDown(this)
         animate().cancel()
-        translationY = height.toFloat()
-        alpha = 1f
+        clearAnimation()
+        getBehavior().slideDown(this, false)
+        animate().cancel()
+        val margin = (layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.bottomMargin ?: 0
+        translationY = (height + margin).toFloat()
     }
 
-    private fun cancelPendingTransition() {
-        transitionJob?.cancel()
-        transitionJob = null
+    override fun onRestoreInstanceState(state: Parcelable?) {
+        super.onRestoreInstanceState(state)
+        if (!shouldShow()) { pendingTransition = null; commitHidden() }
     }
 
-    private fun hasPendingDelayedHide(): Boolean {
-        return pendingTransition == Transition.HideAfterStart || transitionJob != null
+    override fun onDetachedFromWindow() {
+        pendingTransition = null
+        animate().cancel()
+        super.onDetachedFromWindow()
     }
 
     fun changeState(state: BaseService.State) {
         currentState = state
         updateHideOnScroll()
         if (state == BaseService.State.Connected) {
-            setStatus(app.getText(R.string.vpn_connected))
+            setStatus(context.getText(R.string.vpn_connected))
         } else {
+            pendingTransition = null
+            commitHidden()
             updateSpeed(0, 0)
             setStatus(
                 context.getText(

@@ -2,17 +2,13 @@ package io.nekohasekai.sagernet.ui
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.content.Intent
 import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
-import android.os.Bundle
-import android.text.Spannable
-import android.text.SpannableString
 import android.text.TextUtils
-import android.text.style.ForegroundColorSpan
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
@@ -23,21 +19,27 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupWindow
-import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.widget.SearchView
 import androidx.appcompat.widget.Toolbar
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import androidx.core.view.GravityCompat
+import androidx.recyclerview.widget.ItemTouchHelper
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.GroupManager
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.ktx.snackbar
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 
 /**
  * 配置页顶栏。
@@ -112,6 +114,7 @@ internal class TopBarController(
     private var callbacks: Callbacks = Noop
 
     private var groupPopup: PopupWindow? = null
+    private var groupPickerSession: PickerSession? = null
 
     /** ⊙ 点击循环进度：false=下次去选定节点分组，true=下次去第一个分组 */
     private var jumpToggle = false
@@ -547,227 +550,271 @@ internal class TopBarController(
     // ------------------------------------------------------------ 分组快速列表
 
     fun dismissGroupPicker() {
+        // Close before PopupWindow starts its exit animation; clearView may arrive much later.
+        groupPickerSession?.close()
+        groupPickerSession = null
         groupPopup?.dismiss()
         groupPopup = null
     }
 
     fun showGroupPicker(anchor: View) {
         dismissGroupPicker()
-
-        val list = groups()
+        val list = groups().toList()
         if (list.isEmpty()) {
             host.snackbar(R.string.jump_hint_none)
             return
         }
-
-        val currentId = DataStore.selectedGroup
-
-        /*
-         * 顺序保持原样，一个都不动。
-         *
-         * 之前那版是错的：把选中的分组从原位挪到列表第一个。你要的不是这个 ——
-         * 「显示在第一」指的是**打开列表时滚动位置就在它身上**，让它一眼可见；
-         * 它在原排序里前面还有几个分组，就照样在前面，可以往上滚。
-         * 选中项排在末尾时也一样，列表就停在最后那几个上。
-         *
-         * 所以排序逻辑整体删掉，改由下面的 scrollView.post { scrollTo } 完成。
-         */
-
-        val card = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(6), 0, dp(6))
-            // 这里**不**设背景、也不设 clipToOutline。
-            //
-            // 描边必须只由外面那层固定框（ScrollView）来画：card 是滚动内容，
-            // 一旦给它描边，那张描边就会跟着内容一起滚走 —— 内容够长时它还会
-            // 撑满整个高度、把固定框的上下描边盖住，看起来就是「滑动时上下描边
-            // 消失，滚到两端才冒出来」。
-            //
-            // 透明的滚动内容 + 固定框自己裁剪 = 框线始终定在那里不动。
-        }
-
-        // 记下选中项那一行，稍后用滚动位置把它带到视口里
-        var selectedRow: View? = null
-
-        // 名称后缀 ·N（配置数）：与分组卡片 group_status 同源 countByGroup
-        val countTargets = ArrayList<Pair<TextView, Long>>()
-
-        for ((index, g) in list.withIndex()) {
-            val isCurrent = g.id == currentId
-
-            val label = TextView(context).apply {
-                text = g.displayName()
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                setSingleLine(true)
-                ellipsize = TextUtils.TruncateAt.END
-                if (isCurrent) setTypeface(typeface, Typeface.BOLD)
-                setTextColor(themeColor(android.R.attr.textColorPrimary))
-            }
-
-            /*
-             * 配置名称的圆角矩形背景。
-             *
-             * 外观照搬抽屉菜单的选中项 + 节点卡片的选中态：
-             *   · 圆角 = @dimen/nav_item_corner_radius (14dp)
-             *   · 底色 = ?attr/colorPrimary 运行时解析后取 16% alpha
-             *   · **选中时加主题色描边** —— 与配置列表里「选定了节点」完全一致
-             *     （ConfigurationFragment#applySelected：strokeColor = colorPrimary，
-             *      strokeWidth = @dimen/card_stroke_width_selected），
-             *     这样哪一条是当前分组一眼就能看出来。
-             *
-             * 圆角矩形只包住文字，左右两侧是留白。
-             */
-            val nameCard = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                background = groupItemCard(isCurrent)
-                setPadding(dp(14), dp(10), dp(14), dp(10))
-                layoutParams = LinearLayout.LayoutParams(
-                    0,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    1f,
-                )
-            }
-            nameCard.addView(
-                label,
-                LinearLayout.LayoutParams(
-                    0,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    1f,
-                ),
-            )
-
-            countTargets.add(label to g.id)
-
-            val rowView = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                // 上下各 2dp：相邻两个圆角矩形之间正好隔 4dp，
-                // 与配置列表里节点卡片之间的间隔一致（layout_profile.xml 的
-                // android:layout_margin="2dp" 两侧相加）。
-                // 左右 12dp：绿点已移除，这里的留白相应收窄一点。
-                setPadding(dp(12), dp(2), dp(12), dp(2))
-                isClickable = true
-            }
-
-            rowView.addView(nameCard)
-
-            if (isCurrent) selectedRow = rowView
-
-            rowView.setOnClickListener {
-                dismissGroupPicker()
-                // index 就是 groups() 的下标，与 jumpTo(target) 同一套编号，
-                // 不必再 indexOfFirst 匹配一遍（项目里跳转选中分组也是这么做的）
-                jumpTo(index)
-            }
-
-            // 长按分组名 → 进该分组的设置编辑界面
-            rowView.setOnLongClickListener {
-                dismissGroupPicker()
-                context.startActivity(
-                    Intent(context, GroupSettingsActivity::class.java)
-                        .putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, g.id)
-                )
-                true
-            }
-
-            card.addView(rowView)
-        }
-
-        val scroll = ScrollView(context).apply {
-            addView(card)
-            isFillViewport = false
-            // 这一层只负责滚动，**不画任何东西** —— 背景与描边全部交给外层容器。
-            isVerticalScrollBarEnabled = false
-        }
-
-        /*
-         * 固定容器：整个浮层就是它，尺寸不再变。
-         *
-         * 描边只画在这一层，而且它是 PopupWindow 的 content view ——
-         * 尺寸就是窗口尺寸、不参与滚动，所以四条边永远定格。
-         *
-         * 为什么必须单独有这一层：ScrollView 的内容可以在 onMeasure 阶段决定
-         * 自己的高度，配合 WRAP_CONTENT 的窗口曾经出现过「背景比可视窗口更高、
-         * 上下边缘被裁在视野之外」的情况 —— 那种情况下上下描边会"消失"，
-         * 只有把边缘滚进视野才看得到（用户实测到的正是这个）。把描边放在
-         * 尺寸固定的容器上，结构上就不可能再出现这种问题。
-         */
-        val container = FrameLayout(context).apply {
-            background = roundedCard()
-            clipToOutline = true
-            addView(
-                scroll,
-                FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ),
-            )
-        }
-
-        val popup = PopupWindow(
-            container,
-            pickerWidth(),
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            true,
-        ).apply {
-            isOutsideTouchable = true
-            isFocusable = true
-            elevation = dp(8).toFloat()
-            setBackgroundDrawable(ColorDrawable(0x00000000))
-        }
-
-        popup.showAsDropDown(anchor, pickerOffsetX(anchor, popup.width), dp(4))
-
-        /*
-         * 列表顺序完全不动，只把滚动位置对准当前选中的分组。
-         *
-         * 「选中配置分组显示在第一」= 打开列表时它就在视口里、一眼看到；
-         * 它在原排序里前面有几个分组，前面就照样有几个（可以往上滚），
-         * 排在末尾时撑不到更大滚动量、列表自然停在最后那几个上 —— 正是要的效果。
-         *
-         * 必须 post 到布局完成之后：showAsDropDown 之前 ScrollView 还没测量，
-         * 这时 scrollTo 会被当成 0。
-         */
-        val target = selectedRow
-        if (target != null) {
-            scroll.post {
-                // target.top 是相对 card 的坐标；减去 card 的内边距，
-                // 让选中行的上边缘正好落在视口顶部，不露出一截上一条。
-                scroll.scrollTo(0, (target.top - card.paddingTop).coerceAtLeast(0))
-            }
-        }
-
-        groupPopup = popup
-
-        applyGroupCounts(countTargets)
+        PickerSession(anchor, list).show()
     }
 
-    /**
-     * 行名称后缀 ·N：N = 该分组的配置数（与分组卡片 group_status 同源：
-     * SagerDatabase.proxyDao.countByGroup）；「·N」用卡片同款灰阶
-     * ?android:attr/textColorSecondary。异步查库：行先展示名称，数量随后补上。
-     */
-    private fun applyGroupCounts(targets: List<Pair<TextView, Long>>) {
-        if (targets.isEmpty()) return
-        runOnDefaultDispatcher {
-            val counts = targets.map { (tv, id) -> tv to PendingProfileDeletes.count(id) }
-            onMainDispatcher {
-                val secondary = themeColor(android.R.attr.textColorSecondary)
-                for ((tv, count) in counts) {
-                    val name = tv.text.toString()
-                    val full = "$name·$count"
-                    tv.text = SpannableString(full).apply {
-                        setSpan(
-                            ForegroundColorSpan(secondary),
-                            name.length,
-                            full.length,
-                            Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
-                        )
-                    }
+    private fun jumpToGroupId(id: Long) {
+        val index = groups().indexOfFirst { it.id == id }
+        if (index < 0) {
+            host.snackbar(R.string.jump_hint_none)
+            return
+        }
+        dismissGroupPicker()
+        if (host.select) host.groupPager.setCurrentItem(index, false) else jumpTo(index)
+    }
+
+    /** Owns only display state. The process-wide writer outlives this popup/fragment. */
+    private inner class PickerSession(
+        private val anchor: View,
+        initial: List<ProxyGroup>,
+    ) : GroupManager.Listener {
+        private val popupContext = context
+        private val appContext = popupContext.applicationContext
+        private var closed = false
+        private var editGeneration = 0L
+        private var pendingSaves = 0
+        private var refreshGeneration = 0L
+        private var refreshNeeded = false
+        private var refreshing: Job? = null
+        private var counting: Job? = null
+        private var deferredResult: Pair<Long, GroupOrderWriter.Result>? = null
+        private var confirmed = initial
+        private val layout = LinearLayoutManager(popupContext)
+        private val list = GroupPickerRecyclerView(popupContext)
+        private val adapter = GroupPickerAdapter(
+            popupContext, initial,
+            selectedId = { selectedItemGroupId() },
+            card = { groupItemCard(it) },
+            textColor = themeColor(android.R.attr.textColorPrimary),
+            secondaryColor = themeColor(android.R.attr.textColorSecondary),
+            onClick = { jumpToGroupId(it) },
+        )
+        private val drag = GroupPickerDragCallback(
+            adapter,
+            commit = { persist(it) },
+            cancelled = { showFailure(); refreshNeeded = true },
+            settled = { onSettled() },
+        )
+        private val touch = ItemTouchHelper(drag)
+        private val container = FrameLayout(popupContext).apply {
+            // Only this fixed, non-scrolling frame paints the border. Leave an inset so
+            // children/recovery animations cannot draw over its top/bottom edges.
+            background = roundedCard()
+            clipToOutline = true
+            val border = resources.getDimensionPixelSize(R.dimen.card_stroke_width)
+            setPadding(border, border, border, border)
+            addView(list, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+            ))
+        }
+        private val popup = PopupWindow(container, pickerWidth(), 1, true).apply {
+            isOutsideTouchable = true
+            elevation = dp(8).toFloat()
+            inputMethodMode = PopupWindow.INPUT_METHOD_NOT_NEEDED
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        }
+        private val scrollToSelected = Runnable {
+            if (!closed) {
+                val position = adapter.ids.indexOf(selectedItemGroupId())
+                if (position >= 0) layout.scrollToPositionWithOffset(position, 0)
+            }
+        }
+
+        init {
+            list.layoutManager = layout
+            list.adapter = adapter
+            list.itemAnimator = null
+            list.isVerticalScrollBarEnabled = false
+            list.setPadding(0, dp(6), 0, dp(6))
+            list.clipToPadding = true
+            touch.attachToRecyclerView(list)
+            adapter.startDrag = { holder ->
+                if (!closed && !drag.isDragging) touch.startDrag(holder)
+            }
+            list.cancelDrag = { drag.cancelGesture() }
+            popup.setOnDismissListener {
+                close()
+                if (groupPopup === popup) {
+                    groupPopup = null
+                    groupPickerSession = null
                 }
             }
         }
+
+        private fun selectedItemGroupId() = if (host.select) {
+            // ProfileSelectActivity uses its own current page; sorting must not select a node
+            // or write the main configuration's selectedGroup preference.
+            groups().getOrNull(host.groupPager.currentItem)?.id ?: DataStore.selectedGroup
+        } else DataStore.selectedGroup
+
+        fun show() {
+            val gap = dp(4)
+            val visible = Rect().also { anchor.getWindowVisibleDisplayFrame(it) }
+            val location = IntArray(2).also { anchor.getLocationOnScreen(it) }
+            val below = (visible.bottom - location[1] - anchor.height - gap - dp(8)).coerceAtLeast(0)
+            val above = (location[1] - visible.top - gap - dp(8)).coerceAtLeast(0)
+            val available = maxOf(below, above).coerceAtLeast(1)
+            // Measure a real row so large font sizes are included; the viewport itself has
+            // an explicit cap, rather than asking a WRAP_CONTENT scrolling child to cap it.
+            val probe = adapter.onCreateViewHolder(list, 0)
+            adapter.onBindViewHolder(probe, 0)
+            probe.itemView.measure(
+                View.MeasureSpec.makeMeasureSpec(popup.width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            )
+            val desired = probe.itemView.measuredHeight.toLong() * adapter.itemCount +
+                list.paddingTop + list.paddingBottom + container.paddingTop + container.paddingBottom
+            popup.height = desired.coerceAtMost(available.toLong()).coerceAtLeast(1).toInt()
+            groupPopup = popup
+            groupPickerSession = this
+            GroupManager.addListener(this)
+            try {
+                popup.showAsDropDown(anchor, pickerOffsetX(anchor, popup.width), gap)
+                list.post(scrollToSelected)
+                loadCounts()
+                // Reopening before a previous write's notification must not revive old order.
+                requestRefresh()
+            } catch (e: Exception) {
+                Logs.w(e)
+                close()
+                groupPopup = null
+                groupPickerSession = null
+                showFailure()
+            }
+        }
+
+        private fun persist(ids: List<Long>) {
+            // An older result waiting for an in-progress drag is now superseded, but its
+            // failure still needs a visible acknowledgement rather than being lost silently.
+            deferredResult?.second?.error?.let { showFailure() }
+            deferredResult = null
+            val generation = ++editGeneration
+            pendingSaves++
+            GroupOrderStore.submit(ids) { result ->
+                pendingSaves--
+                if (closed) {
+                    if (result.error != null) showFailure()
+                    return@submit
+                }
+                // A previous save/failure must never replace a more recent local gesture.
+                if (generation == editGeneration) {
+                    if (drag.isDragging) deferredResult = generation to result
+                    else accept(result)
+                } else if (result.error != null) showFailure()
+                onSettled()
+            }
+        }
+
+        private fun accept(result: GroupOrderWriter.Result) {
+            val fresh = result.groups
+            if (fresh != null) {
+                // Match the pager's hidden-empty-ungrouped policy without querying counts
+                // on the UI thread. Existing visible rows stay visible until the next refresh.
+                val visibleIds = (adapter.ids + groups().map { it.id }).toSet()
+                confirmed = fresh.filter { !it.ungrouped || it.id in visibleIds }
+            }
+            adapter.replace(confirmed)
+            if (result.error != null) showFailure()
+            loadCounts()
+        }
+
+        private fun onSettled() {
+            if (closed || drag.isDragging) return
+            deferredResult?.let { (generation, result) ->
+                deferredResult = null
+                if (generation == editGeneration) accept(result)
+            }
+            if (pendingSaves == 0 && refreshNeeded) requestRefresh()
+        }
+
+        private fun requestRefresh() {
+            if (closed) return
+            refreshNeeded = true
+            if (drag.isDragging || pendingSaves > 0) return
+            refreshNeeded = false
+            val generation = ++refreshGeneration
+            val edits = editGeneration
+            refreshing?.cancel()
+            refreshing = runOnDefaultDispatcher {
+                try {
+                    val fresh = SagerDatabase.groupDao.allGroups().filter {
+                        !it.ungrouped || PendingProfileDeletes.count(it.id) > 0L
+                    }
+                    onMainDispatcher {
+                        if (closed || generation != refreshGeneration) return@onMainDispatcher
+                        if (drag.isDragging || pendingSaves > 0 || edits != editGeneration) {
+                            refreshNeeded = true
+                        } else {
+                            confirmed = fresh
+                            adapter.replace(fresh)
+                            loadCounts()
+                        }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    onMainDispatcher { if (!closed) showFailure() }
+                }
+            }
+        }
+
+        private fun loadCounts() {
+            if (closed) return
+            counting?.cancel()
+            val ids = adapter.ids
+            counting = runOnDefaultDispatcher {
+                try {
+                    val counts = ids.associateWith { PendingProfileDeletes.count(it) }
+                    onMainDispatcher { if (!closed) adapter.updateCounts(counts) }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Logs.w(e)
+                }
+            }
+        }
+
+        private fun showFailure() {
+            Toast.makeText(appContext, R.string.group_reorder_failed, Toast.LENGTH_SHORT).show()
+        }
+
+        fun close() {
+            if (closed) return
+            closed = true
+            GroupManager.removeListener(this)
+            list.removeCallbacks(scrollToSelected)
+            refreshing?.cancel()
+            counting?.cancel()
+            deferredResult?.second?.error?.let { showFailure() }
+            deferredResult = null
+            list.cancelDrag = null
+            adapter.startDrag = null
+            // Explicit finalization is idempotent with a late clearView/exit animation.
+            drag.close()
+            touch.attachToRecyclerView(null)
+            list.adapter = null
+            deferredResult = null
+        }
+
+        override suspend fun groupAdd(group: ProxyGroup) = onMainDispatcher { requestRefresh() }
+        override suspend fun groupRemoved(groupId: Long) = onMainDispatcher { requestRefresh() }
+        override suspend fun groupUpdated(group: ProxyGroup) = onMainDispatcher { requestRefresh() }
+        override suspend fun groupUpdated(groupId: Long) = onMainDispatcher { requestRefresh() }
     }
 
     /**

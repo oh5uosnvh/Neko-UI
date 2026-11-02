@@ -60,13 +60,21 @@ class SubscriptionDnsBuilderTest {
         assertTrue(pattern.matches("private.example")); assertTrue(pattern.matches("a.private.example"))
         assertFalse(pattern.matches("notprivate.example")); assertFalse(pattern.matches("example.org"))
     }
-    @Test fun restoredHostsOnlyNodeStillHasExplicitUnmappedResolver() {
+    @Test fun serverAddressSwapNeverDisablesHostsRules() {
         val builder = SubscriptionDnsBuilder()
-        val settings = subscription("hosts: {node.private.example: target.example}").apply { applyHosts = false }
-        val tag = builder.node(bean(), settings)
-        assertNotNull(tag)
-        val resolver = builder.servers.first { it.asMap()["tag"] == tag }.asMap()
-        assertTrue((resolver["hosts"] as Map<*, *>).isEmpty())
+        val settings = subscription("hosts: {node.private.example: target.example}")
+        val profile = bean()
+        NodeHostMapping.apply(profile, builder.config(profile, settings).hosts, true)
+        assertEquals("target.example", profile.serverAddress)
+        val replacedTag = builder.node(profile, settings)
+        settings.applyHosts = false
+        NodeHostMapping.apply(profile, builder.config(profile, settings).hosts, false)
+        assertEquals("node.private.example", profile.serverAddress)
+        val originalTag = builder.node(profile, settings)
+        assertNotNull(originalTag)
+        assertEquals(replacedTag, originalTag)
+        val resolver = builder.servers.first { it.asMap()["tag"] == originalTag }.asMap()
+        assertEquals(listOf("target.example"), (resolver["hosts"] as Map<*, *>)["node.private.example"])
         assertEquals(listOf("dns-direct"), resolver["fallback"])
     }
 

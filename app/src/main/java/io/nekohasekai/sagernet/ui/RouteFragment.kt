@@ -1,11 +1,18 @@
 package io.nekohasekai.sagernet.ui
 
+import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.widget.ListPopupWindow
 import androidx.appcompat.widget.Toolbar
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.recyclerview.widget.ItemTouchHelper
@@ -20,6 +27,7 @@ import io.nekohasekai.sagernet.databinding.LayoutEmptyRouteBinding
 import io.nekohasekai.sagernet.databinding.LayoutRouteItemBinding
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.widget.ListListener
+import io.nekohasekai.sagernet.widget.RouteOutboundMenu
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
 
 class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItemClickListener {
@@ -28,6 +36,76 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
     lateinit var ruleListView: RecyclerView
     lateinit var ruleAdapter: RuleAdapter
     lateinit var undoManager: UndoSnackbarManager<RuleEntity>
+
+    private var outboundPopup: ListPopupWindow? = null
+    private var pendingProfileRuleId = 0L
+    private val savingOutbounds = hashSetOf<Long>()
+
+    private val chooseRuleProfile = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val ruleId = pendingProfileRuleId
+        pendingProfileRuleId = 0L
+        if (result.resultCode == Activity.RESULT_OK && ruleId > 0) {
+            val profileId = result.data?.getLongExtra(ProfileSelectActivity.EXTRA_PROFILE_ID, 0L) ?: 0L
+            if (profileId > 0) saveQuickOutbound(ruleId, profileId)
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        pendingProfileRuleId = savedInstanceState?.getLong("pendingProfileRuleId", 0L) ?: 0L
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putLong("pendingProfileRuleId", pendingProfileRuleId)
+    }
+
+    private fun showQuickOutbound(anchor: View, ruleId: Long, outbound: Long) {
+        if (ruleId in savingOutbounds || pendingProfileRuleId != 0L) return
+        outboundPopup?.dismiss()
+        outboundPopup = RouteOutboundMenu.show(anchor, outbound) { position ->
+            when(position) {
+                0 -> saveQuickOutbound(ruleId, 0)
+                1 -> saveQuickOutbound(ruleId, -1)
+                2 -> saveQuickOutbound(ruleId, -2)
+                3 -> {
+                    pendingProfileRuleId = ruleId
+                    chooseRuleProfile.launch(Intent(requireContext(), ProfileSelectActivity::class.java).apply {
+                        if (outbound > 0) ProfileManager.getProfile(outbound)?.let {
+                            putExtra(ProfileSelectActivity.EXTRA_SELECTED, it)
+                        }
+                    })
+                }
+            }
+        }
+    }
+
+    private fun saveQuickOutbound(ruleId: Long, outbound: Long) {
+        if (!savingOutbounds.add(ruleId)) return
+        lifecycleScope.launch {
+            try {
+                val saved = withContext(Dispatchers.IO) { RouteOutboundStore.set(SagerDatabase.instance, ruleId, outbound) }
+                if (saved == null) {
+                    if (isAdded) snackbar(getString(R.string.route_quick_save_failed)).show()
+                    return@launch
+                }
+                // UI labels are published from the latest persisted row so parallel switch updates win correctly.
+                val latest = withContext(Dispatchers.IO) { SagerDatabase.rulesDao.getById(ruleId) } ?: return@launch
+                ProfileManager.ruleIterator { onUpdated(latest) }
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                Logs.w(error)
+                if (isAdded) snackbar(getString(R.string.route_quick_save_failed)).show()
+            } finally { savingOutbounds.remove(ruleId) }
+        }
+    }
+
+    override fun onDestroyView() {
+        outboundPopup?.dismiss()
+        outboundPopup = null
+        if (::ruleAdapter.isInitialized) ProfileManager.removeListener(ruleAdapter)
+        super.onDestroyView()
+    }
 
     /** 问题1-B：切回路由页时列表回顶部 */
     override fun resetScrollState() {
@@ -201,10 +279,16 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             notifyItemMoved(from, to)
         }
 
-        fun commitMove() = runOnDefaultDispatcher {
-            if (updated.isNotEmpty()) {
-                SagerDatabase.rulesDao.updateRules(updated.toList())
-                updated.clear()
+        fun commitMove() {
+            val changes = updated.map { it.id to it.userOrder }
+            updated.clear()
+            if (changes.isEmpty()) return
+            lifecycleScope.launch {
+                withContext(Dispatchers.IO) {
+                    SagerDatabase.instance.runInTransaction {
+                        changes.forEach { (id, order) -> SagerDatabase.rulesDao.updateOrder(id, order) }
+                    }
+                }
                 needReload()
             }
         }
@@ -237,10 +321,12 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
         }
 
         override suspend fun onUpdated(rule: RuleEntity) {
-            val index = ruleList.indexOfFirst { it.id == rule.id }
-            if (index == -1) return
             ruleListView.post {
-                ruleList[index] = rule
+                val index = ruleList.indexOfFirst { it.id == rule.id }
+                if (index < 0) return@post
+                // Quick outbound changes must not undo an in-progress reorder or switch interaction.
+                val visible = ruleList[index]
+                ruleList[index] = rule.copy(userOrder = visible.userOrder)
                 ruleAdapter.notifyItemChanged(index + 1)
                 needReload()
             }
@@ -275,6 +361,13 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             }
         }
 
+        private fun postFreshRule(ruleId: Long) {
+            runOnDefaultDispatcher {
+                val fresh = SagerDatabase.rulesDao.getById(ruleId) ?: return@runOnDefaultDispatcher
+                ProfileManager.ruleIterator { onUpdated(fresh) }
+            }
+        }
+
         inner class RuleHolder(binding: LayoutRouteItemBinding) : RecyclerView.ViewHolder(binding.root) {
 
             lateinit var rule: RuleEntity
@@ -299,6 +392,14 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                     else -> R.color.color_route_config // 配置：紫色
                 }
                 routeOutbound.setTextColor(ContextCompat.getColor(itemView.context, colorRes))
+                routeOutbound.isClickable = true
+                routeOutbound.isFocusable = true
+                routeOutbound.minHeight = (40 * resources.displayMetrics.density).toInt()
+                routeOutbound.gravity = android.view.Gravity.CENTER_VERTICAL
+                routeOutbound.setBackgroundResource(android.R.drawable.list_selector_background)
+                routeOutbound.setOnClickListener { anchor ->
+                    showQuickOutbound(anchor, rule.id, rule.outbound)
+                }
 
                 itemView.setOnClickListener(null)
                 itemView.isClickable = false
@@ -306,9 +407,11 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 enableSwitch.setOnCheckedChangeListener(null)
                 enableSwitch.isChecked = rule.enabled
                 enableSwitch.setOnCheckedChangeListener { _, isChecked ->
+                    val ruleId = rule.id
+                    rule.enabled = isChecked
                     runOnDefaultDispatcher {
-                        rule.enabled = isChecked
-                        SagerDatabase.rulesDao.updateRule(rule)
+                        SagerDatabase.rulesDao.updateEnabled(ruleId, isChecked)
+                        postFreshRule(ruleId)
                         onMainDispatcher {
                             needReload()
                         }

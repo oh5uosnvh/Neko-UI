@@ -448,11 +448,11 @@
     <string name="subscription_dns_from_subscription">Provided by subscription</string>
     <string name="subscription_dns_from_file">Provided by local file</string>
     <string name="subscription_dns_custom">Custom</string>
-    <string name="subscription_hosts_swap">Toggle domain mapping</string>
-    <string name="subscription_hosts_restore">Restore original domains</string>
-    <string name="subscription_hosts_apply">Apply domain mappings</string>
-    <string name="subscription_hosts_mapping_on">Domain mapping on</string>
-    <string name="subscription_hosts_mapping_off">Domain mapping off</string>
+    <string name="subscription_hosts_swap">Swap server addresses</string>
+    <string name="subscription_hosts_restore">Restore original addresses</string>
+    <string name="subscription_hosts_apply">Use target addresses</string>
+    <string name="subscription_hosts_mapping_on">Using target addresses</string>
+    <string name="subscription_hosts_mapping_off">Original addresses restored</string>
     <string name="subscription_direct_dns_invalid">Invalid custom direct DNS. Use https://, tls://, quic://, tcp://, udp:// or host[:port], separated by newlines or commas, or leave empty.</string>
     <string name="subscription_dns_config_invalid">%1$s: %2$s</string>
     <string name="subscription_used">%s Used</string>
@@ -740,4 +740,7 @@
     <string name="group_deleted_undo">Group %s deleted</string>
     <string name="subscription_hosts_busy">Subscription updating</string>
     <string name="subscription_hosts_failed">Domain mapping failed</string>
+    <string name="group_reorder_handle">Drag to reorder</string>
+    <string name="group_reorder_failed">Could not save group order; restored the saved order</string>
+    <string name="route_quick_save_failed">Could not save route outbound</string>
 </resources>

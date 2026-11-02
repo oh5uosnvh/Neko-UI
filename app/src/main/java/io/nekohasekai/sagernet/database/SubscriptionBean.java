@@ -32,6 +32,8 @@ public class SubscriptionBean extends Serializable {
     // Snapshot from subscription updates; never edited by group settings.
     public String importedDnsConfig;
     public String importedDnsSource;
+    // Legacy field name retained for v5 compatibility: true stores server=B, false restores A.
+    // This is NOT a switch for DNS hosts rules; A->B remains active in both address modes.
     public Boolean applyHosts;
 
     // SIP008

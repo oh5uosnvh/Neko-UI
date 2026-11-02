@@ -338,6 +338,42 @@ public class SubscriptionDnsTest {
         }
     }
 
+    @Test public void compactPolicyAndCommaListEditorsKeepEveryResolver() {
+        String list = "['https://dns.example/dns-query', 'https://192.0.2.53/dns-query']";
+        List<String> expected = Arrays.asList("https://dns.example/dns-query", "https://192.0.2.53/dns-query");
+        for (String input : Arrays.asList(
+                "+.nodes.example: " + list,
+                "{ +.nodes.example: " + list + " }",
+                "+.nodes.example: 'https://dns.example/dns-query', 'https://192.0.2.53/dns-query'",
+                "+.nodes.example: https://dns.example/dns-query, https://192.0.2.53/dns-query")) {
+            assertNull(SubscriptionDns.validatePrivateConfig(input));
+            SubscriptionDns.Config config = SubscriptionDns.effective("", input, "", "");
+            assertEquals(expected, config.policy.get("+.nodes.example"));
+        }
+        SubscriptionDns.Config nodeOnly = SubscriptionDns.effective("", "proxy-server-nameserver-policy: { +.nodes.example: " + list + " }", "", "");
+        assertEquals(expected, nodeOnly.serverPolicy.get("+.nodes.example"));
+        assertTrue(nodeOnly.policy.isEmpty());
+    }
+
+    @Test public void indentedFlatHostsEditorSupportsRawPastedMappingRows() {
+        String text = "node-bj.example: real-bj.example\n  node-gz.example: real-gz.example\n  node-sh.example: real-sh.example";
+        assertNull(SubscriptionDns.validateHostsConfig(text));
+        Map<String,List<String>> hosts = SubscriptionDns.effective("", "", text, "").hosts;
+        assertEquals(3, hosts.size());
+        assertEquals(Collections.singletonList("real-gz.example"), hosts.get("node-gz.example"));
+        assertThrows(IllegalArgumentException.class, () -> SubscriptionDns.loadDocument(text));
+        assertNull(SubscriptionDns.validateHostsConfig("{ node.example: target.example }"));
+        assertNull(SubscriptionDns.validateHostsConfig("hosts:\n  node.example: target.example"));
+    }
+
+    @Test public void compactEditorStillRejectsCyclesDuplicateKeysAndUnsafeValues() {
+        for (String input : Arrays.asList("a.example: b.example\n  b.example: a.example", "A.Example: 192.0.2.1\n  a.example: 192.0.2.2", "a.example: !!java.net.URL ['https://example.org']", "a.example: &a [*a]")) {
+            assertNotNull(SubscriptionDns.validateHostsConfig(input));
+        }
+        assertNotNull(SubscriptionDns.validatePrivateConfig("+.example: 'https://dns.example/dns-query', false"));
+        assertNotNull(SubscriptionDns.validatePrivateConfig("+.example: https://dns.example/dns-query\n  +.EXAMPLE: 192.0.2.53"));
+    }
+
     @Test public void snapshotDoesNotRetainNodesOrCredentials() {
         SubscriptionDns.Config config = parse("proxies:\n"
                 + "  - {name: private-node-sentinel, type: ss, server: hidden.invalid, port: 443, password: password-sentinel}\n"

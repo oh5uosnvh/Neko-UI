@@ -20,7 +20,10 @@ This iteration starts at the published **1.4.2-mg-pre1** commit `53f1f18`.
 It adds group-scoped DNS, visible imported settings, reversible direct node-host
 mapping, and bounded DNS racing/connection reuse without changing TLS identities.
 See [debugging behavior and tests](docs/subscription-dns.md).
-The candidate name is `1.4.2-mg-pre1-debug-dns02`, base code 51 (Android 255).
+The candidate name is `1.4.2-mg-pre1-debug-dns03`, base code 52 (Android 260).
+This debugging round fixes the disconnected statistics tray and live address display,
+keeps hosts active in both server-address modes, adds 200ms group export shortcuts,
+handle-based quick group ordering, and immediate route-outbound selection.
 The earlier `pre2` filename was a test candidate, not an authorized product release.
 No release/tag is created. Parser, pinned-core DNS/TLS and Android JVM tests are mandatory gates.
 
@@ -48,7 +51,7 @@ Neko-shanlian, Neko-viewTurbo, Neko-fastup and Neko-oppa from Nekobox-MG commit
 `sing-anytls-shanlian`, `sing-shadowsocks2-vt`, `fastup-mod`, `oppa-mod`.
 `./run lib core` fetches the pinned sing-box and libneko siblings and builds
 the AAR; it refuses to overwrite dirty checkouts. Then run
-`./run init action gradle` and `APP_VERSION_NAME=1.4.2-mg-pre1-debug-dns02 APP_PRE_VERSION_NAME=1.4.2-mg-pre1-debug-dns02 APP_VERSION_CODE=51 ./gradlew app:assemblePreviewRelease`.
+`./run init action gradle` and `APP_VERSION_NAME=1.4.2-mg-pre1-debug-dns03 APP_PRE_VERSION_NAME=1.4.2-mg-pre1-debug-dns03 APP_VERSION_CODE=52 ./gradlew app:assemblePreviewRelease`.
 
 These pins make source selection repeatable, not a claim of byte-identical APKs:
 external action tags, Maven/Go dependencies and hosted runner images are not

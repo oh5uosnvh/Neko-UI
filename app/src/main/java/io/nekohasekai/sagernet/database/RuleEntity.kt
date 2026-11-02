@@ -98,6 +98,15 @@ data class RuleEntity(
         @Update
         fun updateRule(rule: RuleEntity)
 
+        @Query("UPDATE rules SET outbound = :outbound WHERE id = :ruleId")
+        fun updateOutbound(ruleId: Long, outbound: Long): Int
+
+        @Query("UPDATE rules SET enabled = :enabled WHERE id = :ruleId")
+        fun updateEnabled(ruleId: Long, enabled: Boolean): Int
+
+        @Query("UPDATE rules SET userOrder = :order WHERE id = :ruleId")
+        fun updateOrder(ruleId: Long, order: Long): Int
+
         @Update
         fun updateRules(rules: List<RuleEntity>)
 

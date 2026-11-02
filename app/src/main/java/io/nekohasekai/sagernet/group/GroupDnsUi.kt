@@ -19,17 +19,20 @@ object GroupDnsUi {
     }
 
     fun automatic(config: SubscriptionDns.Config): Automatic {
-        val privateDns = linkedMapOf<String, Any>()
-        if (config.policy.isNotEmpty()) privateDns["nameserver-policy"] = config.policy
-        if (config.serverPolicy.isNotEmpty()) {
-            privateDns["proxy-server-nameserver-policy"] = config.serverPolicy
+        fun compact(values: Map<String, List<String>>): Map<String, Any> =
+            values.mapValues { (_, items) -> if (items.size == 1) items.first() else items }
+        val privateText = when {
+            config.serverPolicy.isEmpty() && config.policy.isNotEmpty() -> SubscriptionDns.dumpFlow(compact(config.policy))
+            else -> buildList {
+                if (config.policy.isNotEmpty()) add("nameserver-policy: " + SubscriptionDns.dumpFlow(compact(config.policy)))
+                if (config.serverPolicy.isNotEmpty()) add("proxy-server-nameserver-policy: " + SubscriptionDns.dumpFlow(compact(config.serverPolicy)))
+            }.joinToString("\n")
         }
-        if (privateDns.isNotEmpty() && config.bootstrap.isNotEmpty()) privateDns["default-nameserver"] = config.bootstrap
         return Automatic(
             server = config.serverDns.joinToString("\n"),
             direct = config.directDns.joinToString("\n"),
-            privateDns = if (privateDns.isEmpty()) "" else SubscriptionDns.dump(mapOf("dns" to privateDns)),
-            hosts = if (config.hosts.isEmpty()) "" else SubscriptionDns.dump(mapOf("hosts" to config.hosts)),
+            privateDns = privateText,
+            hosts = if (config.hosts.isEmpty()) "" else SubscriptionDns.dump(compact(config.hosts)).trimEnd(),
         )
     }
 

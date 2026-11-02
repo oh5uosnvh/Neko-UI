@@ -129,8 +129,8 @@
     <string name="action_create_group">空白组</string>
     <string name="action_from_link">添加订阅</string>
     <string name="action_scan_china_apps">扫描中国应用</string>
-    <string name="action_export_file">导出到文件</string>
-    <string name="action_export_clipboard">导出到剪切板</string>
+    <string name="action_export_file">导出文件</string>
+    <string name="action_export_clipboard">导出剪切板</string>
     <string name="action_import">从剪切板导入</string>
     <string name="action_import_file">从文件中导入</string>
     <string name="action_export_msg">导出成功!</string>
@@ -376,11 +376,11 @@
     <string name="subscription_dns_from_subscription">订阅提供</string>
     <string name="subscription_dns_from_file">本地文件提供</string>
     <string name="subscription_dns_custom">自定义</string>
-    <string name="subscription_hosts_swap">切换域名映射</string>
-    <string name="subscription_hosts_restore">恢复原始域名</string>
-    <string name="subscription_hosts_apply">应用域名映射</string>
-    <string name="subscription_hosts_mapping_on">域名映射已开启</string>
-    <string name="subscription_hosts_mapping_off">域名映射已关闭</string>
+    <string name="subscription_hosts_swap">替换服务器域名</string>
+    <string name="subscription_hosts_restore">还原原始地址</string>
+    <string name="subscription_hosts_apply">替换为目标地址</string>
+    <string name="subscription_hosts_mapping_on">已替换为目标地址</string>
+    <string name="subscription_hosts_mapping_off">已还原原始地址</string>
     <string name="subscription_direct_dns_invalid">自定义直连 DNS 无效。请使用 https://、tls://、quic://、tcp://、udp:// 或 host[:port]，多个端点用换行或逗号分隔，也可留空。</string>
     <string name="subscription_dns_config_invalid">%1$s：%2$s</string>
     <string name="enable_dns_routing">启用 DNS 路由</string>
@@ -634,4 +634,7 @@
     <string name="group_deleted_undo">已删除分组 %s</string>
     <string name="subscription_hosts_busy">订阅更新中</string>
     <string name="subscription_hosts_failed">域名映射失败</string>
+    <string name="group_reorder_handle">拖动排序</string>
+    <string name="group_reorder_failed">排序保存失败，已恢复原顺序</string>
+    <string name="route_quick_save_failed">路由出口保存失败</string>
 </resources>

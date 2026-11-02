@@ -202,11 +202,11 @@
     <string name="subscription_dns_from_subscription">訂閱提供</string>
     <string name="subscription_dns_from_file">本機檔案提供</string>
     <string name="subscription_dns_custom">自訂</string>
-    <string name="subscription_hosts_swap">切換網域映射</string>
-    <string name="subscription_hosts_restore">還原原始網域</string>
-    <string name="subscription_hosts_apply">套用網域映射</string>
-    <string name="subscription_hosts_mapping_on">網域映射已開啟</string>
-    <string name="subscription_hosts_mapping_off">網域映射已關閉</string>
+    <string name="subscription_hosts_swap">替換伺服器網域</string>
+    <string name="subscription_hosts_restore">還原原始位址</string>
+    <string name="subscription_hosts_apply">替換為目標位址</string>
+    <string name="subscription_hosts_mapping_on">已替換為目標位址</string>
+    <string name="subscription_hosts_mapping_off">已還原原始位址</string>
     <string name="subscription_direct_dns_invalid">自訂直連 DNS 無效。請使用 https://、tls://、quic://、tcp://、udp:// 或 host[:port]，多個端點以換行或逗號分隔，也可留空。</string>
     <string name="subscription_dns_config_invalid">%1$s：%2$s</string>
     <string name="connection_test_available_http">成功：HTTP 握手花費 %d 毫秒</string>
@@ -632,4 +632,7 @@
     <string name="sort_descending">降序</string>
     <string name="subscription_hosts_busy">訂閱更新中</string>
     <string name="subscription_hosts_failed">網域映射失敗</string>
+    <string name="group_reorder_handle">拖動排序</string>
+    <string name="group_reorder_failed">排序儲存失敗，已還原原順序</string>
+    <string name="route_quick_save_failed">路由出口儲存失敗</string>
 </resources>

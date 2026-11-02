@@ -100,7 +100,8 @@ class MainActivity : ThemedActivity(),
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         MessageStore.setCurrentActivity(this)
-        val animateInitialControls = savedInstanceState == null
+        // The UI starts unbound: do not restore a stale Connected tray before the service replies.
+        DataStore.serviceState = BaseService.State.Idle
 
         binding = LayoutMainBinding.inflate(layoutInflater)
         binding.fab.initProgress(binding.fabProgress)
@@ -145,14 +146,8 @@ class MainActivity : ThemedActivity(),
             currentMainFragment =
                 supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
         }
-        if (!animateInitialControls) {
-            syncMainControls(showWhenConnected = false, animate = false)
-        }
-        changeState(
-            BaseService.State.Idle,
-            animate = false,
-            animateControls = animateInitialControls,
-        )
+        syncMainControls(showWhenConnected = false, animate = false)
+        changeState(BaseService.State.Idle, animate = false, animateControls = false)
         connection.connect(this, this)
         DataStore.configurationStore.registerChangeListener(this)
         GroupManager.userInterface = GroupInterfaceAdapter(this)
@@ -213,11 +208,12 @@ class MainActivity : ThemedActivity(),
         super.onPostResume()
         val restoredFragment = currentMainFragment
             ?: supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
-        if (restoredFragment != null && restoredFragment !== currentMainFragment) {
+        if (restoredFragment != null) {
+            val fragmentChanged = restoredFragment !== currentMainFragment
             currentMainFragment = restoredFragment
             syncMainControls(
                 fragment = restoredFragment,
-                showWhenConnected = DataStore.serviceState == BaseService.State.Connected,
+                showWhenConnected = fragmentChanged && DataStore.serviceState == BaseService.State.Connected,
                 animate = false,
             )
         }
@@ -786,6 +782,7 @@ class MainActivity : ThemedActivity(),
 
     override fun onServiceDisconnected() = changeState(BaseService.State.Idle)
     override fun onBinderDied() {
+        changeState(BaseService.State.Idle)
         connection.disconnect(this)
         connection.connect(this, this)
     }

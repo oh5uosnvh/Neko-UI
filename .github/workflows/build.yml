@@ -6,11 +6,11 @@ on:
       release_tag:
         description: 'Debug candidate name only; does not create a release or tag'
         required: true
-        default: '1.4.2-mg-pre1-debug-dns02'
+        default: '1.4.2-mg-pre1-debug-dns03'
       version_code:
         description: 'Base version code (>=49; Android code is base x 5)'
         required: true
-        default: '51'
+        default: '52'
       signed:
         description: 'Sign with the verified legacy key (requires secrets)'
         type: boolean
@@ -142,6 +142,14 @@ jobs:
           fi
           cp "${apks[@]}" release/
           (cd release && sha256sum ./*.apk > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-test-results
+          path: |
+            app/build/test-results/testPreviewDebugUnitTest/
+            app/build/reports/tests/testPreviewDebugUnitTest/
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: candidate-apks

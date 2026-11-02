@@ -58,14 +58,9 @@ class SubscriptionDnsBuilder {
     }
 
     fun node(bean: AbstractBean, subscription: SubscriptionBean?, fallback: String = "dns-direct"): String? {
-        var config = config(bean, subscription)
-        val mappingDisabled = subscription?.applyHosts == false
-        if (mappingDisabled) {
-            // ⇆ restored the original node address: do not remap it again inside DNS.
-            config = SubscriptionDns.fromDocument(config.asDocument()).apply { hosts.clear() }
-        }
-        // Keep an explicit plain resolver even for hosts-only groups, so app-level hosts cannot reapply.
-        if (!config.hasNodeConfig() && !mappingDisabled) return null
+        val config = config(bean, subscription)
+        // applyHosts only chooses the stored server address (A or B). The A->B DNS rule is always kept.
+        if (!config.hasNodeConfig()) return null
         return build(config, true, fallback)
     }
 

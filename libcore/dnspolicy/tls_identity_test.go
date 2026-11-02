@@ -59,8 +59,9 @@ func testCertificate(t *testing.T, name string) (tls.Certificate, string) {
 	return cert, string(certPEM)
 }
 func TestMappedTLSNodePreservesCertificateNameAndSNI(t *testing.T) {
-	for _, explicit := range []bool{false, true} {
-		t.Run(fmt.Sprint("explicit-sni=", explicit), func(t *testing.T) {
+	for _, tc := range []struct{ explicit, replaced bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
+		explicit := tc.explicit
+		t.Run(fmt.Sprint("explicit-sni=", explicit, "/server-replaced=", tc.replaced), func(t *testing.T) {
 			identity := "node.example"
 			if explicit {
 				identity = "certificate.example"
@@ -108,8 +109,12 @@ func TestMappedTLSNodePreservesCertificateNameAndSNI(t *testing.T) {
 			ctx := box.Context(context.Background(), ir, or, endpoint.NewRegistry(), dr, boxservice.NewRegistry())
 			ctx = service.ContextWithDefaultRegistry(ctx)
 			tlsOpts := map[string]any{"enabled": true, "certificate": []string{certPEM}, "alpn": []string{"http/1.1"}}
-			if explicit {
+			if explicit || tc.replaced {
 				tlsOpts["server_name"] = identity
+			}
+			serverName := "node.example"
+			if tc.replaced {
+				serverName = "alias.example"
 			}
 			cfg := map[string]any{
 				"log": map[string]any{"disabled": true},
@@ -117,7 +122,7 @@ func TestMappedTLSNodePreservesCertificateNameAndSNI(t *testing.T) {
 					map[string]any{"type": "neko-tcp", "tag": "unused", "server": "127.0.0.1", "server_port": 9},
 					map[string]any{"type": "neko-policy", "tag": "group", "fallback": []string{"unused"}, "hosts": map[string][]string{"node.example": {"alias.example"}, "alias.example": {"127.0.0.1"}}},
 				}},
-				"outbounds": []any{map[string]any{"type": "http", "tag": "proxy", "server": "node.example", "server_port": listener.Addr().(*net.TCPAddr).Port,
+				"outbounds": []any{map[string]any{"type": "http", "tag": "proxy", "server": serverName, "server_port": listener.Addr().(*net.TCPAddr).Port,
 					"domain_resolver": map[string]any{"server": "group", "strategy": "ipv4_only"}, "tls": tlsOpts}},
 				"route": map[string]any{"final": "proxy"},
 			}

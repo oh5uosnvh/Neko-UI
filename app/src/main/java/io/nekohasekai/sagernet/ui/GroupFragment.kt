@@ -20,7 +20,6 @@ import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import android.view.ViewGroup
 import android.widget.LinearLayout
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.PopupMenu
 import androidx.appcompat.widget.Toolbar
 import androidx.core.view.*
@@ -219,33 +218,17 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         return true
     }
 
-    private lateinit var selectedGroup: ProxyGroup
+    private val groupProfileExport = GroupProfileExport(this)
 
-    private val exportProfiles =
-        registerForActivityResult(ActivityResultContracts.CreateDocument()) { data ->
-            if (data != null) {
-                runOnDefaultDispatcher {
-                    val profiles = SagerDatabase.proxyDao.getByGroup(selectedGroup.id)
-                    val links = profiles.joinToString("\n") { it.toStdLink(compact = true) }
-                    try {
-                        (requireActivity() as MainActivity).contentResolver.openOutputStream(
-                            data
-                        )!!.bufferedWriter().use {
-                            it.write(links)
-                        }
-                        onMainDispatcher {
-                            snackbar(getString(R.string.action_export_msg)).show()
-                        }
-                    } catch (e: Exception) {
-                        Logs.w(e)
-                        onMainDispatcher {
-                            snackbar(e.readableMessage).show()
-                        }
-                    }
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        groupProfileExport.restoreState(savedInstanceState)
+    }
 
-                }
-            }
-        }
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        groupProfileExport.saveState(outState)
+    }
 
 
     private fun toolbarForeground(): Int {
@@ -612,20 +595,34 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         }
 
         override suspend fun groupUpdated(group: ProxyGroup) {
-            val index = groupList.indexOfFirst { it.id == group.id }
-            if (index == -1) {
-                reload()
-                return
-            }
-            // 自身回声（move 原地改的同一实例）无需重绑，否则松手后卡片闪一下；
-            // 拖动中的一切广播先吞掉，松手时本地已是最终状态
-            if (suppressSelfEcho || groupList[index] === group) return
-            groupList[index] = group
-            onMainDispatcher {
+            val known = onMainDispatcher {
+                val allIndex = fullList.indexOfFirst { it.id == group.id }
+                if (allIndex < 0) return@onMainDispatcher false
+                // Ignore our own active drag's echoes, not a newly persisted external order.
+                if (suppressSelfEcho || fullList[allIndex] === group) return@onMainDispatcher true
+                val before = groupList.map { it.id }
+                fullList[allIndex] = group
+                fullList.sortBy { it.userOrder }
                 undoManager.flush()
-
-                notifyItemChanged(index)
+                rebuildVisible()
+                val after = groupList.map { it.id }
+                if (before.size != after.size || before.toSet() != after.toSet()) {
+                    notifyDataSetChanged()
+                } else {
+                    val current = before.toMutableList()
+                    after.forEachIndexed { target, id ->
+                        val source = current.indexOf(id)
+                        if (source != target) {
+                            current.add(target, current.removeAt(source))
+                            notifyItemMoved(source, target)
+                        }
+                    }
+                    val index = after.indexOf(group.id)
+                    if (index >= 0) notifyItemChanged(index)
+                }
+                true
             }
+            if (!known) reload()
         }
 
         override suspend fun groupUpdated(groupId: Long) {
@@ -658,8 +655,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     }
 
     inner class GroupHolder(binding: LayoutGroupItemBinding) :
-        RecyclerView.ViewHolder(binding.root),
-        PopupMenu.OnMenuItemClickListener {
+        RecyclerView.ViewHolder(binding.root) {
 
         lateinit var proxyGroup: ProxyGroup
         val groupName = binding.groupName
@@ -671,7 +667,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         val updateButton = binding.groupUpdate
         val subscriptionUpdateProgress = binding.subscriptionUpdateProgress
 
-        override fun onMenuItemClick(item: MenuItem): Boolean {
+        private fun onMenuItemClick(item: MenuItem, menuGroup: ProxyGroup): Boolean {
 
             fun export(link: String) {
                 val success = SagerNet.trySetPrimaryClip(link)
@@ -682,31 +678,24 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             when (item.itemId) {
                 R.id.action_universal_qr -> {
                     QRCodeDialog(
-                        proxyGroup.toUniversalLink(), proxyGroup.displayName()
+                        menuGroup.toUniversalLink(), menuGroup.displayName()
                     ).showAllowingStateLoss(parentFragmentManager)
                 }
 
                 R.id.action_universal_clipboard -> {
-                    export(proxyGroup.toUniversalLink())
+                    export(menuGroup.toUniversalLink())
                 }
 
                 R.id.action_export_clipboard -> {
-                    runOnDefaultDispatcher {
-                        val profiles = SagerDatabase.proxyDao.getByGroup(selectedGroup.id)
-                        val links = profiles.joinToString("\n") { it.toStdLink(compact = true) }
-                        onMainDispatcher {
-                            SagerNet.trySetPrimaryClip(links)
-                            snackbar(getString(R.string.copy_toast_msg)).show()
-                        }
-                    }
+                    groupProfileExport.toClipboard(menuGroup.id)
                 }
 
                 R.id.action_export_file -> {
-                    startFilesForResult(exportProfiles, "profiles_${proxyGroup.displayName()}.txt")
+                    groupProfileExport.toFile(menuGroup.id, menuGroup.displayName())
                 }
 
                 R.id.action_clear -> {
-                    GroupClearAction.confirm(activity, proxyGroup)
+                    GroupClearAction.confirm(activity, menuGroup)
                 }
             }
 
@@ -734,15 +723,15 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             }
 
             optionsButton.setOnClickListener {
-                selectedGroup = proxyGroup
+                val menuGroup = proxyGroup
 
                 val popup = PopupMenu(requireContext(), it)
                 popup.menuInflater.inflate(R.menu.group_action_menu, popup.menu)
 
-                if (proxyGroup.type != GroupType.SUBSCRIPTION) {
+                if (menuGroup.type != GroupType.SUBSCRIPTION) {
                     popup.menu.removeItem(R.id.action_share_subscription)
                 }
-                popup.setOnMenuItemClickListener(this)
+                popup.setOnMenuItemClickListener { item -> onMenuItemClick(item, menuGroup) }
                 popup.show()
             }
 
