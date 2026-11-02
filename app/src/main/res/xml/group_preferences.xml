@@ -52,31 +52,27 @@
             app:useSimpleSummaryProvider="true" />
 
         <EditTextPreference
-            app:dialogMessage="@string/subscription_server_dns_message"
             app:icon="@drawable/ic_action_dns"
             app:key="subscriptionServerDns"
-            app:summary="@string/subscription_dns_inherit"
+            app:summary="@string/subscription_dns_unset"
             app:title="@string/server_dns" />
 
         <EditTextPreference
-            app:dialogMessage="@string/subscription_direct_dns_message"
             app:icon="@drawable/ic_action_dns"
             app:key="subscriptionDirectDns"
-            app:summary="@string/subscription_direct_dns_inherit"
+            app:summary="@string/subscription_dns_unset"
             app:title="@string/subscription_direct_dns" />
 
         <EditTextPreference
-            app:dialogMessage="@string/subscription_private_dns_message"
             app:icon="@drawable/ic_action_dns"
             app:key="subscriptionPrivateDns"
-            app:summary="@string/subscription_dns_inherit"
+            app:summary="@string/subscription_dns_unset"
             app:title="@string/subscription_private_dns" />
 
-        <EditTextPreference
-            app:dialogMessage="@string/subscription_hosts_message"
+        <io.nekohasekai.sagernet.widget.HostsSwapPreference
             app:icon="@drawable/ic_action_dns"
             app:key="subscriptionHosts"
-            app:summary="@string/subscription_dns_inherit"
+            app:summary="@string/subscription_dns_unset"
             app:title="@string/subscription_hosts" />
 
         <SwitchPreference

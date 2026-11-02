@@ -41,7 +41,7 @@ data class ProxyGroup(
             subscription.serializeForShare(output)
 
         } else {
-            output.writeInt(1)
+            output.writeInt(2)
             output.writeLong(id)
             output.writeLong(userOrder)
             output.writeBoolean(ungrouped)
@@ -55,6 +55,10 @@ data class ProxyGroup(
             output.writeBoolean(isSelector)
             output.writeLong(frontProxy)
             output.writeLong(landingProxy)
+            if (type != GroupType.SUBSCRIPTION) {
+                output.writeBoolean(subscription != null)
+                subscription?.serializeToBuffer(output)
+            }
         }
     }
 
@@ -89,6 +93,9 @@ data class ProxyGroup(
                 isSelector = input.readBoolean()
                 frontProxy = input.readLong()
                 landingProxy = input.readLong()
+            }
+            if (version >= 2 && type != GroupType.SUBSCRIPTION && input.readBoolean()) {
+                subscription = SubscriptionBean().apply { deserializeFromBuffer(input) }
             }
         }
     }

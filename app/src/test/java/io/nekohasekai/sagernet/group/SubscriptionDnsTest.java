@@ -224,14 +224,15 @@ public class SubscriptionDnsTest {
         SubscriptionDns.Config noPrivate = SubscriptionDns.effective(IMPORTED, "{}", "", "");
         assertTrue(noPrivate.policy.isEmpty());
         assertTrue(noPrivate.serverPolicy.isEmpty());
-        assertTrue(noPrivate.serverDns.isEmpty());
+        assertEquals(original.serverDns, noPrivate.serverDns);
+        assertEquals(original.directDns, noPrivate.directDns);
         assertEquals(original.hosts, noPrivate.hosts);
         assertEquals(original.bootstrap, noPrivate.bootstrap);
         SubscriptionDns.Config noHosts = SubscriptionDns.effective(IMPORTED, "", "{}", "");
         assertTrue(noHosts.hosts.isEmpty());
         assertEquals(original.policy, noHosts.policy);
         assertEquals(original.serverDns, noHosts.serverDns);
-        SubscriptionDns.Config off = SubscriptionDns.effective(IMPORTED, "{}", "{}", "");
+        SubscriptionDns.Config off = SubscriptionDns.effective(IMPORTED, "{}", "{}", "{}");
         assertFalse(off.hasNodeConfig());
         assertFalse(off.hasGeneralConfig());
     }

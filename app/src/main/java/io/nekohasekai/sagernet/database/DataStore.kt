@@ -308,6 +308,9 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var subscriptionDirectDns by profileCacheStore.string(Key.SUBSCRIPTION_DIRECT_DNS) { "" }
     var subscriptionPrivateDns by profileCacheStore.string(Key.SUBSCRIPTION_PRIVATE_DNS) { "" }
     var subscriptionHosts by profileCacheStore.string(Key.SUBSCRIPTION_HOSTS) { "" }
+    var subscriptionImportedDns by profileCacheStore.string("subscriptionImportedDns") { "" }
+    var subscriptionDnsSource by profileCacheStore.string("subscriptionDnsSource") { "" }
+    var subscriptionApplyHosts by profileCacheStore.boolean("subscriptionApplyHosts") { true }
 
     var rulesFirstCreate by profileCacheStore.boolean("rulesFirstCreate")
 

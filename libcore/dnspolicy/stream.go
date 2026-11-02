@@ -2,7 +2,9 @@ package dnspolicy
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/miekg/dns"
@@ -25,6 +27,13 @@ type streamTransport struct {
 	dialer    N.Dialer
 	address   M.Socksaddr
 	tlsConfig tls.Config
+	poolMu    sync.Mutex
+	idle      []idleStream
+	closed    bool
+}
+type idleStream struct {
+	conn net.Conn
+	used time.Time
 }
 
 func registerStreams(registry *boxdns.TransportRegistry) {
@@ -71,29 +80,108 @@ func (s *streamTransport) Start(stage adapter.StartStage) error {
 	}
 	return nil
 }
-func (s *streamTransport) Close() error { return nil }
+func (s *streamTransport) Close() error {
+	s.poolMu.Lock()
+	s.closed = true
+	idle := s.idle
+	s.idle = nil
+	s.poolMu.Unlock()
+	for _, item := range idle {
+		_ = item.conn.Close()
+	}
+	return nil
+}
+func (s *streamTransport) takeIdle() net.Conn {
+	s.poolMu.Lock()
+	defer s.poolMu.Unlock()
+	for len(s.idle) > 0 {
+		last := len(s.idle) - 1
+		item := s.idle[last]
+		s.idle = s.idle[:last]
+		if time.Since(item.used) < 20*time.Second {
+			return item.conn
+		}
+		_ = item.conn.Close()
+	}
+	return nil
+}
+func (s *streamTransport) keepIdle(conn net.Conn) {
+	s.poolMu.Lock()
+	defer s.poolMu.Unlock()
+	if s.closed || len(s.idle) >= 4 {
+		_ = conn.Close()
+		return
+	}
+	_ = conn.SetDeadline(time.Time{})
+	s.idle = append(s.idle, idleStream{conn, time.Now()})
+}
+
 func (s *streamTransport) Exchange(ctx context.Context, message *dns.Msg) (*dns.Msg, error) {
+	s.poolMu.Lock()
+	closed := s.closed
+	s.poolMu.Unlock()
+	if closed {
+		return nil, fmt.Errorf("DNS transport is closed")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	conn, err := s.dialer.DialContext(ctx, N.NetworkTCP, s.address)
+	conn := s.takeIdle()
+	if conn != nil {
+		response, err := s.exchangeStream(ctx, conn, message)
+		if err == nil {
+			return response, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
+	tcp, err := s.dialer.DialContext(ctx, N.NetworkTCP, s.address)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
-	closeOnCancel := context.AfterFunc(ctx, func() { conn.Close() })
-	defer closeOnCancel()
+	conn = tcp
 	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
+		_ = tcp.SetDeadline(deadline)
 	}
-	var stream net.Conn = conn
 	if s.tlsConfig != nil {
-		stream, err = tls.ClientHandshake(ctx, conn, s.tlsConfig)
-		if err != nil {
+		stop := context.AfterFunc(ctx, func() { _ = tcp.Close() })
+		conn, err = tls.ClientHandshake(ctx, tcp, s.tlsConfig)
+		stopped := stop()
+		if err != nil || !stopped || ctx.Err() != nil {
+			_ = tcp.Close()
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			return nil, err
 		}
 	}
-	if err = transport.WriteMessage(stream, message.Id, message); err != nil {
+	return s.exchangeStream(ctx, conn, message)
+}
+func (s *streamTransport) exchangeStream(ctx context.Context, conn net.Conn, message *dns.Msg) (*dns.Msg, error) {
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	err := transport.WriteMessage(conn, message.Id, message)
+	var response *dns.Msg
+	if err == nil {
+		response, err = transport.ReadMessage(conn)
+	}
+	stopped := stop()
+	if err != nil || !stopped || ctx.Err() != nil {
+		_ = conn.Close()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, err
 	}
-	return transport.ReadMessage(stream)
+	if response == nil || response.Id != message.Id || !validReply(response, message) {
+		_ = conn.Close()
+		return nil, fmt.Errorf("invalid DNS stream response")
+	}
+	s.keepIdle(conn)
+	return response, nil
 }

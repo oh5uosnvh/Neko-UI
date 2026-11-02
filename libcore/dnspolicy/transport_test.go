@@ -7,6 +7,7 @@ import (
 	"net"
 	"reflect"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ func (s *stubDNSTransport) Exchange(ctx context.Context, q *dns.Msg) (*dns.Msg, 
 
 type transportFixture struct {
 	*Transport
+	mu       sync.Mutex
 	calls    []string
 	requests map[string][]*dns.Msg
 }
@@ -53,8 +55,10 @@ func newTransportFixture(t *testing.T, options Options, handlers map[string]test
 		f.upstreams[tag] = &stubDNSTransport{
 			TransportAdapter: boxdns.NewTransportAdapter("mock", tag, nil),
 			exchange: func(ctx context.Context, q *dns.Msg) (*dns.Msg, error) {
+				f.mu.Lock()
 				f.calls = append(f.calls, tag)
 				f.requests[tag] = append(f.requests[tag], q.Copy())
+				f.mu.Unlock()
 				return handler(ctx, q)
 			},
 		}
@@ -111,6 +115,8 @@ func exchangeForTest(t *testing.T, f *transportFixture, q *dns.Msg) *dns.Msg {
 
 func assertCalls(t *testing.T, f *transportFixture, want ...string) {
 	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if !slices.Equal(f.calls, want) {
 		t.Fatalf("upstream attempts = %v, want %v", f.calls, want)
 	}

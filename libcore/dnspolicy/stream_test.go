@@ -123,3 +123,31 @@ func TestRealTCPCancellationClosesBlockedConnection(t *testing.T) {
 		t.Fatal("query failed before its timeout")
 	}
 }
+
+func TestTCPReusesConnectionWithoutKeepingCancelledSocket(t *testing.T) {
+	addresses := make(chan string, 2)
+	port := localTCPDNS(t, func(w dns.ResponseWriter, q *dns.Msg) {
+		addresses <- w.RemoteAddr().String()
+		_ = w.WriteMsg(addressReply(q, "192.0.2.18"))
+	})
+	transport := tcpUpstream(t, "reuse", port)
+	for _, name := range []string{"first.test", "second.test"} {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		_, err := transport.Exchange(ctx, testQuery(name, dns.TypeA))
+		cancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, second := <-addresses, <-addresses
+	if first != second {
+		t.Fatalf("TCP DNS was not reused: %s != %s", first, second)
+	}
+	if got := len(transport.(*streamTransport).idle); got != 1 {
+		t.Fatalf("idle connections %d", got)
+	}
+	_ = transport.Close()
+	if len(transport.(*streamTransport).idle) != 0 {
+		t.Fatal("Close leaked pooled connections")
+	}
+}

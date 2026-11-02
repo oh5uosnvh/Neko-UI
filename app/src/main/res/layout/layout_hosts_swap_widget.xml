@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="64dp"
+    android:layout_height="48dp"
+    android:layout_gravity="center_vertical">
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/hosts_swap"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="center"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/subscription_hosts_swap"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:minWidth="0dp"
+        android:minHeight="0dp"
+        android:padding="0dp"
+        android:text="⇆"
+        android:textAllCaps="false"
+        android:textColor="?attr/colorPrimary"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+</FrameLayout>

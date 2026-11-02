@@ -31,6 +31,8 @@ public class SubscriptionBean extends Serializable {
 
     // Snapshot from subscription updates; never edited by group settings.
     public String importedDnsConfig;
+    public String importedDnsSource;
+    public Boolean applyHosts;
 
     // SIP008
 
@@ -53,7 +55,7 @@ public class SubscriptionBean extends Serializable {
 
     @Override
     public void serializeToBuffer(ByteBufferOutput output) {
-        output.writeInt(4);
+        output.writeInt(5);
 
         output.writeInt(type);
 
@@ -81,6 +83,9 @@ public class SubscriptionBean extends Serializable {
         output.writeString(privateDnsConfig);
         output.writeString(hostsConfig);
         output.writeString(importedDnsConfig);
+        // v5: origin labels and reversible address mapping.
+        output.writeString(importedDnsSource);
+        output.writeBoolean(applyHosts == null || applyHosts);
     }
 
     public void serializeForShare(ByteBufferOutput output) {
@@ -132,6 +137,8 @@ public class SubscriptionBean extends Serializable {
             hostsConfig = input.readString();
             importedDnsConfig = input.readString();
         }
+        importedDnsSource = version >= 5 ? input.readString() : "";
+        applyHosts = version < 5 || input.readBoolean();
     }
 
     public void deserializeFromShare(ByteBufferInput input) {
@@ -164,6 +171,8 @@ public class SubscriptionBean extends Serializable {
         if (privateDnsConfig == null) privateDnsConfig = "";
         if (hostsConfig == null) hostsConfig = "";
         if (importedDnsConfig == null) importedDnsConfig = "";
+        if (importedDnsSource == null) importedDnsSource = "";
+        if (applyHosts == null) applyHosts = true;
 
         if (bytesUsed == null) bytesUsed = 0L;
         if (bytesRemaining == null) bytesRemaining = 0L;

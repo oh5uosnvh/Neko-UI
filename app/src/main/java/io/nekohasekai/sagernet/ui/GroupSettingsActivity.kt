@@ -25,12 +25,14 @@ import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.SubscriptionFilterMode
 import io.nekohasekai.sagernet.database.*
 import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
+import io.nekohasekai.sagernet.group.GroupDnsStore
+import io.nekohasekai.sagernet.group.GroupDnsUi
 import io.nekohasekai.sagernet.group.GroupUpdater
 import io.nekohasekai.sagernet.group.SubscriptionDns
 import io.nekohasekai.sagernet.ktx.Logs
-import io.nekohasekai.sagernet.ktx.applyDefaultValues
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+import io.nekohasekai.sagernet.widget.HostsSwapPreference
 import io.nekohasekai.sagernet.widget.ListListener
 import io.nekohasekai.sagernet.widget.CopyableEditTextPreferenceDialog
 import io.nekohasekai.sagernet.widget.OutboundPreference
@@ -45,8 +47,12 @@ class GroupSettingsActivity(
 
     private lateinit var frontProxyPreference: OutboundPreference
     private lateinit var landingProxyPreference: OutboundPreference
+    private lateinit var hostsPreference: HostsSwapPreference
+    private val dnsPreferences = linkedMapOf<String, EditTextPreference>()
+    private var automaticDns = GroupDnsUi.Automatic()
 
     fun ProxyGroup.init() {
+        val subscription = GroupDnsStore.prepare(this)
         DataStore.groupName = name ?: ""
         DataStore.groupType = type
         DataStore.groupOrder = order
@@ -59,7 +65,6 @@ class GroupSettingsActivity(
         DataStore.landingProxyTmp =
             if (landingProxy >= 0) OutboundPreference.VALUE_SELECT_PROFILE.toInt() else 0
 
-        val subscription = subscription ?: SubscriptionBean().applyDefaultValues()
         DataStore.subscriptionLink = subscription.link
         DataStore.subscriptionForceResolve = subscription.forceResolve
         DataStore.subscriptionDeduplication = subscription.deduplication
@@ -73,9 +78,15 @@ class GroupSettingsActivity(
         DataStore.subscriptionDirectDns = subscription.directDnsResolver ?: ""
         DataStore.subscriptionPrivateDns = subscription.privateDnsConfig ?: ""
         DataStore.subscriptionHosts = subscription.hostsConfig ?: ""
+        DataStore.subscriptionImportedDns = subscription.importedDnsConfig.orEmpty()
+        DataStore.subscriptionDnsSource = subscription.importedDnsSource.orEmpty()
+        DataStore.subscriptionApplyHosts = subscription.applyHosts != false
     }
 
     fun ProxyGroup.serialize() {
+        // Prepare the live object before changing its type, including legacy basic-node snapshots.
+        // Never overwrite imported data with the cache captured when this page opened.
+        val settings = GroupDnsStore.prepare(this)
         name = DataStore.groupName.takeIf { it.isNotBlank() } ?: "My group"
         type = DataStore.groupType
         order = DataStore.groupOrder
@@ -94,9 +105,13 @@ class GroupSettingsActivity(
                 -1
             }
 
-        val isSubscription = type == GroupType.SUBSCRIPTION
-        if (isSubscription) {
-            subscription = (subscription ?: SubscriptionBean().applyDefaultValues()).apply {
+        settings.serverDnsResolver = DataStore.subscriptionServerDns
+        settings.directDnsResolver = DataStore.subscriptionDirectDns
+        settings.privateDnsConfig = DataStore.subscriptionPrivateDns
+        settings.hostsConfig = DataStore.subscriptionHosts
+        settings.applyHosts = DataStore.subscriptionApplyHosts
+        if (type == GroupType.SUBSCRIPTION) {
+            settings.apply {
                 link = DataStore.subscriptionLink
                 forceResolve = DataStore.subscriptionForceResolve
                 deduplication = DataStore.subscriptionDeduplication
@@ -106,11 +121,6 @@ class GroupSettingsActivity(
                 autoUpdateDelay = DataStore.subscriptionAutoUpdateDelay
                 filterMode = DataStore.subscriptionFilterMode
                 filterRegex = DataStore.subscriptionFilterRegex
-                serverDnsResolver = DataStore.subscriptionServerDns
-                directDnsResolver = DataStore.subscriptionDirectDns
-                privateDnsConfig = DataStore.subscriptionPrivateDns
-                hostsConfig = DataStore.subscriptionHosts
-                // Preserve importedDnsConfig: only subscription updates own that snapshot.
             }
         }
     }
@@ -174,12 +184,31 @@ class GroupSettingsActivity(
 
         val groupType = findPreference<SimpleMenuPreference>(Key.GROUP_TYPE)!!
         val groupSubscription = findPreference<PreferenceCategory>(Key.GROUP_SUBSCRIPTION)!!
-        val subscriptionUpdate = findPreference<PreferenceCategory>(Key.SUBSCRIPTION_UPDATE)!!
+        val subscriptionOnlyKeys = listOf(
+            Key.SUBSCRIPTION_LINK,
+            Key.SUBSCRIPTION_FORCE_RESOLVE,
+            Key.SUBSCRIPTION_DEDUPLICATION,
+            Key.SUBSCRIPTION_FILTER_MODE,
+            Key.SUBSCRIPTION_UPDATE_WHEN_CONNECTED_ONLY,
+            Key.SUBSCRIPTION_USER_AGENT,
+            Key.SUBSCRIPTION_AUTO_UPDATE,
+            Key.SUBSCRIPTION_AUTO_UPDATE_DELAY,
+        )
 
         fun updateGroupType(groupType: Int = DataStore.groupType) {
             val isSubscription = groupType == GroupType.SUBSCRIPTION
-            groupSubscription.isVisible = isSubscription
-            subscriptionUpdate.isVisible = isSubscription
+            // Keep the DNS category and all four editors visible, including empty basic groups.
+            // The update category contains subscription-only items, so hide its otherwise empty title.
+            findPreference<PreferenceCategory>(Key.SUBSCRIPTION_UPDATE)!!.isVisible = isSubscription
+            subscriptionOnlyKeys.forEach { key ->
+                findPreference<Preference>(key)!!.isVisible = isSubscription
+            }
+            findPreference<Preference>(Key.SUBSCRIPTION_FILTER_REGEX)!!.isVisible =
+                isSubscription && DataStore.subscriptionFilterMode != SubscriptionFilterMode.DISABLED
+            groupSubscription.setTitle(
+                if (isSubscription) R.string.subscription_settings else R.string.cag_dns,
+            )
+            refreshDnsSummaries(groupType)
         }
         updateGroupType()
         groupType.setOnPreferenceChangeListener { _, newValue ->
@@ -212,7 +241,8 @@ class GroupSettingsActivity(
             findPreference<EditTextPreference>(Key.SUBSCRIPTION_FILTER_REGEX)!!
 
         fun updateFilterMode(filterMode: Int = DataStore.subscriptionFilterMode) {
-            subscriptionFilterRegex.isVisible = filterMode != SubscriptionFilterMode.DISABLED
+            subscriptionFilterRegex.isVisible = DataStore.groupType == GroupType.SUBSCRIPTION &&
+                    filterMode != SubscriptionFilterMode.DISABLED
         }
         updateFilterMode()
         subscriptionFilterMode.setOnPreferenceChangeListener { _, newValue ->
@@ -220,44 +250,156 @@ class GroupSettingsActivity(
             true
         }
 
-        fun configureDnsPreference(key: String, supportsDisable: Boolean = false) {
-            findPreference<EditTextPreference>(key)!!.apply {
-                // Never show resolver URLs or YAML in the list: DoH paths may contain keys.
-                summaryProvider = Preference.SummaryProvider<EditTextPreference> { preference ->
-                    val value = preference.text.orEmpty().trim()
-                    preference.context.getString(
-                        when {
-                            value.isEmpty() && key == Key.SUBSCRIPTION_DIRECT_DNS -> R.string.subscription_direct_dns_inherit
-                            value.isEmpty() -> R.string.subscription_dns_inherit
-                            supportsDisable && value == "{}" -> R.string.subscription_dns_disabled
-                            else -> R.string.subscription_dns_custom
-                        }
-                    )
-                }
-                setOnBindEditTextListener { editText ->
-                    editText.inputType = InputType.TYPE_CLASS_TEXT or
-                            InputType.TYPE_TEXT_FLAG_MULTI_LINE or
-                            InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-                    editText.setSingleLine(false)
-                    editText.setHorizontallyScrolling(false)
-                    editText.minLines = 3
-                }
-                setOnPreferenceChangeListener { _, newValue ->
-                    // Keep YAML indentation intact; the validators handle empty/whitespace input.
-                    val error = subscriptionDnsError(key, newValue as String)
-                    if (error == null) {
-                        true
-                    } else {
+        automaticDns = GroupDnsUi.automatic(DataStore.subscriptionImportedDns)
+        dnsPreferences.clear()
+        hostsPreference = findPreference<HostsSwapPreference>(Key.SUBSCRIPTION_HOSTS)!!.apply {
+            onSwap = { swapHostsMapping() }
+        }
+
+        fun configureDnsPreference(key: String) {
+            val preference = findPreference<EditTextPreference>(key)!!
+            dnsPreferences[key] = preference
+            preference.isVisible = true
+            // Summaries describe provenance only; private resolver URLs stay inside the editor.
+            preference.summaryProvider = Preference.SummaryProvider<EditTextPreference> {
+                getString(dnsSummaryResource(dnsState(key, it.text.orEmpty()).summary))
+            }
+            var editorState = dnsState(key, preference.text.orEmpty())
+            var initialContent = editorState.content
+            preference.setOnBindEditTextListener { editText ->
+                editorState = dnsState(key, preference.text.orEmpty())
+                editText.inputType = InputType.TYPE_CLASS_TEXT or
+                        InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                        InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                editText.setSingleLine(false)
+                editText.setHorizontallyScrolling(false)
+                editText.minLines = 3
+                // Set only the editor, never preference.text: automatic values are not overrides.
+                editText.setText(editorState.content)
+                editText.setSelection(editText.length())
+                initialContent = editText.text.toString()
+            }
+            preference.setOnPreferenceChangeListener { _, newValue ->
+                val raw = newValue as String
+                val edited = editorState.edited(raw, initialContent)
+                if (edited == null) {
+                    // Opening, copying, cancelling or saving unchanged keeps the original manual value.
+                    false
+                } else {
+                    val error = subscriptionDnsError(key, edited)
+                    if (error != null) {
                         Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show()
                         false
+                    } else if (edited != raw) {
+                        // Clearing an imported value must not immediately inherit it again.
+                        preference.text = edited
+                        if (key == Key.SUBSCRIPTION_HOSTS) refreshHostsWidget(edited)
+                        false
+                    } else {
+                        // EditTextPreference persists the untrimmed original text after this callback.
+                        if (key == Key.SUBSCRIPTION_HOSTS) refreshHostsWidget(raw)
+                        true
                     }
                 }
             }
         }
         configureDnsPreference(Key.SUBSCRIPTION_SERVER_DNS)
         configureDnsPreference(Key.SUBSCRIPTION_DIRECT_DNS)
-        configureDnsPreference(Key.SUBSCRIPTION_PRIVATE_DNS, supportsDisable = true)
-        configureDnsPreference(Key.SUBSCRIPTION_HOSTS, supportsDisable = true)
+        configureDnsPreference(Key.SUBSCRIPTION_PRIVATE_DNS)
+        configureDnsPreference(Key.SUBSCRIPTION_HOSTS)
+        refreshHostsWidget()
+    }
+
+    private fun dnsState(
+        key: String,
+        manual: String,
+        groupType: Int = DataStore.groupType,
+    ): GroupDnsUi.State = GroupDnsUi.state(
+        manual = manual,
+        automatic = when (key) {
+            Key.SUBSCRIPTION_SERVER_DNS -> automaticDns.server
+            Key.SUBSCRIPTION_DIRECT_DNS -> automaticDns.direct
+            Key.SUBSCRIPTION_PRIVATE_DNS -> automaticDns.privateDns
+            Key.SUBSCRIPTION_HOSTS -> automaticDns.hosts
+            else -> ""
+        },
+        source = DataStore.subscriptionDnsSource,
+        isSubscription = groupType == GroupType.SUBSCRIPTION,
+    )
+
+    private fun dnsSummaryResource(summary: GroupDnsUi.Summary): Int = when (summary) {
+        GroupDnsUi.Summary.UNSET -> R.string.subscription_dns_unset
+        GroupDnsUi.Summary.SUBSCRIPTION -> R.string.subscription_dns_from_subscription
+        GroupDnsUi.Summary.FILE -> R.string.subscription_dns_from_file
+        GroupDnsUi.Summary.CUSTOM -> R.string.subscription_dns_custom
+    }
+
+    private fun refreshDnsSummaries(groupType: Int = DataStore.groupType) {
+        dnsPreferences.forEach { (key, preference) ->
+            preference.summaryProvider = Preference.SummaryProvider<EditTextPreference> {
+                getString(dnsSummaryResource(dnsState(key, it.text.orEmpty(), groupType).summary))
+            }
+        }
+    }
+
+    private fun refreshHostsWidget(manual: String = DataStore.subscriptionHosts) {
+        if (!::hostsPreference.isInitialized) return
+        val state = GroupDnsUi.hostsState(
+            dnsState(Key.SUBSCRIPTION_HOSTS, manual), DataStore.subscriptionApplyHosts,
+        )
+        hostsPreference.mapped = state.mapped
+        hostsPreference.canSwap = state.canSwap
+    }
+
+    private var mappingBusy = false
+
+    private fun cachedDnsSettings() = SubscriptionBean().apply {
+        initializeDefaultValues()
+        serverDnsResolver = DataStore.subscriptionServerDns
+        directDnsResolver = DataStore.subscriptionDirectDns
+        privateDnsConfig = DataStore.subscriptionPrivateDns
+        hostsConfig = DataStore.subscriptionHosts
+        applyHosts = DataStore.subscriptionApplyHosts
+    }
+
+    private fun swapHostsMapping() {
+        if (mappingBusy || !::hostsPreference.isInitialized || !hostsPreference.canSwap) return
+        if (GroupUpdater.updating.contains(DataStore.editingId)) {
+            Toast.makeText(this, R.string.subscription_hosts_busy, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val groupId = DataStore.editingId
+        val oldMode = DataStore.subscriptionApplyHosts
+        val updated = cachedDnsSettings().apply { applyHosts = !oldMode }
+        if (groupId == 0L) {
+            DataStore.subscriptionApplyHosts = !oldMode
+            DataStore.dirty = true
+            refreshHostsWidget()
+            return
+        }
+        mappingBusy = true
+        hostsPreference.canSwap = false
+        runOnDefaultDispatcher {
+            try {
+                GroupDnsStore.saveDnsAndMappings(SagerDatabase.instance, groupId, updated)
+                GroupManager.postReload(groupId)
+                GroupManager.postUpdate(groupId)
+                onMainDispatcher {
+                    DataStore.subscriptionApplyHosts = !oldMode
+                    DataStore.dirty = true
+                    Toast.makeText(this@GroupSettingsActivity,
+                        if (!oldMode) R.string.subscription_hosts_mapping_on else R.string.subscription_hosts_mapping_off,
+                        Toast.LENGTH_SHORT).show()
+                }
+            } catch (error: Exception) {
+                Logs.w(error)
+                onMainDispatcher {
+                    Toast.makeText(this@GroupSettingsActivity, R.string.subscription_hosts_failed, Toast.LENGTH_LONG).show()
+                }
+            } finally {
+                onMainDispatcher { mappingBusy = false; refreshHostsWidget() }
+            }
+        }
     }
 
     private fun subscriptionDnsError(key: String, raw: String): String? = when (key) {
@@ -369,21 +511,24 @@ class GroupSettingsActivity(
     }
 
     suspend fun saveAndExit() {
-        if (DataStore.groupType == GroupType.SUBSCRIPTION) {
-            // Revalidate the cache as well, including restored values and existing groups.
-            val dnsValues = listOf(
-                Key.SUBSCRIPTION_SERVER_DNS to DataStore.subscriptionServerDns,
-                Key.SUBSCRIPTION_DIRECT_DNS to DataStore.subscriptionDirectDns,
-                Key.SUBSCRIPTION_PRIVATE_DNS to DataStore.subscriptionPrivateDns,
-                Key.SUBSCRIPTION_HOSTS to DataStore.subscriptionHosts,
-            )
-            for ((key, value) in dnsValues) {
-                val error = subscriptionDnsError(key, value) ?: continue
-                onMainDispatcher {
-                    Toast.makeText(this@GroupSettingsActivity, error, Toast.LENGTH_LONG).show()
-                }
-                return
+        if (mappingBusy) return
+        if (GroupUpdater.updating.contains(DataStore.editingId)) {
+            onMainDispatcher { Toast.makeText(this@GroupSettingsActivity, R.string.subscription_hosts_busy, Toast.LENGTH_SHORT).show() }
+            return
+        }
+        // Both basic and subscription groups persist the same four DNS overrides.
+        val dnsValues = listOf(
+            Key.SUBSCRIPTION_SERVER_DNS to DataStore.subscriptionServerDns,
+            Key.SUBSCRIPTION_DIRECT_DNS to DataStore.subscriptionDirectDns,
+            Key.SUBSCRIPTION_PRIVATE_DNS to DataStore.subscriptionPrivateDns,
+            Key.SUBSCRIPTION_HOSTS to DataStore.subscriptionHosts,
+        )
+        for ((key, value) in dnsValues) {
+            val error = subscriptionDnsError(key, value) ?: continue
+            onMainDispatcher {
+                Toast.makeText(this@GroupSettingsActivity, error, Toast.LENGTH_LONG).show()
             }
+            return
         }
 
         val editingId = DataStore.editingId
@@ -407,7 +552,20 @@ class GroupSettingsActivity(
             if (!keepUserInfo) {
                 entity.subscription?.subscriptionUserinfo = "";
             }
-            GroupManager.updateGroup(entity.apply { serialize() })
+            try {
+                entity.serialize()
+                SagerDatabase.instance.runInTransaction {
+                    SagerDatabase.groupDao.updateGroup(entity)
+                    GroupDnsStore.applyMappings(SagerDatabase.instance, entity)
+                }
+            } catch (error: Exception) {
+                Logs.w(error)
+                onMainDispatcher { Toast.makeText(this@GroupSettingsActivity, R.string.subscription_hosts_failed, Toast.LENGTH_LONG).show() }
+                return
+            }
+            GroupManager.postReload(editingId)
+            GroupManager.postUpdate(entity)
+            if (entity.type == GroupType.SUBSCRIPTION) io.nekohasekai.sagernet.bg.SubscriptionUpdater.reconfigureUpdater()
         }
 
         finish()
@@ -447,6 +605,19 @@ class GroupSettingsActivity(
     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
         if (key != Key.PROFILE_DIRTY) {
             DataStore.dirty = true
+        }
+        when (key) {
+            Key.SUBSCRIPTION_HOSTS, "subscriptionApplyHosts" -> runOnUiThread {
+                refreshHostsWidget()
+            }
+            "subscriptionImportedDns" -> runOnUiThread {
+                automaticDns = GroupDnsUi.automatic(DataStore.subscriptionImportedDns)
+                refreshDnsSummaries()
+                refreshHostsWidget()
+            }
+            Key.GROUP_TYPE, "subscriptionDnsSource" -> runOnUiThread {
+                refreshDnsSummaries()
+            }
         }
     }
 

@@ -24,7 +24,8 @@ import (
 func TestDoTAndDoHPreserveTLSNameAndCustomPath(t *testing.T) {
 	cert, certificate := testCertificate(t, "resolver.example")
 	tlsOptions := &option.OutboundTLSOptions{Enabled: true, ServerName: "resolver.example", Certificate: []string{certificate}}
-	listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
+	var handshakes atomic.Int32
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}, GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) { handshakes.Add(1); return nil, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,6 +52,14 @@ func TestDoTAndDoHPreserveTLSNameAndCustomPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertAddressRecords(t, response.Answer, "node.private.test", "192.0.2.91")
+	for _, name := range []string{"second.private.test", "third.private.test"} {
+		if _, err := dot.Exchange(ctx, testQuery(name, dns.TypeA)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if handshakes.Load() != 1 {
+		t.Fatalf("DoT repeats TLS handshakes: %d", handshakes.Load())
+	}
 
 	var calls atomic.Int32
 	path := "/dns-query/TEST%2DPATH"

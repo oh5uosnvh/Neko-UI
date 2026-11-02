@@ -24,6 +24,11 @@ public abstract class AbstractBean extends Serializable {
     public String customOutboundJson;
     public String customConfigJson;
     public String subscriptionDns;
+    public String subscriptionDnsSource;
+    // Kept separately: never guess an ambiguous B->A reverse mapping.
+    public String mappedOriginalAddress;
+    public String mappedTargetAddress;
+    public String mappedIdentityFields;
 
     //
     public transient String finalAddress;
@@ -75,6 +80,10 @@ public abstract class AbstractBean extends Serializable {
         if (customOutboundJson == null) customOutboundJson = "";
         if (customConfigJson == null) customConfigJson = "";
         if (subscriptionDns == null) subscriptionDns = "";
+        if (subscriptionDnsSource == null) subscriptionDnsSource = "";
+        if (mappedOriginalAddress == null) mappedOriginalAddress = "";
+        if (mappedTargetAddress == null) mappedTargetAddress = "";
+        if (mappedIdentityFields == null) mappedIdentityFields = "";
     }
 
 
@@ -84,13 +93,17 @@ public abstract class AbstractBean extends Serializable {
     public void serializeToBuffer(@NonNull ByteBufferOutput output) {
         serialize(output);
 
-        output.writeInt(2);
+        output.writeInt(3);
         if (!serializeWithoutName) {
             output.writeString(name);
         }
         output.writeString(customOutboundJson);
         output.writeString(customConfigJson);
         output.writeString(subscriptionDns);
+        output.writeString(subscriptionDnsSource);
+        output.writeString(mappedOriginalAddress);
+        output.writeString(mappedTargetAddress);
+        output.writeString(mappedIdentityFields);
     }
 
     @Override
@@ -103,6 +116,10 @@ public abstract class AbstractBean extends Serializable {
         customOutboundJson = input.readString();
         customConfigJson = input.readString();
         subscriptionDns = extraVersion >= 2 ? input.readString() : "";
+        subscriptionDnsSource = extraVersion >= 3 ? input.readString() : "";
+        mappedOriginalAddress = extraVersion >= 3 ? input.readString() : "";
+        mappedTargetAddress = extraVersion >= 3 ? input.readString() : "";
+        mappedIdentityFields = extraVersion >= 3 ? input.readString() : "";
     }
 
     public void serialize(ByteBufferOutput output) {

@@ -14,17 +14,19 @@ The source includes:
 - OPPA and Shanlian protocol integration;
 - source and APK regression checks.
 
-## Subscription DNS (pre2)
+## Subscription DNS debugging (not a release)
 
 This iteration starts at the published **1.4.2-mg-pre1** commit `53f1f18`.
-It adds group-scoped direct DNS, private domain policies and domain/IP hosts
-mapping without changing node TLS identities. See [usage, behavior and tests](docs/subscription-dns.md).
-The candidate default is `1.4.2-mg-pre2`, base code 50 (Android 250).
-Parser, pinned-core DNS/TLS and Android JVM tests are mandatory build gates.
+It adds group-scoped DNS, visible imported settings, reversible direct node-host
+mapping, and bounded DNS racing/connection reuse without changing TLS identities.
+See [debugging behavior and tests](docs/subscription-dns.md).
+The candidate name is `1.4.2-mg-pre1-debug-dns02`, base code 51 (Android 255).
+The earlier `pre2` filename was a test candidate, not an authorized product release.
+No release/tag is created. Parser, pinned-core DNS/TLS and Android JVM tests are mandatory gates.
 
 ## Candidate build
 
-`Build UI candidate` is a manually dispatched workflow; it uploads artifacts only
+`Build debug candidate` is a manually dispatched workflow; it uploads artifacts only
 and never creates a release or pushes. Enter a safe version name and a **base**
 version code in 49..420000000. The app multiplies that code by five; 49 yields
 245, above the old APK's 240. Use a higher code for each later update.
@@ -46,7 +48,7 @@ Neko-shanlian, Neko-viewTurbo, Neko-fastup and Neko-oppa from Nekobox-MG commit
 `sing-anytls-shanlian`, `sing-shadowsocks2-vt`, `fastup-mod`, `oppa-mod`.
 `./run lib core` fetches the pinned sing-box and libneko siblings and builds
 the AAR; it refuses to overwrite dirty checkouts. Then run
-`./run init action gradle` and `APP_VERSION_NAME=1.4.2-mg-pre2 APP_PRE_VERSION_NAME=1.4.2-mg-pre2 APP_VERSION_CODE=50 ./gradlew app:assemblePreviewRelease`.
+`./run init action gradle` and `APP_VERSION_NAME=1.4.2-mg-pre1-debug-dns02 APP_PRE_VERSION_NAME=1.4.2-mg-pre1-debug-dns02 APP_VERSION_CODE=51 ./gradlew app:assemblePreviewRelease`.
 
 These pins make source selection repeatable, not a claim of byte-identical APKs:
 external action tags, Maven/Go dependencies and hosted runner images are not

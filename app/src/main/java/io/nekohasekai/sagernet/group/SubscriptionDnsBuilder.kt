@@ -15,8 +15,7 @@ class SubscriptionDnsBuilder {
 
     fun config(bean: AbstractBean, subscription: SubscriptionBean?): SubscriptionDns.Config {
         val values = listOf(
-            // Empty is authoritative for a successfully updated subscription (removes stale rules).
-            if (subscription != null) subscription.importedDnsConfig ?: "" else bean.subscriptionDns ?: "",
+            GroupDnsStore.importedForNode(bean, subscription),
             subscription?.privateDnsConfig ?: "",
             subscription?.hostsConfig ?: "",
             subscription?.serverDnsResolver ?: "",
@@ -59,8 +58,14 @@ class SubscriptionDnsBuilder {
     }
 
     fun node(bean: AbstractBean, subscription: SubscriptionBean?, fallback: String = "dns-direct"): String? {
-        val config = config(bean, subscription)
-        if (!config.hasNodeConfig()) return null
+        var config = config(bean, subscription)
+        val mappingDisabled = subscription?.applyHosts == false
+        if (mappingDisabled) {
+            // ⇆ restored the original node address: do not remap it again inside DNS.
+            config = SubscriptionDns.fromDocument(config.asDocument()).apply { hosts.clear() }
+        }
+        // Keep an explicit plain resolver even for hosts-only groups, so app-level hosts cannot reapply.
+        if (!config.hasNodeConfig() && !mappingDisabled) return null
         return build(config, true, fallback)
     }
 

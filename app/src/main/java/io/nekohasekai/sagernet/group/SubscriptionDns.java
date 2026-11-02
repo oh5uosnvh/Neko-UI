@@ -37,6 +37,7 @@ public final class SubscriptionDns {
         public final Map<String, List<String>> serverPolicy = new LinkedHashMap<>();
         public final Map<String, List<String>> hosts = new LinkedHashMap<>();
         public final List<String> serverDns = new ArrayList<>();
+        public final List<String> directDns = new ArrayList<>();
         public final List<String> bootstrap = new ArrayList<>();
         public final List<String> warnings = new ArrayList<>();
         public boolean hasNodeConfig() {
@@ -50,6 +51,7 @@ public final class SubscriptionDns {
             if (!policy.isEmpty()) dns.put("nameserver-policy", policy);
             if (!serverPolicy.isEmpty()) dns.put("proxy-server-nameserver-policy", serverPolicy);
             if (!serverDns.isEmpty()) dns.put("proxy-server-nameserver", serverDns);
+            if (!directDns.isEmpty()) dns.put("direct-nameserver", directDns);
             if (!bootstrap.isEmpty()) dns.put("default-nameserver", bootstrap);
             if (!dns.isEmpty()) doc.put("dns", dns);
             return doc;
@@ -108,6 +110,7 @@ public final class SubscriptionDns {
             readPolicy(dns.get("nameserver-policy"), result.policy);
             readPolicy(dns.get("proxy-server-nameserver-policy"), result.serverPolicy);
             result.serverDns.addAll(endpoints(dns.get("proxy-server-nameserver")));
+            result.directDns.addAll(endpoints(dns.get("direct-nameserver")));
             result.bootstrap.addAll(endpoints(dns.get("default-nameserver")));
             // Clash often points node DNS back at its own listener. NekoBox does not run that listener.
             int listenPort = listenerPort(dns.get("listen"));
@@ -141,7 +144,12 @@ public final class SubscriptionDns {
             Config custom = parsePrivate(privateOverride);
             config.policy.clear(); config.policy.putAll(custom.policy);
             config.serverPolicy.clear(); config.serverPolicy.putAll(custom.serverPolicy);
-            config.serverDns.clear(); config.serverDns.addAll(custom.serverDns);
+            // Private policy editor does not silently erase the separate server-DNS field.
+            Map<?, ?> customDocument = loadDocument(privateOverride);
+            Map<?, ?> customDns = customDocument.containsKey("dns") ? asMap(customDocument.get("dns"), "dns") : customDocument;
+            if (customDns.containsKey("proxy-server-nameserver")) {
+                config.serverDns.clear(); config.serverDns.addAll(custom.serverDns);
+            }
             // A private override without bootstrap inherits the safe imported bootstrap.
             if (!custom.bootstrap.isEmpty()) { config.bootstrap.clear(); config.bootstrap.addAll(custom.bootstrap); }
         }
@@ -183,7 +191,7 @@ public final class SubscriptionDns {
         try { endpointList(text); return true; } catch (IllegalArgumentException e) { return false; }
     }
     public static List<String> endpointList(String text) {
-        if (text == null || text.trim().isEmpty()) return Collections.emptyList();
+        if (text == null || text.trim().isEmpty() || text.trim().equals("{}")) return Collections.emptyList();
         return endpoints(Arrays.asList(text.trim().split("[\\r\\n,]+")));
     }
     private static List<String> endpoints(Object value) {

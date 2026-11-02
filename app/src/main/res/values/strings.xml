@@ -440,20 +440,21 @@
     <string name="server_dns">Custom Server DNS</string>
     <string name="server_dns_subscription_sum">Optional DNS used only to resolve server domains in this subscription. Leave empty to use the default behavior. Accepts https://, tls://, quic:// or host[:port].</string>
     <string name="server_dns_invalid">Invalid custom server DNS. Use https://, tls://, quic:// or host[:port], or leave empty.</string>
-    <string name="subscription_server_dns_message">Only resolves proxy server domains in this subscription, not Android system Private DNS. Domain mappings and matching policies take precedence. For unmatched server domains: this manual setting &gt; private/subscription server DNS &gt; existing default. Leave empty to inherit server DNS. Enter one or more endpoints, separated by newlines or commas: https://, tls://, quic://, tcp://, udp:// or host[:port].\n\nSynthetic example:\nhttps://dns.example/dns-query\ntcp://192.0.2.53:53</string>
     <string name="subscription_server_dns_invalid">Invalid custom server DNS. Use https://, tls://, quic://, tcp://, udp:// or host[:port], separated by newlines or commas, or leave empty.</string>
     <string name="subscription_direct_dns">Custom Direct DNS</string>
     <string name="subscription_private_dns">Private DNS Settings</string>
     <string name="subscription_hosts">Domain Mapping Settings</string>
-    <string name="subscription_dns_inherit">Automatic: inherit subscription settings; use defaults if absent</string>
-    <string name="subscription_direct_dns_inherit">Automatic: use global Direct DNS</string>
-    <string name="subscription_dns_custom">Custom settings (tap to edit; content hidden)</string>
-    <string name="subscription_dns_disabled">Automatic import disabled for this item</string>
+    <string name="subscription_dns_unset">Not set</string>
+    <string name="subscription_dns_from_subscription">Provided by subscription</string>
+    <string name="subscription_dns_from_file">Provided by local file</string>
+    <string name="subscription_dns_custom">Custom</string>
+    <string name="subscription_hosts_swap">Toggle domain mapping</string>
+    <string name="subscription_hosts_restore">Restore original domains</string>
+    <string name="subscription_hosts_apply">Apply domain mappings</string>
+    <string name="subscription_hosts_mapping_on">Domain mapping on</string>
+    <string name="subscription_hosts_mapping_off">Domain mapping off</string>
     <string name="subscription_direct_dns_invalid">Invalid custom direct DNS. Use https://, tls://, quic://, tcp://, udp:// or host[:port], separated by newlines or commas, or leave empty.</string>
     <string name="subscription_dns_config_invalid">%1$s: %2$s</string>
-    <string name="subscription_direct_dns_message">DNS for direct traffic in this subscription, not Android system Private DNS. Priority: this manual setting &gt; global Direct DNS. Leave empty to use global Direct DNS; subscription policies and hosts are inherited separately below. Accepts a single endpoint or a list separated by newlines or commas (https://, tls://, quic://, tcp://, udp:// or host[:port]).\n\nSynthetic example:\nudp://192.0.2.53:53\nhttps://dns.example/dns-query</string>
-    <string name="subscription_private_dns_message">"Subscription DNS policies, not Android system Private DNS. Leave empty to inherit the subscription; {} disables automatically imported policies. Manual settings take precedence over imported policies; domain mappings take precedence over policies. Ordinary unmatched queries keep their existing DNS behavior.\n\nAccepts full DNS YAML or a bare nameserver-policy map. Synthetic example:\ndns:\n  nameserver-policy:\n    +.corp.example: https://dns.example/dns-query"</string>
-    <string name="subscription_hosts_message">"Domain mappings for this subscription, not Android system Private DNS. Leave empty to inherit the subscription; {} disables automatically imported hosts. Manual mappings take precedence over imported hosts; domain mappings take precedence over private DNS policies. Unmatched queries keep their existing DNS behavior.\n\nAccepts full hosts YAML or a bare hosts map. Synthetic example:\nhosts:\n  printer.corp.example: 192.0.2.10"</string>
     <string name="subscription_used">%s Used</string>
     <string name="subscription_traffic">%s Used / %s Remaining</string>
     <string name="subscription_expire">Expire: %s</string>
@@ -737,4 +738,6 @@
     <string name="sort_ascending">Ascending</string>
     <string name="sort_descending">Descending</string>
     <string name="group_deleted_undo">Group %s deleted</string>
+    <string name="subscription_hosts_busy">Subscription updating</string>
+    <string name="subscription_hosts_failed">Domain mapping failed</string>
 </resources>

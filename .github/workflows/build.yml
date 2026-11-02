@@ -1,16 +1,16 @@
-name: Build UI candidate
+name: Build debug candidate
 
 on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Candidate version name'
+        description: 'Debug candidate name only; does not create a release or tag'
         required: true
-        default: '1.4.2-mg-pre2'
+        default: '1.4.2-mg-pre1-debug-dns02'
       version_code:
         description: 'Base version code (>=49; Android code is base x 5)'
         required: true
-        default: '50'
+        default: '51'
       signed:
         description: 'Sign with the verified legacy key (requires secrets)'
         type: boolean
@@ -114,6 +114,7 @@ jobs:
         run: |
           set -euo pipefail
           trap 'rm -f release.keystore; rm -rf mg-sign' EXIT
+          [[ "$APP_VERSION_NAME" == *-debug-* ]] || { echo 'This branch only builds debug-named candidates' >&2; exit 1; }
           [[ "$APP_VERSION_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$ ]] || { echo 'Invalid candidate version' >&2; exit 1; }
           [[ "$APP_VERSION_CODE" =~ ^[1-9][0-9]{0,8}$ ]] && (( 10#$APP_VERSION_CODE >= 49 && 10#$APP_VERSION_CODE <= 420000000 )) || { echo 'Base version code must be 49..420000000' >&2; exit 1; }
           if [[ "$SIGNED" == true ]]; then

@@ -60,6 +60,16 @@ class SubscriptionDnsBuilderTest {
         assertTrue(pattern.matches("private.example")); assertTrue(pattern.matches("a.private.example"))
         assertFalse(pattern.matches("notprivate.example")); assertFalse(pattern.matches("example.org"))
     }
+    @Test fun restoredHostsOnlyNodeStillHasExplicitUnmappedResolver() {
+        val builder = SubscriptionDnsBuilder()
+        val settings = subscription("hosts: {node.private.example: target.example}").apply { applyHosts = false }
+        val tag = builder.node(bean(), settings)
+        assertNotNull(tag)
+        val resolver = builder.servers.first { it.asMap()["tag"] == tag }.asMap()
+        assertTrue((resolver["hosts"] as Map<*, *>).isEmpty())
+        assertEquals(listOf("dns-direct"), resolver["fallback"])
+    }
+
     @Test fun directOverrideUsesAllServersAndNeverChangesNodeIdentity() {
         val builder = SubscriptionDnsBuilder()
         assertEquals("dns-direct", builder.direct(listOf("223.5.5.5", "tls://1.1.1.1")))

@@ -4,11 +4,11 @@ package dnspolicy
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"net/netip"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/miekg/dns"
@@ -40,6 +40,9 @@ type Transport struct {
 	upstreams map[string]adapter.DNSTransport
 	options   Options
 	timeout   time.Duration
+	choiceMu  sync.Mutex
+	preferred map[string]int
+	slots     chan struct{}
 }
 
 var _ adapter.DNSTransport = (*Transport)(nil)
@@ -162,6 +165,7 @@ func New(ctx context.Context, _ log.ContextLogger, tag string, options Options) 
 		TransportAdapter: boxdns.NewTransportAdapter(Type, tag, dependencies),
 		manager:          service.FromContext[adapter.DNSTransportManager](ctx),
 		options:          options, timeout: timeout,
+		preferred: make(map[string]int), slots: make(chan struct{}, 64),
 	}, nil
 }
 func (t *Transport) Start(stage adapter.StartStage) error {
@@ -344,41 +348,4 @@ func (t *Transport) Exchange(ctx context.Context, message *dns.Msg) (*dns.Msg, e
 	}
 	response.Id = message.Id
 	return response, nil
-}
-
-func (t *Transport) exchangeUpstreams(ctx context.Context, message *dns.Msg, servers []string) (*dns.Msg, error) {
-	var negative *dns.Msg
-	for _, tag := range servers {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		upstream := t.upstreams[tag]
-		if upstream == nil {
-			return nil, errors.New("subscription DNS upstream unavailable")
-		}
-		attempt, cancel := context.WithTimeout(ctx, t.timeout)
-		response, err := upstream.Exchange(attempt, message.Copy())
-		cancel()
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if err != nil || response == nil {
-			continue
-		}
-		if len(response.Question) != 1 || !strings.EqualFold(response.Question[0].Name, message.Question[0].Name) ||
-			response.Question[0].Qtype != message.Question[0].Qtype || response.Question[0].Qclass != message.Question[0].Qclass {
-			continue
-		}
-		if response.Rcode == dns.RcodeSuccess && len(response.Answer) > 0 {
-			return response, nil
-		}
-		// Alternate servers are still restricted to the matched policy. Never leak to the default.
-		if response.Rcode == dns.RcodeNameError || response.Rcode == dns.RcodeSuccess {
-			negative = response
-		}
-	}
-	if negative != nil {
-		return negative, nil
-	}
-	return nil, fmt.Errorf("all %d subscription DNS upstreams failed", len(servers))
 }

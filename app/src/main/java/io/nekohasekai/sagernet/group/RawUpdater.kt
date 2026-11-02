@@ -133,6 +133,10 @@ object RawUpdater : GroupUpdater() {
             importedDnsConfig, subscription.privateDnsConfig, subscription.hostsConfig,
             subscription.serverDnsResolver,
         )
+        proxies.forEach { bean ->
+            bean.subscriptionDnsSource = if (link.startsWith("content://")) "file" else "subscription"
+            NodeHostMapping.apply(bean, resolution.hosts, subscription.applyHosts != false)
+        }
         // Do not let system DNS permanently replace a domain whose runtime policy is private.
         if (subscription.forceResolve && !resolution.hasNodeConfig()) {
             forceResolve(proxies, proxyGroup.id)
@@ -265,6 +269,7 @@ object RawUpdater : GroupUpdater() {
         }
 
         subscription.importedDnsConfig = importedDnsConfig
+        subscription.importedDnsSource = if (link.startsWith("content://")) "file" else "subscription"
         subscription.lastUpdated = (System.currentTimeMillis() / 1000).toInt()
         SagerDatabase.groupDao.updateGroup(proxyGroup)
         finishUpdate(proxyGroup)
@@ -986,6 +991,8 @@ object RawUpdater : GroupUpdater() {
                             if (it.utlsFingerprint.isNullOrBlank()) it.utlsFingerprint = "chrome"
                         }
                     }
+                    it.subscriptionDnsSource = if (fileName.isNotBlank()) "file" else ""
+                    NodeHostMapping.apply(it, importedDns.hosts, true)
                 }
                 return proxies
             } catch (e: YAMLException) {

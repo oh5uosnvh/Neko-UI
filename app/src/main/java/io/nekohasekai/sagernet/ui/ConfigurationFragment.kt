@@ -698,7 +698,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                     if (proxies.isEmpty()) onMainDispatcher {
                         if (isAdded) snackbar(getString(R.string.no_proxies_found_in_file)).show()
-                    } else import(proxies)
+                    } else import(proxies, "file", fileName.orEmpty())
                 } catch (e: SubscriptionFoundException) {
                     (activity as? MainActivity)?.importSubscription(e.link.toUri())
                 } catch (e: Exception) {
@@ -712,11 +712,12 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
         }
 
-    suspend fun import(proxies: List<AbstractBean>) {
+    suspend fun import(proxies: List<AbstractBean>, source: String = "", fileName: String = "") {
         val targetId = DataStore.selectedGroupForImport()
         kotlinx.coroutines.withContext(Dispatchers.IO) {
-            ProfileBatchStore.append(SagerDatabase.instance, targetId, proxies)
+            ProfileBatchStore.append(SagerDatabase.instance, targetId, proxies, source, fileName)
         }
+        GroupManager.postUpdate(targetId)
         GroupManager.postReload(targetId)
         onMainDispatcher {
             DataStore.editingGroup = targetId

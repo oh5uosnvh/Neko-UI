@@ -36,6 +36,7 @@ import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
 import io.nekohasekai.sagernet.fmt.wireguard.buildSingBoxOutboundWireguardBean
 import io.nekohasekai.sagernet.group.SubscriptionDns
 import io.nekohasekai.sagernet.group.SubscriptionDnsBuilder
+import io.nekohasekai.sagernet.group.NodeHostMapping
 import io.nekohasekai.sagernet.ktx.isIpAddress
 import io.nekohasekai.sagernet.ktx.mkPort
 import io.nekohasekai.sagernet.utils.PackageCache
@@ -181,8 +182,10 @@ fun buildConfig(
     val bypassDNSBeans = hashSetOf<AbstractBean>()
     val subscriptionDns = SubscriptionDnsBuilder()
     val groupCache = HashMap<Long, ProxyGroup?>()
-    val activeSubscription = group?.takeIf { it.type == GroupType.SUBSCRIPTION }?.subscription
-    val subscriptionDirectDns = SubscriptionDns.endpointList(activeSubscription?.directDnsResolver ?: "")
+    val activeSubscription = group?.subscription
+    val activeDns = subscriptionDns.config(proxy.requireBean(), activeSubscription)
+    val directOverride = activeSubscription?.directDnsResolver.orEmpty()
+    val subscriptionDirectDns = if (directOverride.isNotBlank()) SubscriptionDns.endpointList(directOverride) else activeDns.directDns
     val isVPN = DataStore.serviceMode == Key.MODE_VPN
     val deviceInboundTag = if (isVPN && DataStore.enableHevTun) TAG_MIXED else "tun-in"
     val bind = if (!forTest && DataStore.allowAccess) "0.0.0.0" else LOCALHOST
@@ -353,8 +356,13 @@ fun buildConfig(
                 val nodeGroup = groupCache.getOrPut(proxyEntity.groupId) {
                     SagerDatabase.groupDao.getById(proxyEntity.groupId)
                 }
-                val nodeSubscription = nodeGroup?.takeIf { it.type == GroupType.SUBSCRIPTION }?.subscription
+                val nodeSubscription = nodeGroup?.subscription
+                val nodeDnsConfig = subscriptionDns.config(bean, nodeSubscription)
+                NodeHostMapping.apply(bean, nodeDnsConfig.hosts, nodeSubscription?.applyHosts != false)
                 val nodeResolver = subscriptionDns.node(bean, nodeSubscription)
+                val preserveMultiAddress = nodeSubscription?.applyHosts != false && NodeHostMapping.hasMultipleAddresses(bean, nodeDnsConfig.hosts)
+                // Keep all IP candidates in the resolver instead of freezing a multi-IP hosts entry.
+                if (preserveMultiAddress) bean.serverAddress = bean.mappedOriginalAddress
                 if (nodeResolver != null && proxyEntity.needExternal() && !bean.canMapping()) {
                     throw IllegalArgumentException("This external protocol cannot use subscription DNS safely; use a built-in protocol or disable its subscription DNS settings")
                 }
