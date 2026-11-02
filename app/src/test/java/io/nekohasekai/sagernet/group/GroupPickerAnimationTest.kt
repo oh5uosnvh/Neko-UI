@@ -14,6 +14,8 @@ import io.nekohasekai.sagernet.ui.GroupPickerAdapter
 import io.nekohasekai.sagernet.ui.GroupPickerDragCallback
 import io.nekohasekai.sagernet.ui.GroupPickerRecyclerView
 import io.nekohasekai.sagernet.ui.groupPickerItemAnimator
+import org.junit.After
+import org.junit.Before
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -29,6 +31,18 @@ import kotlin.math.abs
 @Config(sdk = [28], application = Application::class)
 @LooperMode(LooperMode.Mode.PAUSED)
 class GroupPickerAnimationTest {
+    @Before fun pauseVsyncClock() {
+        // LooperMode.PAUSED alone still auto-advances unpaused VSYNC through the whole animation.
+        // Keep the real 250ms animator and advance frames at a realistic refresh cadence.
+        org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true)
+    }
+
+    @After fun restoreVsyncClock() {
+        org.robolectric.shadows.ShadowChoreographer.setPaused(false)
+        org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(1))
+    }
+
     private class Fixture : AutoCloseable {
         val controller = Robolectric.buildActivity(Activity::class.java).setup()
         val recycler = GroupPickerRecyclerView(controller.get())

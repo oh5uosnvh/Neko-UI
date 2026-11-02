@@ -88,7 +88,10 @@ class ThemedChoiceMenuTest {
     }
 
     private fun assertCorners(drawable: GradientDrawable, radius: Float) {
-        val radii = drawable.cornerRadii ?: FloatArray(8) { drawable.cornerRadius }
+        // Android 28 getCornerRadii() clones the optional array without a null check when
+        // the drawable uses one uniform cornerRadius. Read its state, then check all 8 axes.
+        val radii = ReflectionHelpers.getField<FloatArray?>(drawable.constantState, "mRadiusArray")
+            ?: FloatArray(8) { drawable.cornerRadius }
         assertEquals(8, radii.size)
         radii.forEach { assertEquals(radius, it, 0.01f) }
     }
