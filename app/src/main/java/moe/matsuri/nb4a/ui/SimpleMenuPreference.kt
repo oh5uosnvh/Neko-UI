@@ -20,6 +20,7 @@ import android.content.Context
 import android.util.AttributeSet
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
+import android.widget.AdapterView
 import android.widget.Spinner
 import androidx.preference.DropDownPreference
 import androidx.preference.PreferenceViewHolder
@@ -47,6 +48,20 @@ open class SimpleMenuPreference
         val mSpinner = holder.itemView.findViewById<Spinner>(R.id.spinner)
         mSpinner.layoutParams.width = ViewGroup.LayoutParams.WRAP_CONTENT
         mSpinner.setPopupBackgroundResource(R.drawable.bg_spinner_dropdown)
+        // A rejected preference change leaves Spinner's mechanical selection different from
+        // the saved value. Layout may then deliver onItemSelected again: one click must never
+        // repeat side effects (dialogs, service reloads) just because persistence was vetoed.
+        var lastDeliveredPosition = mSpinner.selectedItemPosition
+        mSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                if (position < 0 || position == lastDeliveredPosition) return
+                lastDeliveredPosition = position
+                val newValue = entryValues?.getOrNull(position)?.toString() ?: return
+                if (newValue != value && callChangeListener(newValue)) value = newValue
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
     }
 
     override fun createAdapter(): ArrayAdapter<CharSequence?> {

@@ -76,7 +76,15 @@ class GroupPickerAnimationTest {
             recycler.layout(0, 0, 500, 800)
         }
         fun holder(id: Long) = recycler.findViewHolderForItemId(id) as GroupPickerAdapter.Holder
-        fun advance(ms: Long) = shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ms))
+        fun advance(ms: Long) {
+            // A single large clock jump triggers only one paused VSYNC. Drive each real frame.
+            var remaining = ms
+            while (remaining > 0L) {
+                val step = minOf(16L, remaining)
+                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(step))
+                remaining -= step
+            }
+        }
         fun move() {
             drag.onSelectedChanged(holder(1), ItemTouchHelper.ACTION_STATE_DRAG)
             assertTrue(drag.onMove(recycler, holder(1), holder(3)))
