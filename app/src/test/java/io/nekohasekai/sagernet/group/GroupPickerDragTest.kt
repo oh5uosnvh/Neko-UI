@@ -174,10 +174,12 @@ class GroupPickerDragTest {
             f.adapter.onBindViewHolder(holder, 0)
             assertEquals(2L, holder.groupId)
             assertEquals("Group 2·34", holder.label.text.toString())
-            assertTrue(holder.label.typeface.isBold)
+            assertTrue(holder.row.isSelected)
+            assertTrue(holder.label.paint.isFakeBoldText)
             f.adapter.onBindViewHolder(holder, 2)
             assertEquals("Group 1·12", holder.label.text.toString())
-            assertFalse(holder.label.typeface.isBold)
+            assertFalse(holder.row.isSelected)
+            assertFalse(holder.label.paint.isFakeBoldText)
         }
     }
 }

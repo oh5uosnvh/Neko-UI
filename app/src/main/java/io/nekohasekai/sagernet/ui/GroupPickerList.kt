@@ -119,8 +119,11 @@ internal class GroupPickerAdapter(
         val group = rows[position]
         holder.groupId = group.id
         val selected = group.id == selectedId()
+        holder.row.isSelected = selected
+        holder.nameCard.isSelected = selected
         holder.nameCard.background = card(selected)
-        holder.label.setTypeface(Typeface.DEFAULT, if (selected) Typeface.BOLD else Typeface.NORMAL)
+        holder.label.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        holder.label.paint.isFakeBoldText = selected
         val name = group.displayName()
         val count = counts[group.id]
         holder.label.text = if (count == null) name else {

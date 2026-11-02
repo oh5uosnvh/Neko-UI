@@ -26,6 +26,8 @@ class StatsBarStateTest {
         controller.setup().visible()
         try {
             val binding=LayoutMainBinding.inflate(activity.layoutInflater)
+            // Match MainActivity's theme selection: only one LEFT drawer may remain attached.
+            binding.drawerLayout.removeView(binding.navViewBlack)
             binding.fab.initProgress(binding.fabProgress)
             activity.setContentView(binding.root)
             binding.root.measure(View.MeasureSpec.makeMeasureSpec(1080,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(1920,View.MeasureSpec.EXACTLY))

@@ -92,7 +92,11 @@ internal class GroupProfileExport(private val fragment: Fragment) {
             val profiles = loadProfiles(groupId) ?: error("Export group no longer exists")
             // Preserve the original GroupFragment format and DAO order, including
             // empty links. This is neither exportConfig() nor a subscription link.
-            return profiles.joinToString("\n") { it.toStdLink(compact = true) }
+            return try {
+                profiles.joinToString("\n") { it.toStdLink(compact = true) }
+            } catch (error: Exception) {
+                throw IllegalStateException("Unable to serialize export group", error)
+            }
         }
 
         private fun loadGroup(groupId: Long): List<ProxyEntity>? {
