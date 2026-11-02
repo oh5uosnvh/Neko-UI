@@ -50,7 +50,7 @@ class KaringRuleCompilerTest {
         }
     }
 
-    @Test fun desktopProcessNamesAreNotAndroidMatchCriteria() {
+    @Test fun desktopOnlyConditionsStillRejectAnEmptyAndroidRule() {
         val model = KaringRuleModel(processName = listOf("Telegram.exe"))
         assertTrue(model.processName.isNotEmpty())
         assertFalse(KaringRuleCompiler.hasMatchCondition(model))
@@ -59,13 +59,19 @@ class KaringRuleCompilerTest {
         }
     }
 
-    @Test fun networkAndWifiConditionsAreRejectedInsteadOfDropped() {
-        assertThrows(IllegalArgumentException::class.java) {
-            KaringRuleCompiler.compile(KaringRuleModel(networkType = listOf("wifi")), resolver, "direct")
-        }
-        assertThrows(IllegalArgumentException::class.java) {
-            KaringRuleCompiler.compile(KaringRuleModel(wifiSsid = listOf("office")), resolver, "direct")
-        }
+    @Test fun desktopConditionsAreIgnoredWhenAndroidCriteriaRemain() {
+        val result = KaringRuleCompiler.compile(
+            KaringRuleModel(
+                ruleSetBuildIn = listOf("geosite:telegram"),
+                packageNames = listOf("org.telegram.messenger"),
+                processName = listOf("Telegram.exe"),
+                networkType = listOf("wifi"),
+                wifiSsid = listOf("office"),
+            ), resolver, "direct"
+        ).toJsonForKaringTest()
+        assertTrue(result.contains("telegram"))
+        assertTrue(result.contains("org.telegram.messenger"))
+        assertFalse(result.contains("Telegram.exe"))
     }
 
     @Test fun resolvedUidIsPreferredAndPackageNameIsNotDuplicated() {

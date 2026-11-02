@@ -84,8 +84,7 @@ class KaringResourceSettingsDialog : DialogFragment() {
                     .setPositiveButton(android.R.string.ok, null).show()
             }
         }
-        // remoteRow 的第 0 个子 view 是 TextView (weight=1)，第 1 个是 SwitchCompat。
-        // 将感叹号加在两者之间，形成：使用远程规则 (圆形感叹号)      [开关]
+        // 文字与感叹号紧贴；空白区域位于感叹号和开关之间。
         remoteRow.addView(infoButton, 1, LinearLayout.LayoutParams(dp(40), dp(48)))
         content.addView(remoteRow, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,

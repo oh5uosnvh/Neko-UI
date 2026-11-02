@@ -85,6 +85,20 @@ private fun JSONArray.toKaringList(): List<String> = (0 until length()).mapNotNu
 
 private fun JSONObject.karingList(key: String): List<String> = optJSONArray(key)?.toKaringList() ?: emptyList()
 
+/**
+ * Remove desktop-only matchers before compiling a preset for Android.
+ * Karing shares presets with desktop clients, where process names and Wi-Fi
+ * matchers are meaningful; Android routes use package/UID and rule-set data.
+ */
+fun KaringRuleModel.androidCompatible(): KaringRuleModel = copy(
+    processName = emptyList(),
+    processPath = emptyList(),
+    processDir = emptyList(),
+    networkType = emptyList(),
+    wifiSsid = emptyList(),
+    wifiBssid = emptyList(),
+)
+
 private fun KaringRuleModel.normalized(): KaringRuleModel = copy(
     ruleSetBuildIn = ruleSetBuildIn.map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
     ruleSetItems = ruleSetItems.filter { it.url.isNotBlank() }.distinctBy { it.url.trim() }

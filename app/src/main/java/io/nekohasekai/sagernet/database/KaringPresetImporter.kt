@@ -22,6 +22,14 @@ data class KaringImportResult(
 object KaringPresetImporter {
     const val CHINA_PRESET_ASSET = "karing/cn.json"
     const val CHINA_PRESET_IMPORT_ID = "karing-cn-v1"
+    const val DEFAULT_SWITCH_MIGRATION = "cn-v2-default-switches"
+    val DEFAULT_ENABLED_NAMES = setOf(
+        "📹 油管视频", "♊️ Google Gemini", "🌏 Google Play", "🌏 Google",
+        "📲 Facebook", "🎧 TikTok", "📸 Instagram", "🎥 奈飞视频",
+        "📲 WhatsApp", "📲 电报消息", "💬 Claude", "💬 OpenAI", "🐱 GitHub",
+        "📺 哔哩哔哩", "🎯 国内直连", "🌏 国外穿墙",
+    )
+
     fun parse(json: String): KaringPreset {
         val preset = KaringRuleJson.parsePreset(json)
         if (preset.rules.any { it.ruleSetBuildIn.any { code -> !KaringRuleSetValidation.builtIn(code) } }) {

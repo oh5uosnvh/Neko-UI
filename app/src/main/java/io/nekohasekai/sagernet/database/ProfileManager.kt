@@ -203,6 +203,16 @@ object ProfileManager {
                 val db = SagerDatabase.instance.openHelper.writableDatabase
                 // Stored in the same database as rules: marker and inserts commit together.
                 db.execSQL("CREATE TABLE IF NOT EXISTS `karing_initialization` (`key` TEXT NOT NULL PRIMARY KEY)")
+                val switchMigrationDone = db.query("SELECT 1 FROM `karing_initialization` WHERE `key` = '${KaringPresetImporter.DEFAULT_SWITCH_MIGRATION}'").use { it.moveToFirst() }
+                if (!switchMigrationDone) {
+                    val dao = SagerDatabase.rulesDao
+                    val existing = dao.allRules()
+                    val toEnable = existing.filter { rule ->
+                        rule.hasKaringEnvelope() && rule.name in KaringPresetImporter.DEFAULT_ENABLED_NAMES
+                    }.onEach { it.enabled = true }
+                    if (toEnable.isNotEmpty()) dao.updateRules(toEnable)
+                    db.execSQL("INSERT INTO `karing_initialization` (`key`) VALUES ('${KaringPresetImporter.DEFAULT_SWITCH_MIGRATION}')")
+                }
                 val completed = db.query("SELECT 1 FROM `karing_initialization` WHERE `key` = 'cn-v1'").use { it.moveToFirst() }
                 if (!completed) {
                     val preset = app.assets.open(KaringPresetImporter.CHINA_PRESET_ASSET).bufferedReader()

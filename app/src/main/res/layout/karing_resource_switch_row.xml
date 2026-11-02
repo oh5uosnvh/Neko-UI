@@ -8,14 +8,18 @@
 
     <TextView
         android:id="@+id/karing_resource_switch_label"
-        android:layout_width="0dp"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
         android:ellipsize="end"
         android:paddingTop="12dp"
         android:paddingBottom="12dp"
         android:textAppearance="?android:attr/textAppearanceListItem"
         android:textColor="?android:attr/textColorPrimary" />
+
+    <Space
+        android:layout_width="0dp"
+        android:layout_height="1dp"
+        android:layout_weight="1" />
 
     <androidx.appcompat.widget.SwitchCompat
         android:id="@+id/karing_resource_switch_control"

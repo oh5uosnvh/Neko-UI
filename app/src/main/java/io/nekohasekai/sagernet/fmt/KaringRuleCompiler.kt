@@ -3,6 +3,7 @@ package io.nekohasekai.sagernet.fmt
 import io.nekohasekai.sagernet.database.KaringRuleModel
 import io.nekohasekai.sagernet.database.KaringRuleSetItem
 import io.nekohasekai.sagernet.database.RuleEntity
+import io.nekohasekai.sagernet.database.androidCompatible
 import io.nekohasekai.sagernet.database.toKaringRule
 import moe.matsuri.nb4a.SingBoxOptions
 import moe.matsuri.nb4a.SingBoxOptions.RuleSet
@@ -83,17 +84,21 @@ object KaringRuleCompiler {
 
     fun compile(model: KaringRuleModel, resolver: KaringRuleSetResolver, outbound: String,
                 ruleSets: MutableList<RuleSet> = mutableListOf(), userIds: List<Int> = emptyList()): SingBoxOptions.Rule {
-        val normalized = model.copy(
+        // Karing's shared presets contain desktop-only process and Wi-Fi
+        // matchers. Android has no equivalent process-name matcher; package/UID
+        // and rule-set conditions remain usable, so discard only those fields
+        // instead of rejecting the whole route at every VPN start.
+        val normalized = model.androidCompatible().copy(
             ruleSetBuildIn = model.ruleSetBuildIn.map(String::trim).filter(String::isNotEmpty).distinct(),
             ruleSetItems = model.ruleSetItems.map { it.copy(url = it.url.trim()) }
                 .filter { it.url.isNotEmpty() }.distinctBy { it.url },
             packageNames = model.packageNames.map(String::trim).filter(String::isNotEmpty).distinct(),
-            processName = model.processName.map(String::trim).filter(String::isNotEmpty).distinct(),
-            processPath = model.processPath.map(String::trim).filter(String::isNotEmpty).distinct(),
-            processDir = model.processDir.map(String::trim).filter(String::isNotEmpty).distinct(),
-            networkType = model.networkType.map(String::trim).filter(String::isNotEmpty).distinct(),
-            wifiSsid = model.wifiSsid.map(String::trim).filter(String::isNotEmpty).distinct(),
-            wifiBssid = model.wifiBssid.map(String::trim).filter(String::isNotEmpty).distinct(),
+            processName = emptyList(),
+            processPath = emptyList(),
+            processDir = emptyList(),
+            networkType = emptyList(),
+            wifiSsid = emptyList(),
+            wifiBssid = emptyList(),
             port = model.port.map(String::trim).filter(String::isNotEmpty).distinct(),
             portRange = model.portRange.map(String::trim).filter(String::isNotEmpty).distinct(),
             sourcePorts = model.sourcePorts.map(String::trim).filter(String::isNotEmpty).distinct(),
@@ -155,9 +160,9 @@ object KaringRuleCompiler {
             normalized.packageNames.takeIf { it.isNotEmpty() }?.let { values -> atom { package_name = values } }
         }
         normalized.network.takeIf { it.isNotEmpty() }?.let { values -> atom { network = values } }
-        // process_name/process_path/process_dir, network_type and Wi-Fi matchers are
-        // retained in the envelope but rejected above: silently dropping them would
-        // broaden a rule and could release traffic to the wrong outbound.
+        // Desktop-only process/Wi-Fi matchers were removed during Android
+        // normalization above. Android package/UID and rule-set conditions are
+        // emitted normally; no unsupported desktop matcher reaches sing-box.
         normalized.sourceIpCidr.takeIf { it.isNotEmpty() }?.let { values -> atom { source_ip_cidr = values } }
         normalized.sourcePorts.takeIf { it.isNotEmpty() }?.let { values ->
             atom { source_port = values.map { value -> KaringRuleSetValidation.port(value) ?: error("Invalid Karing source port: $value") } }
