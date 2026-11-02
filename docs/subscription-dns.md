@@ -55,7 +55,7 @@ hosts:
 
 不导入完整 Clash 路由、FakeIP/fallback-filter、面板或系统 hosts 设置；这些继续由 NekoBox 自身负责。规则 DNS 支持上述具体模式，不宣称兼容 Mihomo 全部 DSL。DNS URL 中带用户名/密码、查询参数和 fragment 的扩展暂不支持，会明确拒绝；自定义 DoH 路径可用。
 
-YAML 使用 SafeConstructor，显式传递 LoaderOptions，并做事件级预检：禁止重复键、危险对象标签、循环 aliases，深度上限64、alias引用上限32、文档上限16MiB。规范化快照只保存 DNS/hosts，无完整订阅、节点密码或UUID。UI列表只显示状态，不直接暴露私有DoH路径。
+YAML 固定使用 SnakeYAML 2.7（App 与独立测试一致）；修复2.3对跨1024字符缓冲边界 emoji 的读取异常，并显式统一64层嵌套和16MiB限制。使用 SafeConstructor，显式传递 LoaderOptions，并做事件级预检：禁止重复键、危险对象标签、循环 aliases，深度上限64、alias引用上限32、文档上限16MiB。规范化快照只保存 DNS/hosts，无完整订阅、节点密码或UUID。UI列表只显示状态，不直接暴露私有DoH路径。
 
 订阅存储 v3→v4、节点附加存储 v1→v2，向后读取旧数据；共享订阅仍使用原v0格式，不额外分享私有DNS数据。降级安装旧版软件不保证保留新字段。
 

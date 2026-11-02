@@ -327,6 +327,16 @@ public class SubscriptionDnsTest {
         assertThrows(IllegalArgumentException.class, () -> SubscriptionDns.loadDocument(rejected));
     }
 
+    @Test public void emojiAcrossReaderBufferBoundaryPreservesNodeText() {
+        // SnakeYAML 2.3 read a surrogate past the end of its 1024-char input buffer.
+        // Two real subscriptions triggered it; use synthetic text rather than private fixtures.
+        for (int boundary : Arrays.asList(1024, 2048, 3072, 4096)) {
+            String prefix = "node: ";
+            String value = String.join("", Collections.nCopies(boundary - 1 - prefix.length(), "a")) + "\ud83d\ude80";
+            assertEquals(value, SubscriptionDns.loadDocument(prefix + value + "\n").get("node"));
+        }
+    }
+
     @Test public void snapshotDoesNotRetainNodesOrCredentials() {
         SubscriptionDns.Config config = parse("proxies:\n"
                 + "  - {name: private-node-sentinel, type: ss, server: hidden.invalid, port: 443, password: password-sentinel}\n"

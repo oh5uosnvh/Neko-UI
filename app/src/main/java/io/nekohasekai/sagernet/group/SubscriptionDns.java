@@ -64,10 +64,12 @@ public final class SubscriptionDns {
         options.setAllowDuplicateKeys(false);
         options.setAllowRecursiveKeys(false);
         options.setMaxAliasesForCollections(32);
+        options.setNestingDepthLimit(64);
+        options.setCodePointLimit(16 * 1024 * 1024);
         Object root;
         try {
             DumperOptions dumper = new DumperOptions();
-            // Supplying only SafeConstructor silently resets LoaderOptions in SnakeYAML 1.30.
+            // Share the same limits with both constructor and composer.
             Yaml yaml = new Yaml(new SafeConstructor(options), new Representer(dumper), dumper, options);
             validateYamlEvents(yaml, text);
             root = yaml.load(text);

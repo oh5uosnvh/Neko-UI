@@ -7,7 +7,7 @@ From the repository root:
   python3 buildScript/test-subscription-dns.py --cache /path/to/jvm-jars --offline
   python3 buildScript/test-subscription-dns.py --audit-yaml /private/uploads/*.yaml
 
-Only three jars (761,210 bytes total) are needed. First use verifies Maven Central
+Only three jars (762,065 bytes total) are needed. First use verifies Maven Central
 SHA-1 sidecars against pinned digests, then verifies every jar. Verified cache
 hits perform no downloads. --offline additionally forbids missing-cache fetches.
 Compilation output is temporary; no sources are copied/reimplemented or patched.
@@ -33,7 +33,7 @@ SOURCE = REPO / "app/src/main/java/io/nekohasekai/sagernet/group/SubscriptionDns
 TEST = REPO / "app/src/test/java/io/nekohasekai/sagernet/group/SubscriptionDnsTest.java"
 MAVEN = "https://repo.maven.apache.org/maven2/"
 ARTIFACTS = (
-    ("org.yaml", "snakeyaml", "1.30", "8fde7fe2586328ac3c68db92045e1c8759125000"),
+    ("org.yaml", "snakeyaml", "2.7", "47713fda569f07641538ff7f2fa9cb3ead4603e5"),
     ("junit", "junit", "4.13.2", "8ac9e16d933b6fb43bc7f576336b8f4d7eb5ba12"),
     ("org.hamcrest", "hamcrest-core", "1.3", "42a25dc3219429f0e5d060061f71acb49bf010a0"),
 )
