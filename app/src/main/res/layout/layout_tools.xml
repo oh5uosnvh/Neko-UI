@@ -2,6 +2,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
+    android:background="?attr/colorLayerLow"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
@@ -27,19 +28,10 @@
         app:tabTextColor="?tabTextColor"
         app:tabUnboundedRipple="false" />
 
-    <io.nekohasekai.sagernet.widget.LayeredContentFrameLayout
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/tools_pager"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginTop="10dp"
-        android:background="@drawable/bg_layer_high"
-        android:clipToOutline="false">
-
-        <androidx.viewpager2.widget.ViewPager2
-            android:id="@+id/tools_pager"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
-
-    </io.nekohasekai.sagernet.widget.LayeredContentFrameLayout>
+        android:layout_weight="1" />
 
 </LinearLayout>

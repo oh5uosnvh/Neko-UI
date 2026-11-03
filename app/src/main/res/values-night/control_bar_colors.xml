@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Control strip only; speeds, unknown/testing text, units and latency stay pure white. -->
+    <color name="control_bar_text">#FFFFFFFF</color>
+    <color name="control_bar_surface">#FF252628</color>
+    <color name="control_bar_border">#80FFFFFF</color>
+</resources>

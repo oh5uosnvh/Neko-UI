@@ -36,7 +36,7 @@
                 android:gravity="start|center_vertical"
                 android:importantForAccessibility="no"
                 android:text="@string/control_bar_speed_down_unknown"
-                android:textColor="@color/brand_primary"
+                android:textColor="@color/control_bar_text"
                 tools:text="▼ 999.99 MB/s" />
 
             <androidx.appcompat.widget.AppCompatTextView
@@ -47,11 +47,12 @@
                 android:gravity="start|center_vertical"
                 android:importantForAccessibility="no"
                 android:text="@string/control_bar_speed_up_unknown"
-                android:textColor="@color/latency_green"
+                android:textColor="@color/control_bar_text"
                 tools:text="▲ 999.99 MB/s" />
         </LinearLayout>
 
-        <androidx.appcompat.widget.AppCompatTextView
+        <!-- The whole 48dp target is clickable; its wrap-content icon/label pair is centered. -->
+        <FrameLayout
             android:id="@+id/capsule"
             android:layout_width="0dp"
             android:layout_height="48dp"
@@ -59,25 +60,58 @@
             android:background="@drawable/bg_capsule"
             android:clickable="true"
             android:clipToOutline="true"
-            android:drawablePadding="6dp"
+            android:descendantFocusability="blocksDescendants"
             android:focusable="true"
-            android:fontFeatureSettings="tnum"
             android:foreground="?attr/selectableItemBackground"
-            android:gravity="center"
-            android:includeFontPadding="false"
             android:importantForAccessibility="yes"
-            android:maxLines="1"
             android:minWidth="48dp"
             android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:text="@string/control_bar_disconnected"
-            android:textColor="@android:color/white"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            app:autoSizeTextType="uniform"
-            app:autoSizeMinTextSize="10sp"
-            app:autoSizeMaxTextSize="14sp"
-            app:autoSizeStepGranularity="0.5sp" />
+            android:paddingEnd="8dp">
+
+            <LinearLayout
+                android:id="@+id/capsule_pair"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:baselineAligned="false"
+                android:clickable="false"
+                android:focusable="false"
+                android:gravity="center_vertical"
+                android:importantForAccessibility="no"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatImageView
+                    android:id="@+id/capsule_icon"
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitCenter"
+                    app:srcCompat="@drawable/ic_control_power" />
+
+                <androidx.appcompat.widget.AppCompatTextView
+                    android:id="@+id/capsule_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:fontFeatureSettings="tnum"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:importantForAccessibility="no"
+                    android:maxLines="1"
+                    android:text="@string/control_bar_disconnected"
+                    android:textColor="@android:color/white"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    app:autoSizeTextType="uniform"
+                    app:autoSizeMinTextSize="10sp"
+                    app:autoSizeMaxTextSize="14sp"
+                    app:autoSizeStepGranularity="0.5sp" />
+            </LinearLayout>
+        </FrameLayout>
 
         <FrameLayout
             android:id="@+id/latency_box"
@@ -103,7 +137,7 @@
                 android:includeFontPadding="false"
                 android:maxLines="1"
                 android:text="@string/control_bar_latency_unknown"
-                android:textColor="@color/latency_green"
+                android:textColor="@color/control_bar_text"
                 android:textSize="16sp"
                 android:textStyle="bold"
                 app:autoSizeTextType="uniform"

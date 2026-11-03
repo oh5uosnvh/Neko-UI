@@ -2,8 +2,8 @@
 <resources>
     <string name="control_bar_connected">Connected</string>
     <string name="control_bar_disconnected">Disconnected</string>
-    <string name="control_bar_connected_compact">Online</string>
-    <string name="control_bar_disconnected_compact">Offline</string>
+    <string name="control_bar_connected_compact">On</string>
+    <string name="control_bar_disconnected_compact">Off</string>
     <string name="control_bar_testing">Testing…</string>
     <string name="control_bar_connect_action">Connect proxy</string>
     <string name="control_bar_disconnect_action">Disconnect proxy</string>

@@ -9,6 +9,9 @@ import android.graphics.drawable.GradientDrawable
 import android.view.ContextThemeWrapper
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
+import android.graphics.drawable.ColorDrawable
+import com.google.android.material.card.MaterialCardView
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import com.google.android.material.appbar.MaterialToolbar
@@ -101,45 +104,39 @@ class LayeredThemeResourceTest {
             for (name in listOf("Theme.SagerNet.Blue", "Theme.SagerNet.Amber", "Theme.SagerNet.Black")) {
                 val items = bag(themes.single { it.getAttribute("name") == name })
                 assertNotEquals("@color/brand_primary", items["colorPrimary"])
-                assertTrue(items.containsKey("cardElevatedSurfaceColor"))
+                assertEquals("?attr/colorLayerHigh", items["cardElevatedSurfaceColor"])
             }
             assertEquals("@color/color_ng_black_accent", bag(themes.single {
                 it.getAttribute("name") == "Theme.SagerNet.Black" })["selectedColorPrimary"])
         }
 
-        @Test fun allSixScreensAndBothSettingsHostsAreBoundedAndKeepTheirIds() {
-            val targets = mapOf("group_list" to "group_pager", "group" to "group_list",
-                "route" to "route_list", "assets" to "refresh_layout", "tools" to "tools_pager",
-                "config_settings" to "settings", "settings_activity" to "settings")
-            for ((layout, id) in targets) {
-                val root = xml("layout/layout_$layout.xml")
-                val child = all(root).single { it.getAttributeNS(ns, "id") == "@+id/$id" }
-                val wrapper = child.parentNode as Element
-                assertEquals("io.nekohasekai.sagernet.widget.LayeredContentFrameLayout", wrapper.tagName)
-                assertEquals("@drawable/bg_layer_high", wrapper.getAttributeNS(ns, "background"))
-                assertEquals("0dp", wrapper.getAttributeNS(ns, "layout_height"))
-                assertEquals("1", wrapper.getAttributeNS(ns, "layout_weight"))
-                assertEquals("10dp", wrapper.getAttributeNS(ns, "layout_marginTop"))
-                assertEquals("false", wrapper.getAttributeNS(ns, "clipToOutline"))
-                assertEquals("match_parent", child.getAttributeNS(ns, "layout_height"))
+        @Test fun originalPagesKeepTheirIdsWithoutAnyNewRoundedOuterSurface() {
+            val targets=mapOf("group_list" to "group_pager","group" to "group_list",
+                "route" to "route_list","assets" to "refresh_layout","tools" to "tools_pager",
+                "config_settings" to "settings","settings_activity" to "settings")
+            for((layout,id) in targets) {
+                val root=xml("layout/layout_$layout.xml")
+                assertEquals("?attr/colorLayerLow",root.getAttributeNS(ns,"background"))
+                assertFalse(all(root).any{it.tagName.contains("LayeredContentFrameLayout")})
+                assertFalse(all(root).any{it.getAttributeNS(ns,"background")=="@drawable/bg_layer_high"})
+                val child=all(root).single{it.getAttributeNS(ns,"id")=="@+id/$id"}
+                assertEquals("LinearLayout",(child.parentNode as Element).tagName)
+                assertEquals("0dp",child.getAttributeNS(ns,"layout_height"))
+                assertEquals("1",child.getAttributeNS(ns,"layout_weight"))
             }
-            val settings = all(xml("layout/layout_settings_activity.xml"))
-            val hosts = listOf("settings", "configuration_list").map { id -> settings.single {
-                it.getAttributeNS(ns, "id") == "@+id/$id" } }
-            assertSame(hosts[0].parentNode, hosts[1].parentNode)
-            hosts.forEach { assertFalse(it.hasAttributeNS(ns, "visibility")) }
-            assertTrue(File(app, "src/main/java/io/nekohasekai/sagernet/ui/SettingsFragment.kt")
-                .readText().contains("ToolbarFragment(R.layout.layout_config_settings)"))
-            val shape = xml("drawable/bg_layer_high.xml")
-            val corners=all(shape).single { it.tagName == "corners" }
-            assertEquals("24dp", corners.getAttributeNS(ns, "topLeftRadius"))
-            assertEquals("24dp", corners.getAttributeNS(ns, "topRightRadius"))
-            assertFalse(corners.hasAttributeNS(ns, "radius"))
-            assertFalse(corners.hasAttributeNS(ns, "bottomLeftRadius"))
-            assertFalse(corners.hasAttributeNS(ns, "bottomRightRadius"))
-            val stroke = all(shape).single { it.tagName == "stroke" }
-            assertEquals("1dp", stroke.getAttributeNS(ns, "width"))
-            assertEquals("?attr/colorLayerStroke", stroke.getAttributeNS(ns, "color"))
+            assertFalse(File(app,"src/main/res/drawable/bg_layer_high.xml").exists())
+            assertFalse(File(app,"src/main/java/io/nekohasekai/sagernet/widget/LayeredContentFrameLayout.kt").exists())
+            val themes=styles("values/themes.xml")
+            for(name in listOf("Widget.SagerNet.CardView","Widget.SagerNet.CardView.Elevated",
+                "Widget.SagerNet.CardView.Tinted")) {
+                assertEquals("?attr/colorLayerHigh",bag(themes.single{it.getAttribute("name")==name})["cardBackgroundColor"])
+            }
+            for(style in themes.filter{it.getAttribute("name").startsWith("Theme.SagerNet")}) {
+                bag(style)["cardElevatedSurfaceColor"]?.let{assertEquals("?attr/colorLayerHigh",it)}
+            }
+            for(name in listOf("Theme.SagerNet.Base","Theme.SagerNet.Dialog")) {
+                assertEquals("false",bag(themes.single{it.getAttribute("name")==name})["elevationOverlayEnabled"])
+            }
         }
     }
 
@@ -215,61 +212,62 @@ class LayeredThemeResourceTest {
             }
         }
 
-        @Test fun sixInflatedScreensUseOneClippableHighLayerAndNeverOverflowAfterAppbar() {
-            val targets = listOf(R.layout.layout_group_list to R.id.group_pager,
-                R.layout.layout_group to R.id.group_list, R.layout.layout_route to R.id.route_list,
-                R.layout.layout_assets to R.id.refresh_layout, R.layout.layout_tools to R.id.tools_pager,
-                R.layout.layout_config_settings to R.id.settings,
-                R.layout.layout_settings_activity to R.id.settings)
-            for (night in listOf(false, true)) {
-                val context = context(night, R.style.Theme_SagerNet)
-                for ((layout, id) in targets) {
-                    val root = LayoutInflater.from(context).inflate(layout, FrameLayout(context), false)
-                    val child = root.findViewById<View>(id)
+        @Test fun sevenRealPagesUseLowBackgroundAndNoOuterCardFrame() {
+            val targets=listOf(R.layout.layout_group_list to R.id.group_pager,
+                R.layout.layout_group to R.id.group_list,R.layout.layout_route to R.id.route_list,
+                R.layout.layout_assets to R.id.refresh_layout,R.layout.layout_tools to R.id.tools_pager,
+                R.layout.layout_config_settings to R.id.settings,R.layout.layout_settings_activity to R.id.settings)
+            for(night in listOf(false,true)) {
+                val context=context(night,R.style.Theme_SagerNet)
+                for((layout,id) in targets) {
+                    val root=LayoutInflater.from(context).inflate(layout,FrameLayout(context),false)
+                    val child=root.findViewById<View>(id)
                     assertNotNull(child)
-                    val wrapper = child.parent as FrameLayout
-                    val params = wrapper.layoutParams as LinearLayout.LayoutParams
-                    assertEquals(0, params.height)
-                    assertEquals(1f, params.weight, 0f)
-                    assertEquals(10, params.topMargin)
-                    root.measure(View.MeasureSpec.makeMeasureSpec(360, View.MeasureSpec.EXACTLY),
-                        View.MeasureSpec.makeMeasureSpec(640, View.MeasureSpec.EXACTLY))
-                    root.layout(0, 0, 360, 640)
-                    assertTrue(wrapper.height > 0)
-                    assertTrue(wrapper.bottom <= (wrapper.parent as View).height)
-                    val background = wrapper.background as GradientDrawable
-                    assertEquals(color(context, R.attr.colorLayerHigh), background.color!!.defaultColor)
-                    assertTrue(wrapper is io.nekohasekai.sagernet.widget.LayeredContentFrameLayout)
-                    assertFalse(wrapper.clipToOutline)
-                    val radii=org.robolectric.util.ReflectionHelpers.getField<FloatArray>(
-                        background.constantState,"mRadiusArray")
-                    assertArrayEquals(floatArrayOf(24f,24f,24f,24f,0f,0f,0f,0f),radii,0.01f)
-                    // The dedicated host clips Canvas on API21+, rather than relying on an
-                    // Outline that cannot clip asymmetric corners before API33.
-                    val path=org.robolectric.util.ReflectionHelpers.getField<android.graphics.Path>(wrapper,"clipPath")
-                    val bounds=android.graphics.RectF()
-                    path.computeBounds(bounds,true)
-                    assertEquals(android.graphics.RectF(0f,0f,wrapper.width.toFloat(),wrapper.height.toFloat()),bounds)
+                    assertTrue(child.parent is LinearLayout)
+                    val params=child.layoutParams as LinearLayout.LayoutParams
+                    assertEquals(0,params.height);assertEquals(1f,params.weight,0f)
+                    assertEquals(color(context,R.attr.colorLayerLow),(root.background as ColorDrawable).color)
+                    root.measure(View.MeasureSpec.makeMeasureSpec(360,View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(640,View.MeasureSpec.EXACTLY))
+                    root.layout(0,0,360,640)
+                    assertTrue(child.height>0)
+                    assertTrue(child.bottom<=(child.parent as View).height)
+                    fun inspect(v:View) {
+                        assertFalse(v.javaClass.simpleName=="LayeredContentFrameLayout")
+                        if(v is ViewGroup)for(i in 0 until v.childCount)inspect(v.getChildAt(i))
+                    }
+                    inspect(root)
                 }
             }
         }
-
-        @Test fun bothSettingsHostsCanBeHiddenWithoutRemovingTheHighContainer() {
-            val context = context(false, R.style.Theme_SagerNet)
-            val root = LayoutInflater.from(context).inflate(R.layout.layout_settings_activity,
-                FrameLayout(context), false)
-            val settings = root.findViewById<View>(R.id.settings)
-            val list = root.findViewById<View>(R.id.configuration_list)
-            assertSame(settings.parent, list.parent)
-            val wrapper = settings.parent as FrameLayout
-            for (showSettings in listOf(false, true)) {
-                settings.visibility = if (showSettings) View.VISIBLE else View.GONE
-                list.visibility = if (showSettings) View.GONE else View.VISIBLE
-                assertEquals(View.VISIBLE, wrapper.visibility)
-                assertNotNull(wrapper.background)
-                val visible = if (showSettings) settings else list
-                assertEquals(View.VISIBLE, visible.visibility)
-                assertSame(wrapper, visible.parent)
+        @Test fun realNodeGroupRouteAndResourceCardsKeepExactHighFillAcrossThemesAndElevation() {
+            val layouts=listOf(R.layout.layout_profile,R.layout.layout_group_item,
+                R.layout.layout_route_item,R.layout.layout_asset_item)
+            for(night in listOf(false,true)) for(theme in listOf(R.style.Theme_SagerNet,
+                R.style.Theme_SagerNet_Blue,R.style.Theme_SagerNet_Black)) {
+                val context=context(night,theme)
+                val high=Color.parseColor(if(night)"#252628" else "#FFFFFF")
+                for(layout in layouts) {
+                    val card=LayoutInflater.from(context).inflate(layout,FrameLayout(context),false) as MaterialCardView
+                    assertEquals(high,card.cardBackgroundColor.defaultColor)
+                    card.cardElevation=12f
+                    assertEquals(high,card.cardBackgroundColor.defaultColor)
+                    val shape=card.background as com.google.android.material.shape.MaterialShapeDrawable
+                    assertFalse("Elevation must not tint the specified card fill",shape.isElevationOverlayEnabled)
+                    assertEquals(high,shape.fillColor!!.defaultColor)
+                }
+            }
+        }
+        @Test fun settingsRemainOnePlainNativePageWithNoNewCardOrBorder() {
+            for(night in listOf(false,true)) for(layout in listOf(R.layout.layout_config_settings,
+                R.layout.layout_settings_activity)) {
+                val context=context(night,R.style.Theme_SagerNet)
+                val root=LayoutInflater.from(context).inflate(layout,FrameLayout(context),false)
+                val settings=root.findViewById<View>(R.id.settings)
+                assertTrue(settings.parent is LinearLayout)
+                assertEquals(color(context,R.attr.colorLayerLow),(root.background as ColorDrawable).color)
+                assertNull(settings.background)
+                assertFalse(root is MaterialCardView)
             }
         }
     }

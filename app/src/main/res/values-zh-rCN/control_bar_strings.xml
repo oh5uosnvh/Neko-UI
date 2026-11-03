@@ -2,8 +2,8 @@
 <resources>
     <string name="control_bar_connected">已连接</string>
     <string name="control_bar_disconnected">未连接</string>
-    <string name="control_bar_connected_compact">已连接</string>
-    <string name="control_bar_disconnected_compact">未连接</string>
+    <string name="control_bar_connected_compact">在线</string>
+    <string name="control_bar_disconnected_compact">离线</string>
     <string name="control_bar_testing">测试中…</string>
     <string name="control_bar_connect_action">连接代理</string>
     <string name="control_bar_disconnect_action">断开代理</string>

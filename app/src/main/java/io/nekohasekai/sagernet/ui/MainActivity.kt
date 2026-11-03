@@ -24,8 +24,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.updateLayoutParams
-import androidx.coordinatorlayout.widget.CoordinatorLayout
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -79,6 +77,7 @@ class MainActivity : ThemedActivity(),
     private var currentMainFragment: ToolbarFragment? = null
     private val controlLatencyGate = ControlLatencyGate()
     private var controlLatencyJob: Job? = null
+    private lateinit var controlOverlay: ConfigurationControlOverlay
 
     // ---- 侧边栏切换优化 ----
     // 官方实现每次点击都是 new Fragment + replace()，事务恰好在抽屉关闭动画
@@ -116,6 +115,7 @@ class MainActivity : ThemedActivity(),
         DataStore.serviceState = BaseService.State.Idle
 
         binding = LayoutMainBinding.inflate(layoutInflater)
+        controlOverlay = ConfigurationControlOverlay(binding.fragmentHolder, binding.controlBar)
         if (themeResId !in intArrayOf(
                 R.style.Theme_SagerNet_Black
             )
@@ -131,7 +131,7 @@ class MainActivity : ThemedActivity(),
         binding.drawerLayout.addDrawerListener(drawerListener)
         // 页面缓存复用后层次里会同时存在多个页面的 AppBarLayout，
         // 每个页面视图创建时即时补一次状态栏内边距，避免顶栏顶进状态栏。
-        supportFragmentManager.registerFragmentLifecycleCallbacks(navInsetCallbacks, false)
+        supportFragmentManager.registerFragmentLifecycleCallbacks(navInsetCallbacks, true)
         if (savedInstanceState == null) {
             displayFragmentWithId(R.id.nav_configuration)
         } else {
@@ -485,6 +485,7 @@ class MainActivity : ThemedActivity(),
                 transaction.add(R.id.fragment_holder, fragment, tagOf(fragment))
             }
             transaction.setMaxLifecycle(fragment, Lifecycle.State.RESUMED)
+            transaction.runOnCommit { syncMainControls() }
             transaction.commitAllowingStateLoss()
 
             currentMainFragment = fragment
@@ -519,6 +520,26 @@ class MainActivity : ThemedActivity(),
             savedInstanceState: Bundle?,
         ) {
             applyStatusBarInset(v)
+            if (f is ConfigurationFragment && !f.select) {
+                v.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(view: View) = syncMainControls()
+                    override fun onViewDetachedFromWindow(view: View) = syncMainControls()
+                })
+            }
+            if (f is ConfigurationFragment && !f.select && f === currentMainFragment) {
+                syncMainControls()
+            } else if (f.parentFragment === currentMainFragment && currentMainFragment is ConfigurationFragment) {
+                // A newly created/cached pager page also needs scroll-range padding.
+                syncMainControls()
+            }
+        }
+
+        override fun onFragmentResumed(fm: FragmentManager, f: Fragment) {
+            if (f === currentMainFragment || f.parentFragment === currentMainFragment) syncMainControls()
+        }
+
+        override fun onFragmentViewDestroyed(fm: FragmentManager, f: Fragment) {
+            if (f === currentMainFragment) syncMainControls()
         }
     }
 
@@ -693,25 +714,24 @@ class MainActivity : ThemedActivity(),
     }
 
     private fun syncMainControls() {
-        binding.controlBar.visibility = View.VISIBLE
-        binding.controlBar.changeState(DataStore.serviceState)
+        if (!::binding.isInitialized || !::controlOverlay.isInitialized) return
+        val configuration = currentMainFragment as? ConfigurationFragment
+        val root = configuration?.view
+        val visible = ConfigurationControlOverlay.shouldShow(
+            configuration != null, configuration?.select == true, configuration?.isAdded == true,
+            configuration?.isHidden == true, root?.isShown == true,
+            root?.translationY != 0f, root?.isAttachedToWindow == true,
+        )
+        // Navigation is not a service acknowledgement: it must not release a pending VPN request.
+        controlOverlay.show(root, visible)
     }
 
     private fun installControlBarInsets() {
-        fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
         ViewCompat.setOnApplyWindowInsetsListener(binding.coordinator) { _, insets ->
             val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
-            val bottom = maxOf(safe.bottom, keyboard)
-            binding.controlBar.updateLayoutParams<CoordinatorLayout.LayoutParams> {
-                leftMargin = dp(14) + safe.left
-                rightMargin = dp(14) + safe.right
-                bottomMargin = dp(14) + bottom
-            }
-            // Reserve the bar's real footprint; lists never render their last row underneath it.
-            binding.fragmentHolder.updateLayoutParams<CoordinatorLayout.LayoutParams> {
-                bottomMargin = dp(104) + bottom
-            }
+            controlOverlay.applyInsets(safe.left, safe.right, maxOf(safe.bottom, keyboard))
+            syncMainControls()
             insets
         }
         ViewCompat.requestApplyInsets(binding.coordinator)
@@ -721,11 +741,12 @@ class MainActivity : ThemedActivity(),
         controlLatencyGate.invalidate()
         controlLatencyJob?.cancel()
         controlLatencyJob = null
-        if (::binding.isInitialized) binding.controlBar.reset()
+        if (::binding.isInitialized) binding.controlBar.clearMeasurements()
     }
 
     private fun testControlLatency() {
-        if (!DataStore.serviceState.connected || connection.service == null) {
+        if (binding.controlBar.visibility != View.VISIBLE ||
+            !DataStore.serviceState.connected || connection.service == null) {
             binding.controlBar.showLatency(-1)
             return
         }
@@ -778,6 +799,7 @@ class MainActivity : ThemedActivity(),
     ) {
         DataStore.serviceState = state
         if (!state.connected) invalidateControlLatency()
+        binding.controlBar.changeState(state) // Only an actual service acknowledgement unlocks toggle.
         refreshConfigurationProfileState()
         syncMainControls()
         if (msg != null) snackbar(getString(R.string.vpn_error, msg)).show()
@@ -811,7 +833,8 @@ class MainActivity : ThemedActivity(),
 
     private val connect = registerForActivityResult(VpnRequestActivity.StartService()) { denied ->
         if (denied) {
-            syncMainControls() // An authoritative permission-cancel response re-arms the capsule.
+            binding.controlBar.changeState(DataStore.serviceState)
+            syncMainControls() // Authoritative permission cancellation re-arms the capsule.
             snackbar(R.string.vpn_permission_denied).show()
         }
         // Successful requests stay locked until the real service reports Connecting/Connected.
@@ -820,7 +843,9 @@ class MainActivity : ThemedActivity(),
     // may NOT called when app is in background
     // ONLY do UI update here, write DB in bg process
     override fun cbSpeedUpdate(stats: SpeedDisplayData) {
-        binding.controlBar.updateSpeed(stats.txRateProxy, stats.rxRateProxy)
+        if (binding.controlBar.visibility == View.VISIBLE) {
+            binding.controlBar.updateSpeed(stats.txRateProxy, stats.rxRateProxy)
+        }
     }
 
     override suspend fun cbTrafficUpdate(data: TrafficDataBatch) {

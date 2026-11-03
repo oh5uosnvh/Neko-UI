@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Control strip only: latest feedback requires opaque day-black, not accent/secondary. -->
+    <color name="control_bar_text">#FF000000</color>
+    <color name="control_bar_surface">#FFFFFFFF</color>
+    <color name="control_bar_border">#59000000</color>
+</resources>

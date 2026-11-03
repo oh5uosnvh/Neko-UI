@@ -20,8 +20,9 @@
         <item name="colorMaterial100">@color/material_blue_grey_100</item>
         <item name="colorMaterial300">@color/brand_primary_light</item>
 
-        <!-- Preserve tonal/elevated cards; the enclosing screen surface is LayerHigh. -->
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_blue_grey</item>
+        <!-- Keep the card fill exact: Material must not tint it again at elevation. -->
+        <item name="elevationOverlayEnabled">false</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
 
         <item name="accentOrTextSecondary">?colorAccent</item>
         <item name="accentOrTextPrimary">?colorAccent</item>
@@ -85,8 +86,9 @@
         <item name="colorMaterial100">@color/material_blue_grey_100</item>
         <item name="colorMaterial300">@color/brand_primary_light</item>
 
-        <!-- Preserve tonal/elevated cards; the enclosing screen surface is LayerHigh. -->
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_blue_grey</item>
+        <!-- Keep the card fill exact: Material must not tint it again at elevation. -->
+        <item name="elevationOverlayEnabled">false</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
 
         <item name="accentOrTextSecondary">?colorAccent</item>
         <item name="accentOrTextPrimary">?colorAccent</item>
@@ -195,18 +197,18 @@
         <item name="cardCornerRadius">@dimen/card_corner_radius</item>
         <item name="strokeColor">@color/card_stroke</item>
         <item name="strokeWidth">@dimen/card_stroke_width</item>
-        <item name="cardBackgroundColor">?attr/colorSurface</item>
+        <item name="cardBackgroundColor">?attr/colorLayerHigh</item>
     </style>
 
     <!-- ElevatedCard: shadow + tonal surface, no stroke. -->
     <style name="Widget.SagerNet.CardView.Elevated">
         <item name="cardElevation">@dimen/card_elevation</item>
         <item name="strokeWidth">0dp</item>
-        <item name="cardBackgroundColor">?attr/cardElevatedSurfaceColor</item>
+        <item name="cardBackgroundColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Widget.SagerNet.CardView.Tinted" parent="Widget.SagerNet.CardView">
-        <item name="cardBackgroundColor">?attr/cardElevatedSurfaceColor</item>
+        <item name="cardBackgroundColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="ShapeAppearanceOverlay.SagerNet.Dialog" parent="">
@@ -274,7 +276,7 @@
         <item name="colorAccent">@color/material_pink_accent_200</item>
         <item name="colorMaterial100">@color/material_pink_accent_100</item>
         <item name="colorMaterial300">@color/color_pink_ssr</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_pink_ssr</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Amber" parent="Theme.SagerNet">
@@ -283,7 +285,7 @@
         <item name="colorAccent">@color/material_amber_accent_200</item>
         <item name="colorMaterial100">@color/material_amber_100</item>
         <item name="colorMaterial300">@color/material_amber_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_amber</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Blue" parent="Theme.SagerNet">
@@ -292,7 +294,7 @@
         <item name="colorAccent">@color/material_blue_accent_200</item>
         <item name="colorMaterial100">@color/material_blue_100</item>
         <item name="colorMaterial300">@color/material_blue_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_blue</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.BlueGrey" parent="Theme.SagerNet">
@@ -301,7 +303,7 @@
         <item name="colorAccent">@color/material_blue_grey_200</item>
         <item name="colorMaterial100">@color/material_blue_grey_100</item>
         <item name="colorMaterial300">@color/material_blue_grey_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_blue_grey</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Brown" parent="Theme.SagerNet">
@@ -310,7 +312,7 @@
         <item name="colorAccent">@color/material_brown_200</item>
         <item name="colorMaterial100">@color/material_brown_100</item>
         <item name="colorMaterial300">@color/material_brown_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_brown</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Cyan" parent="Theme.SagerNet">
@@ -319,7 +321,7 @@
         <item name="colorAccent">@color/material_cyan_accent_200</item>
         <item name="colorMaterial100">@color/material_cyan_100</item>
         <item name="colorMaterial300">@color/material_cyan_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_cyan</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.DeepOrange" parent="Theme.SagerNet">
@@ -328,7 +330,7 @@
         <item name="colorAccent">@color/material_deep_orange_accent_200</item>
         <item name="colorMaterial100">@color/material_deep_orange_100</item>
         <item name="colorMaterial300">@color/material_deep_orange_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_deep_orange</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.DeepPurple" parent="Theme.SagerNet">
@@ -337,7 +339,7 @@
         <item name="colorAccent">@color/material_deep_purple_accent_200</item>
         <item name="colorMaterial100">@color/material_deep_purple_100</item>
         <item name="colorMaterial300">@color/material_deep_purple_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_deep_purple</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Green" parent="Theme.SagerNet">
@@ -346,7 +348,7 @@
         <item name="colorAccent">@color/material_green_accent_200</item>
         <item name="colorMaterial100">@color/material_green_100</item>
         <item name="colorMaterial300">@color/material_green_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_green</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Grey" parent="Theme.SagerNet">
@@ -355,7 +357,7 @@
         <item name="colorAccent">@color/material_grey_200</item>
         <item name="colorMaterial100">@color/material_grey_100</item>
         <item name="colorMaterial300">@color/material_grey_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_grey</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Indigo" parent="Theme.SagerNet">
@@ -364,7 +366,7 @@
         <item name="colorAccent">@color/material_indigo_accent_200</item>
         <item name="colorMaterial100">@color/material_indigo_100</item>
         <item name="colorMaterial300">@color/material_indigo_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_indigo</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.LightBlue" parent="Theme.SagerNet">
@@ -373,7 +375,7 @@
         <item name="colorAccent">@color/material_light_blue_accent_200</item>
         <item name="colorMaterial100">@color/material_light_blue_100</item>
         <item name="colorMaterial300">@color/material_light_blue_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_light_blue</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.LightGreen" parent="Theme.SagerNet">
@@ -382,7 +384,7 @@
         <item name="colorAccent">@color/material_light_green_accent_200</item>
         <item name="colorMaterial100">@color/material_light_green_100</item>
         <item name="colorMaterial300">@color/material_light_green_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_light_green</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Lime" parent="Theme.SagerNet">
@@ -391,7 +393,7 @@
         <item name="colorAccent">@color/material_lime_accent_200</item>
         <item name="colorMaterial100">@color/material_lime_100</item>
         <item name="colorMaterial300">@color/material_lime_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_lime</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Orange" parent="Theme.SagerNet">
@@ -400,7 +402,7 @@
         <item name="colorAccent">@color/material_orange_accent_200</item>
         <item name="colorMaterial100">@color/material_orange_100</item>
         <item name="colorMaterial300">@color/material_orange_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_orange</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Purple" parent="Theme.SagerNet">
@@ -409,7 +411,7 @@
         <item name="colorAccent">@color/material_purple_accent_200</item>
         <item name="colorMaterial100">@color/material_purple_100</item>
         <item name="colorMaterial300">@color/material_purple_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_purple</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Red" parent="Theme.SagerNet">
@@ -418,7 +420,7 @@
         <item name="colorAccent">@color/material_red_accent_200</item>
         <item name="colorMaterial100">@color/material_red_100</item>
         <item name="colorMaterial300">@color/material_red_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_red</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Teal" parent="Theme.SagerNet">
@@ -427,7 +429,7 @@
         <item name="colorAccent">@color/material_teal_accent_200</item>
         <item name="colorMaterial100">@color/material_teal_100</item>
         <item name="colorMaterial300">@color/material_teal_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_teal</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Yellow" parent="Theme.SagerNet">
@@ -436,7 +438,7 @@
         <item name="colorAccent">@color/material_yellow_accent_200</item>
         <item name="colorMaterial100">@color/material_yellow_100</item>
         <item name="colorMaterial300">@color/material_yellow_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_yellow</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
         <item name="colorOnPrimarySurface">@color/black</item>
     </style>
 
@@ -446,7 +448,7 @@
         <item name="colorAccent">@color/material_amber_accent_200</item>
         <item name="colorMaterial100">@color/material_amber_100</item>
         <item name="colorMaterial300">@color/material_amber_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_amber</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.Blue" parent="Theme.SagerNet.Dialog">
@@ -455,7 +457,7 @@
         <item name="colorAccent">@color/material_blue_accent_200</item>
         <item name="colorMaterial100">@color/material_blue_100</item>
         <item name="colorMaterial300">@color/material_blue_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_blue</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.BlueGrey" parent="Theme.SagerNet.Dialog">
@@ -464,7 +466,7 @@
         <item name="colorAccent">@color/material_blue_grey_200</item>
         <item name="colorMaterial100">@color/material_blue_grey_100</item>
         <item name="colorMaterial300">@color/material_blue_grey_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_blue_grey</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.Brown" parent="Theme.SagerNet.Dialog">
@@ -473,7 +475,7 @@
         <item name="colorAccent">@color/material_brown_200</item>
         <item name="colorMaterial100">@color/material_brown_100</item>
         <item name="colorMaterial300">@color/material_brown_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_brown</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.Cyan" parent="Theme.SagerNet.Dialog">
@@ -482,7 +484,7 @@
         <item name="colorAccent">@color/material_cyan_accent_200</item>
         <item name="colorMaterial100">@color/material_cyan_100</item>
         <item name="colorMaterial300">@color/material_cyan_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_cyan</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.DeepOrange" parent="Theme.SagerNet.Dialog">
@@ -491,7 +493,7 @@
         <item name="colorAccent">@color/material_deep_orange_accent_200</item>
         <item name="colorMaterial100">@color/material_deep_orange_100</item>
         <item name="colorMaterial300">@color/material_deep_orange_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_deep_orange</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.DeepPurple" parent="Theme.SagerNet.Dialog">
@@ -500,7 +502,7 @@
         <item name="colorAccent">@color/material_deep_purple_accent_200</item>
         <item name="colorMaterial100">@color/material_deep_purple_100</item>
         <item name="colorMaterial300">@color/material_deep_purple_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_deep_purple</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.Green" parent="Theme.SagerNet.Dialog">
@@ -509,7 +511,7 @@
         <item name="colorAccent">@color/material_green_accent_200</item>
         <item name="colorMaterial100">@color/material_green_100</item>
         <item name="colorMaterial300">@color/material_green_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_green</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.Grey" parent="Theme.SagerNet.Dialog">
@@ -518,7 +520,7 @@
         <item name="colorAccent">@color/material_grey_200</item>
         <item name="colorMaterial100">@color/material_grey_100</item>
         <item name="colorMaterial300">@color/material_grey_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_grey</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.Indigo" parent="Theme.SagerNet.Dialog">
@@ -527,7 +529,7 @@
         <item name="colorAccent">@color/material_indigo_accent_200</item>
         <item name="colorMaterial100">@color/material_indigo_100</item>
         <item name="colorMaterial300">@color/material_indigo_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_indigo</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.LightBlue" parent="Theme.SagerNet.Dialog">
@@ -536,7 +538,7 @@
         <item name="colorAccent">@color/material_light_blue_accent_200</item>
         <item name="colorMaterial100">@color/material_light_blue_100</item>
         <item name="colorMaterial300">@color/material_light_blue_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_light_blue</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.LightGreen" parent="Theme.SagerNet.Dialog">
@@ -545,7 +547,7 @@
         <item name="colorAccent">@color/material_light_green_accent_200</item>
         <item name="colorMaterial100">@color/material_light_green_100</item>
         <item name="colorMaterial300">@color/material_light_green_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_light_green</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.Lime" parent="Theme.SagerNet.Dialog">
@@ -554,7 +556,7 @@
         <item name="colorAccent">@color/material_lime_accent_200</item>
         <item name="colorMaterial100">@color/material_lime_100</item>
         <item name="colorMaterial300">@color/material_lime_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_lime</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.Orange" parent="Theme.SagerNet.Dialog">
@@ -563,7 +565,7 @@
         <item name="colorAccent">@color/material_orange_accent_200</item>
         <item name="colorMaterial100">@color/material_orange_100</item>
         <item name="colorMaterial300">@color/material_orange_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_orange</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.Purple" parent="Theme.SagerNet.Dialog">
@@ -572,7 +574,7 @@
         <item name="colorAccent">@color/material_purple_accent_200</item>
         <item name="colorMaterial100">@color/material_purple_100</item>
         <item name="colorMaterial300">@color/material_purple_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_purple</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.Red" parent="Theme.SagerNet.Dialog">
@@ -581,7 +583,7 @@
         <item name="colorAccent">@color/material_red_accent_200</item>
         <item name="colorMaterial100">@color/material_red_100</item>
         <item name="colorMaterial300">@color/material_red_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_red</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.Pink_SSR" parent="Theme.SagerNet.Dialog">
@@ -590,7 +592,7 @@
         <item name="colorAccent">@color/material_pink_accent_200</item>
         <item name="colorMaterial100">@color/material_pink_accent_100</item>
         <item name="colorMaterial300">@color/color_pink_ssr</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_pink_ssr</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.Teal" parent="Theme.SagerNet.Dialog">
@@ -599,7 +601,7 @@
         <item name="colorAccent">@color/material_teal_accent_200</item>
         <item name="colorMaterial100">@color/material_teal_100</item>
         <item name="colorMaterial300">@color/material_teal_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_teal</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.Yellow" parent="Theme.SagerNet.Dialog">
@@ -608,7 +610,7 @@
         <item name="colorAccent">@color/material_yellow_accent_200</item>
         <item name="colorMaterial100">@color/material_yellow_100</item>
         <item name="colorMaterial300">@color/material_yellow_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_yellow</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
         <item name="colorOnPrimarySurface">@color/black</item>
     </style>
 
@@ -618,7 +620,7 @@
         <item name="colorAccent">@color/color_ng_black_accent</item>
         <item name="colorMaterial100">@color/color_ng_black_primary</item>
         <item name="colorMaterial300">@color/color_ng_black_primary</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_black</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
 
         <item name="selectedColorPrimary">@color/color_ng_black_accent</item>
         <item name="fabColorBackground">@color/color_ng_black_accent</item>
@@ -636,7 +638,7 @@
         <item name="colorAccent">@color/color_verdant_mint_accent</item>
         <item name="colorMaterial100">@color/color_verdant_mint_100</item>
         <item name="colorMaterial300">@color/color_verdant_mint_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_verdant_mint</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.Black" parent="Theme.SagerNet.Dialog">
@@ -645,7 +647,7 @@
         <item name="colorAccent">@color/color_ng_black_accent</item>
         <item name="colorMaterial100">@color/color_ng_black_primary</item>
         <item name="colorMaterial300">@color/color_ng_black_primary</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_black</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
 
         <item name="selectedColorPrimary">@color/color_ng_black_accent</item>
         <item name="fabColorBackground">@color/color_ng_black_accent</item>
@@ -663,7 +665,7 @@
         <item name="colorAccent">@color/color_verdant_mint_accent</item>
         <item name="colorMaterial100">@color/color_verdant_mint_100</item>
         <item name="colorMaterial300">@color/color_verdant_mint_300</item>
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_verdant_mint</item>
+        <item name="cardElevatedSurfaceColor">?attr/colorLayerHigh</item>
     </style>
 
     <style name="Theme.Start" parent="Theme.MaterialComponents.DayNight">

@@ -7,6 +7,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.content.res.AppCompatResources
@@ -19,7 +20,7 @@ import java.util.Locale
  * All methods/callbacks are UI-thread APIs; rates are bytes/second (tx = upload, rx = download).
  *
  * The host must cancel/generation-check asynchronous results on disconnect/profile change, and
- * call [reset] for a profile change even when the service remains Connected. After a permission
+ * call [clearMeasurements] for a profile change even when the service remains Connected. After a permission
  * request is cancelled, call [changeState] with the actual state to re-arm the toggle button.
  */
 class ControlBar @JvmOverloads constructor(
@@ -35,13 +36,15 @@ class ControlBar @JvmOverloads constructor(
     private val latencyBox: View
     private val speedDown: TextView
     private val speedUp: TextView
-    private val capsule: TextView
+    private val capsule: FrameLayout
+    private val capsuleIcon: ImageView
+    private val capsuleLabel: TextView
     private val latency: TextView
     private var currentState = BaseService.State.Idle
     private var testing = false
     private var togglePending = false
     private var detached = false
-    private var stackedCapsule = false
+    private var compactCapsule = false
 
     init {
         // This layout has a merge root containing ordinary views, NOT another ControlBar.
@@ -54,6 +57,8 @@ class ControlBar @JvmOverloads constructor(
         speedDown = findViewById(R.id.speed_down)
         speedUp = findViewById(R.id.speed_up)
         capsule = findViewById(R.id.capsule)
+        capsuleIcon = findViewById(R.id.capsule_icon)
+        capsuleLabel = findViewById(R.id.capsule_label)
         latency = findViewById(R.id.latency)
 
         val buttonSemantics = object : AccessibilityDelegate() {
@@ -76,7 +81,6 @@ class ControlBar @JvmOverloads constructor(
         togglePending = false // Includes an authoritative same-state permission-cancel response.
         val connected = state == BaseService.State.Connected
         capsule.isSelected = connected
-        capsule.setText(if (connected) R.string.control_bar_connected else R.string.control_bar_disconnected)
         capsule.contentDescription = context.getString(
             if (connected) R.string.control_bar_disconnect_action else R.string.control_bar_connect_action
         )
@@ -88,29 +92,21 @@ class ControlBar @JvmOverloads constructor(
 
     private fun updateCapsuleIcon() {
         val connected = currentState == BaseService.State.Connected
-        capsule.setText(if (stackedCapsule) {
+        capsuleLabel.setText(if (compactCapsule) {
             if (connected) R.string.control_bar_connected_compact else R.string.control_bar_disconnected_compact
         } else {
             if (connected) R.string.control_bar_connected else R.string.control_bar_disconnected
         })
-        val icon = AppCompatResources.getDrawable(context,
-            if (connected) R.drawable.ic_control_plane
-            else R.drawable.ic_control_power)
-        capsule.compoundDrawablePadding = ((if (stackedCapsule) 2 else 6) *
-            resources.displayMetrics.density).toInt()
-        if (stackedCapsule) {
-            capsule.setCompoundDrawablesRelativeWithIntrinsicBounds(null, icon, null, null)
-        } else {
-            capsule.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, null, null, null)
-        }
+        capsuleIcon.setImageDrawable(AppCompatResources.getDrawable(context,
+            if (connected) R.drawable.ic_control_plane else R.drawable.ic_control_power))
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val widthDp = View.MeasureSpec.getSize(widthMeasureSpec) / resources.displayMetrics.density
         val compact = widthDp < 420f && resources.configuration.fontScale > 1.3f
-        if (compact != stackedCapsule) {
-            stackedCapsule = compact
-            updateCapsuleIcon() // Keep the real icon at 18dp; never shrink it or the touch target.
+        if (compact != compactCapsule) {
+            compactCapsule = compact
+            updateCapsuleIcon() // Always an 18dp icon beside a readable label, never stacked.
             val content = getChildAt(0)
             val density = resources.displayMetrics.density
             content.setPaddingRelative(((if (compact) 6 else 18) * density).toInt(),
@@ -118,7 +114,7 @@ class ControlBar @JvmOverloads constructor(
             val capsulePadding = ((if (compact) 4 else 8) * density).toInt()
             capsule.setPaddingRelative(capsulePadding, capsule.paddingTop, capsulePadding, capsule.paddingBottom)
             (speedBox.layoutParams as LinearLayout.LayoutParams).weight = if (compact) 1.35f else 1f
-            (capsule.layoutParams as LinearLayout.LayoutParams).weight = if (compact) 0.9f else 1.4f
+            (capsule.layoutParams as LinearLayout.LayoutParams).weight = if (compact) 1.05f else 1.4f
             (latencyBox.layoutParams as LinearLayout.LayoutParams).weight = 1f
             // Compact space budget still keeps the right label at exactly 18dp + 4dp from end.
             speedBox.setPaddingRelative(speedBox.paddingStart, speedBox.paddingTop,
@@ -158,11 +154,20 @@ class ControlBar @JvmOverloads constructor(
         updateEnabledState()
     }
 
-    /** Clears measurements and request locks, without inventing a new service state. */
-    fun reset() {
-        togglePending = false
+    /**
+     * Clears rates/latency and the test lock, but preserves the real state and any pending toggle.
+     * Use for profile/background/page invalidation after the host cancels its test generation.
+     * In particular, leaving for the VPN permission activity must not re-arm a pending start.
+     */
+    fun clearMeasurements() {
         resetMeasurements()
         updateEnabledState()
+    }
+
+    /** Clears measurements and all request locks, without inventing a new service state. */
+    fun reset() {
+        togglePending = false
+        clearMeasurements()
     }
 
     private fun requestTest() {
