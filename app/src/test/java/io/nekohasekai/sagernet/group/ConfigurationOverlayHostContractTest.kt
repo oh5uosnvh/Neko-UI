@@ -13,7 +13,10 @@ class ConfigurationOverlayHostContractTest {
     @Test fun coldRestoreCommitAndPagerCreationAllResyncActualPageVisibility() {
         assertTrue(main.contains("controlOverlay = ConfigurationControlOverlay(binding.fragmentHolder, binding.controlBar)"))
         assertTrue(main.contains("registerFragmentLifecycleCallbacks(navInsetCallbacks, true)"))
-        assertTrue(main.contains("transaction.runOnCommit { syncMainControls() }"))
+        // REQ-08：提交回调除主控件同步外还负责新页淡入（只淡入，无淡出）。
+        val commitBlock = section("transaction.runOnCommit {", "transaction.commitAllowingStateLoss()")
+        assertTrue(commitBlock.contains("syncMainControls()"))
+        assertTrue(commitBlock.contains("fadeInDisplayedPage(fragment)"))
         assertTrue(main.contains("onViewAttachedToWindow"))
         assertTrue(main.contains("onFragmentResumed"))
         assertTrue(main.contains("onFragmentViewDestroyed"))

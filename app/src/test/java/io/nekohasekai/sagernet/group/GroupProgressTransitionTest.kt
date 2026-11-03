@@ -85,10 +85,11 @@ class GroupProgressTransitionTest {
         assertEquals(1f,pager.alpha,.01f);assertEquals(2,settled)
         assertEquals(ViewPager2.SCROLL_STATE_IDLE,pager.scrollState);assertFalse(transition.clicking)
         assertEquals(1f,target.selectionProgress,0f);assertEquals(0f,origin.selectionProgress,0f)
-        // reverse distant click: injection direction flips
+        // reverse distant click: injection direction flips —— 反向（目标在左）：
+        // 旧胶囊（右）向左缘收拢 fromRight=false，新胶囊（左）从右缘长出 fromRight=true
         transition.request(11)
         assertEquals(0f,pager.alpha,0f);assertEquals(0,pager.currentItem)
-        assertTrue(target.fillFromRight);assertFalse(origin.fillFromRight)
+        assertFalse(target.fillFromRight);assertTrue(origin.fillFromRight)
         advance(64)
         assertTrue(origin.selectionProgress>0f&&origin.selectionProgress<1f)
         advance(400)
