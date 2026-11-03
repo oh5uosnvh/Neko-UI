@@ -101,7 +101,7 @@ abstract class ThemedActivity : AppCompatActivity {
     }
 
     fun snackbar(@StringRes resId: Int): Snackbar = snackbar("").setText(resId)
-    fun snackbar(text: CharSequence): Snackbar = snackbarInternal(text).apply {
+    fun snackbar(text: CharSequence): Snackbar = io.nekohasekai.sagernet.widget.OutlinedSnackbar.decorate(snackbarInternal(text)).apply {
         view.findViewById<TextView>(com.google.android.material.R.id.snackbar_text).apply {
             maxLines = 10
         }

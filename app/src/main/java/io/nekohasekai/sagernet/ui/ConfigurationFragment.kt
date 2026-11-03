@@ -237,8 +237,15 @@ class ConfigurationFragment @JvmOverloads constructor(
     /** 🔍 那个可折叠菜单项，收起搜索框时要用它 collapseActionView() */
 
     // 030: 实时读取——旧的 by lazy 首访后缓存，设置里开关后必须重启才生效
-    val alwaysShowAddress get() = DataStore.alwaysShowAddress
-    private var lastAppliedAlwaysShowAddress = DataStore.alwaysShowAddress
+    private var addressDisplaySnapshot = DataStore.alwaysShowAddress
+    private var cardStyleSnapshot = DataStore.profileCardStyle
+    val alwaysShowAddress get() = addressDisplaySnapshot
+    private var lastAppliedAlwaysShowAddress = addressDisplaySnapshot
+
+    private fun updateDisplaySnapshots() {
+        addressDisplaySnapshot = DataStore.alwaysShowAddress
+        cardStyleSnapshot = DataStore.profileCardStyle
+    }
 
     @Volatile
     private var selectedProxySnapshot = selectedItem?.id ?: 0L
@@ -349,10 +356,12 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     fun getCurrentGroupFragment(): GroupFragment? {
         return try {
-            val byTag = childFragmentManager.findFragmentByTag("f" + DataStore.selectedGroup) as? GroupFragment
-            if (byTag != null) return byTag
             val currentIdx = if (::groupPager.isInitialized) groupPager.currentItem else -1
-            if (currentIdx >= 0 && ::adapter.isInitialized) adapter.getGroupFragment(currentIdx) else null
+            if (currentIdx < 0 || !::adapter.isInitialized) return null
+            adapter.getGroupFragment(currentIdx)?.takeIf { it.isAdded && it.view != null }
+                ?: adapter.groupList.getOrNull(currentIdx)?.id?.let {
+                    childFragmentManager.findFragmentByTag("f" + it) as? GroupFragment
+                }
         } catch (e: Exception) {
             Logs.e(e)
             null
@@ -376,12 +385,18 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     private val pageRequests = GroupPageRequests()
+    private val groupSelectionWriter = GroupSelectionWriter { id ->
+        if (DataStore.configurationStore.getLong(Key.PROFILE_GROUP, -1L) != id) DataStore.selectedGroup = id
+    }
+    private var selectedGroupUi = 0L
+    private var pageTransition: GroupPageTransition? = null
     private var pageRequestPosted = false
     private var pageTabListener: TabLayout.OnTabSelectedListener? = null
 
     /** Only user clicks animate; restoration/order alignment keeps setCurrentItem(..., false). */
     fun requestGroupPage(position: Int) {
         val groupId = adapter.groupList.getOrNull(position)?.id ?: return
+        pageTransition?.let { it.request(groupId); return }
         pageRequests.request(groupId)
         schedulePageRequest()
     }
@@ -402,11 +417,14 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
 
         override fun onPageSelected(position: Int) {
+            if (pageTransition?.clicking == true) return
             if (!isRestoringGroup) adapter.selectedGroupIndex = position
             if (!select && !isRestoringGroup && position in adapter.groupList.indices) {
                 val newId = adapter.groupList[position].id
-                if (DataStore.selectedGroup != newId) {
-                    DataStore.selectedGroup = newId
+                if (selectedGroupUi != newId) {
+                    selectedGroupUi = newId
+                    DataStore.stageSelectedGroup(newId)
+                    groupSelectionWriter.submit(newId)
                 }
                 if (searchQueryText.isNotBlank() || searchResultsAdapter != null) {
                     onSearchQueryChanged(searchQueryText)
@@ -495,13 +513,8 @@ class ConfigurationFragment @JvmOverloads constructor(
         startProfileStateActor()
         refreshProfileState()
 
-        if (savedInstanceState != null) {
-            parentFragmentManager.beginTransaction()
-                .setReorderingAllowed(false)
-                .detach(this)
-                .attach(this)
-                .commit()
-        }
+        // FragmentManager restores this page and its child pager state itself.
+        // A self detach/attach during onCreate duplicates inflation and listener setup.
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -574,7 +587,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         DataStore.configurationStore.registerChangeListener(displayPrefListener)
 
         groupPager.adapter = adapter
-        groupPager.offscreenPageLimit = 2
+        groupPager.offscreenPageLimit = 1
 
         groupTabsMediator = TabLayoutMediator(tabLayout, groupPager) { tab, position ->
             val groupId = adapter.groupList.getOrNull(position)?.id
@@ -593,6 +606,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                     true
                 } else false
             }
+            tab.view.setOnClickListener {
+                if (!isRestoringGroup && isAdded) requestGroupPage(tab.position)
+            }
             tabLongPressBindings[tab.view] = java.lang.ref.WeakReference(binding)
         }.also { it.attach() }
         // Keep Mediator's page/adapter observers; replace only its immediate click writer.
@@ -606,6 +622,14 @@ class ConfigurationFragment @JvmOverloads constructor(
                 if (!isRestoringGroup && tab.position != groupPager.currentItem) requestGroupPage(tab.position)
             }
         }.also { tabLayout.addOnTabSelectedListener(it) }
+        pageTransition = GroupPageTransition(groupPager, tabLayout,
+            ids = { adapter.groupList.map { group -> group.id } },
+            onSettled = { position -> updateSelectedCallback.onPageSelected(position) },
+            isReady = {
+                val child = getCurrentGroupFragment()
+                child?.view != null && child.adapter?.hasCurrentSearchResult() == true
+            },
+        ).also { groupPager.registerOnPageChangeCallback(it) }
 
         toolbar.setOnClickListener {
             val fragment = getCurrentGroupFragment()
@@ -675,6 +699,8 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     override fun onDestroyView() {
+        pageTransition?.let { groupPager.unregisterOnPageChangeCallback(it); it.close() }
+        pageTransition = null
         pageRequests.clear()
         pageRequestPosted = false
         pageTabListener?.let { tabLayout.removeOnTabSelectedListener(it) }
@@ -715,6 +741,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
         topBar.detach()
         searchScope.detach()
+        groupSelectionWriter.close()
 
         super.onDestroy()
     }
@@ -1820,7 +1847,8 @@ class ConfigurationFragment @JvmOverloads constructor(
     private fun refreshAddressDisplayPreferences() {
         runOnMainDispatcher {
             if (!isAdded) return@runOnMainDispatcher
-            lastAppliedAlwaysShowAddress = DataStore.alwaysShowAddress
+            updateDisplaySnapshots()
+            lastAppliedAlwaysShowAddress = addressDisplaySnapshot
             if (view != null && !select) {
                 toolbar.menu.findItem(R.id.action_always_show_address)?.isChecked = lastAppliedAlwaysShowAddress
             }
@@ -1832,12 +1860,17 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     override fun onResume() {
         super.onResume()
-        if (lastAppliedAlwaysShowAddress != DataStore.alwaysShowAddress) refreshAddressDisplayPreferences()
+        updateDisplaySnapshots()
+        if (lastAppliedAlwaysShowAddress != addressDisplaySnapshot) refreshAddressDisplayPreferences()
     }
 
     private val displayPrefListener = object : OnPreferenceDataStoreChangeListener {
         override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
             if (key == Key.ALWAYS_SHOW_ADDRESS) refreshAddressDisplayPreferences()
+            if (key == Key.PROFILE_CARD_STYLE) runOnMainDispatcher {
+                updateDisplaySnapshots()
+                refreshAllGroupFragmentsCardStyle()
+            }
         }
     }
 
@@ -2424,7 +2457,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             ProfileManager.addListener(adapter!!)
             GroupManager.addListener(adapter!!)
             configurationListView.adapter = adapter
-            configurationListView.setItemViewCacheSize(20)
+            configurationListView.setItemViewCacheSize(6)
             configurationListView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
                 override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
                     if (newState == RecyclerView.SCROLL_STATE_IDLE) {
@@ -2500,12 +2533,12 @@ class ConfigurationFragment @JvmOverloads constructor(
                     manager.getDecoratedTop(it) - configurationListView.paddingTop
                 } ?: 0
                 val previousIds = configurationIdList.toList()
-                val oldNodes = HashMap(configurationList)
+                val oldNodes = if (configurationIdList.size <= 1200) HashMap(configurationList) else emptyMap()
                 val nextIds = ids.distinct().filterNot { PendingProfileDeletes.contains(it) }
                 val nextNodes = nodes.filterKeys { !PendingProfileDeletes.contains(it) }
                 // Large replacement: one stable-ID refresh avoids Myers diff O(N*D)
                 // on 100k -> 20k; small updates retain precise animations.
-                val diff = if (previousIds.size + nextIds.size <= 4000) DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+                val diff = if (previousIds.isNotEmpty() && previousIds.size + nextIds.size <= 1200) DiffUtil.calculateDiff(object : DiffUtil.Callback() {
                     override fun getOldListSize() = previousIds.size
                     override fun getNewListSize() = nextIds.size
                     override fun areItemsTheSame(a: Int, b: Int) = previousIds[a] == nextIds[b]
@@ -3112,7 +3145,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 profileStatus.setOnClickListener {
                     val proxyEntity = entity
                     if (proxyEntity.status == 3) {
-                        alert(proxyEntity.error ?: "<?>").tryToShow()
+                        (activity as? MainActivity)?.snackbar(getString(R.string.connection_test_error, proxyEntity.error ?: "<?>"))?.show()
                     }
                 }
                 profileStatus.isFocusable = false
@@ -3219,7 +3252,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             private fun applySelected(selected: Boolean) {
                 val ctx = card.context
                 val surface = ctx.getColorAttr(R.attr.colorSurface)
-                if (DataStore.profileCardStyle == 1) {
+                if ((parentFragment as? ConfigurationFragment)?.cardStyleSnapshot == 1) {
                     val primary = ctx.getColorAttr(R.attr.colorPrimary)
                     selectedIndicator.isVisible = false
                     card.cardElevation = 0f
@@ -3263,7 +3296,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val bean = proxyEntity.requireBean()
 
                 profileName.text = bean.displayName()
-                profileType.text = proxyEntity.displayType()
+                val twoColumn = layoutManager is FixedGridLayoutManager
+                profileType.text = io.nekohasekai.sagernet.widget.TwoColumnProtocolLabel.display(proxyEntity.displayType(), twoColumn)
                 profileType.setTextColor(requireContext().getProtocolColor(proxyEntity.type))
 
                 val rx = proxyEntity.rx
@@ -3323,6 +3357,16 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val selectOrChain = select || proxyEntity.type == ProxyEntity.TYPE_CHAIN
                 val isDoubleColumn = layoutManager is FixedGridLayoutManager
                 
+                val statusParams = profileStatus.layoutParams as LinearLayout.LayoutParams
+                val targetWeight = if (isDoubleColumn) 1f else 0f
+                val targetWidth = if (isDoubleColumn) 0 else ViewGroup.LayoutParams.WRAP_CONTENT
+                if (statusParams.weight != targetWeight || statusParams.width != targetWidth) {
+                    statusParams.weight = targetWeight; statusParams.width = targetWidth
+                    profileStatus.layoutParams = statusParams
+                    val row = profileStatus.parent as LinearLayout
+                    val spacer = row.getChildAt(1)
+                    (spacer.layoutParams as LinearLayout.LayoutParams).also { it.weight = if (isDoubleColumn) 0f else 1f; spacer.layoutParams = it }
+                }
                 if (isDoubleColumn) {
                     editButton.isGone = true
                     shareLayout.isGone = true
@@ -3343,7 +3387,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                 val selected = pf.isSelectedProfile(proxyEntity.id)
                 val started =
-                    selected && DataStore.serviceState.started && pf.isCurrentProfile(proxyEntity.id)
+                    selected && pf.serviceStartedSnapshot && pf.isCurrentProfile(proxyEntity.id)
                 editButton.isEnabled = !started
                 removeButton.isEnabled = !started
                 applySelected(selected)

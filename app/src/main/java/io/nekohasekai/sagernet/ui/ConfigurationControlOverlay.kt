@@ -48,14 +48,13 @@ internal class ConfigurationControlOverlay(
     }
 
     private fun padNodeLists(view: View) {
+        // RecyclerView descendants contain hundreds of card children; stop at each
+        // registered node viewport rather than walking every card on lifecycle callbacks.
         if (view is RecyclerView && view.id == R.id.configuration_list) {
-            // Extra SCROLL RANGE, not a smaller viewport: cards are still drawn behind the strip.
-            // This lets the last node scroll completely above it, with 14dp breathing room.
             val padding = dp(76 + 14 + 14)
-            if (view.paddingBottom != padding) {
-                view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, padding)
-            }
+            if (view.paddingBottom != padding) view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, padding)
             view.clipToPadding = false
+            return // Stop at actual node lists, not ViewPager2's internal RecyclerView.
         }
         if (view is ViewGroup) {
             for (index in 0 until view.childCount) padNodeLists(view.getChildAt(index))

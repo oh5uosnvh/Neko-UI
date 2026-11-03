@@ -20,7 +20,7 @@ object MessageStore {
         try {
             val rootView = activity.window.decorView.findViewById<View>(android.R.id.content)
             snackbar?.dismiss()
-            snackbar = Snackbar.make(rootView, message, Snackbar.LENGTH_LONG)
+            snackbar = io.nekohasekai.sagernet.widget.OutlinedSnackbar.decorate(Snackbar.make(rootView, message, Snackbar.LENGTH_LONG))
             snackbar?.show()
         } catch (e: Exception) {
             Logs.w("Failed to show snackbar", e)

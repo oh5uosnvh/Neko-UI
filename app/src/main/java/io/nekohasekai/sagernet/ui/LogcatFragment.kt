@@ -10,6 +10,8 @@ import android.text.style.ForegroundColorSpan
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.appcompat.widget.Toolbar
 import androidx.core.view.ViewCompat
 import androidx.core.view.doOnLayout
@@ -34,6 +36,7 @@ class LogcatFragment : ToolbarFragment(R.layout.layout_logcat),
         toolbar.setOnMenuItemClickListener(this)
 
         binding = LayoutLogcatBinding.bind(view)
+        lastLogHash = 0 // A new view must receive the cached text even when the log content is unchanged.
 
         if (Build.VERSION.SDK_INT >= 23) {
             binding.textview.breakStrategy = 0 // simple
@@ -68,7 +71,8 @@ class LogcatFragment : ToolbarFragment(R.layout.layout_logcat),
     private fun reloadSession() {
         // 读日志 + 逐行构建高亮 span 是纯 IO/CPU 工作，放后台线程做，
         // 主线程只贴结果（原先同步占主线程，是切到日志页卡顿的原因之一）。
-        runOnDefaultDispatcher {
+        val owner = viewLifecycleOwnerLiveData.value ?: return
+        owner.lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             val bytes = SendLog.getNekoLog(50 * 1024)
             val hash = bytes.contentHashCode()
             if (hash == lastLogHash) return@runOnDefaultDispatcher
@@ -82,7 +86,7 @@ class LogcatFragment : ToolbarFragment(R.layout.layout_logcat),
                 offset += line.length + 1
             }
             onMainDispatcher {
-                if (!isAdded) return@onMainDispatcher
+                if (!isAdded || viewLifecycleOwnerLiveData.value !== owner) return@onMainDispatcher
                 lastLogHash = hash
                 binding.textview.text = span
                 binding.textview.clearFocus()

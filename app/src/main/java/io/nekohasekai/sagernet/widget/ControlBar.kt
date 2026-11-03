@@ -433,8 +433,8 @@ class ControlBar @JvmOverloads constructor(
 
     private fun requestReadoutAction() {
         if (!canShowReadouts() || testing) return
-        if (failed) {
-            onError?.invoke() // Both failed readouts show details; never implicitly launch another test.
+        if (failed && currentState != BaseService.State.Connected) {
+            onError?.invoke()
             return
         }
         requestTest()
@@ -489,7 +489,7 @@ class ControlBar @JvmOverloads constructor(
     private fun updateEnabledState() {
         capsule.isEnabled = canShowReadouts() && !togglePending && !isTransitioning()
         val canTest = canShowReadouts() && !testing &&
-            (if (failed) onError != null else currentState == BaseService.State.Connected)
+            (currentState == BaseService.State.Connected || (failed && onError != null))
         speedBox.isEnabled = canTest
         latencyBox.isEnabled = canTest
     }

@@ -1,5 +1,10 @@
 package io.nekohasekai.sagernet.widget
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
+import androidx.interpolator.view.animation.LinearOutSlowInInterpolator
+import androidx.interpolator.view.animation.FastOutLinearInInterpolator
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -19,6 +24,45 @@ import kotlin.math.roundToInt
 /** One scrollbar in the viewport, never in a translated pager page or its blur recording. */
 internal class FixedGroupScrollbar(host: GroupListEdgeLayout) {
     private val host = WeakReference(host)
+    companion object {
+        const val AUTO_HIDE_DELAY = 1500L // FastScroller 2.0.1 DEFAULT_AUTO_HIDE_DELAY
+        const val SHOW_DURATION = 150L
+        const val HIDE_DURATION = 200L
+    }
+    private var reveal = 0f
+    private var revealAnimator: ValueAnimator? = null
+    private var revealTarget = 0f
+    internal val isVisible: Boolean get() = reveal > 0f
+    internal val revealProgress: Float get() = reveal
+    private val hide = Runnable { if (!isDragging) animateReveal(0f) }
+    private fun animateReveal(value: Float) {
+        if (revealTarget == value && revealAnimator?.isRunning == true) return
+        revealTarget = value
+        revealAnimator?.removeAllListeners()
+        revealAnimator?.removeAllUpdateListeners()
+        revealAnimator?.cancel()
+        revealAnimator = null
+        if (reveal == value) return
+        revealAnimator = ValueAnimator.ofFloat(reveal, value).apply {
+            duration = if (value > reveal) SHOW_DURATION else HIDE_DURATION
+            interpolator = if (value > reveal) LinearOutSlowInInterpolator() else FastOutLinearInInterpolator()
+            addUpdateListener {
+                reveal = it.animatedValue as Float
+                this@FixedGroupScrollbar.host.get()?.postInvalidateOnAnimation()
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) { revealAnimator = null }
+            })
+            start()
+        }
+    }
+    internal fun onScrollActivity() {
+        host.get()?.let { root ->
+            root.removeCallbacks(hide)
+            if (reveal < 1f) animateReveal(1f)
+            if (!isDragging) root.postDelayed(hide, AUTO_HIDE_DELAY)
+        }
+    }
     private val density = host.resources.displayMetrics.density
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val color = host.context.obtainStyledAttributes(intArrayOf(R.attr.colorPrimary)).let {
@@ -59,7 +103,10 @@ internal class FixedGroupScrollbar(host: GroupListEdgeLayout) {
         val owner = WeakReference(this)
         val listener = object : RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
-                owner.get()?.host?.get()?.postInvalidateOnAnimation()
+                if (dy != 0) owner.get()?.onScrollActivity()
+            }
+            override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                if (newState != RecyclerView.SCROLL_STATE_IDLE) owner.get()?.onScrollActivity()
             }
         }
         lists[list] = listener
@@ -137,9 +184,12 @@ internal class FixedGroupScrollbar(host: GroupListEdgeLayout) {
     }
 
     fun draw(canvas: Canvas) {
+        if (!isVisible) return
         val geometry = geometry() ?: return
         val save = canvas.save()
         canvas.clipRect(geometry.track)
+        // Slide only out of the FIXED physical edge, never with horizontal page translation.
+        canvas.translate(geometry.track.width() * (1f - reveal), 0f)
         paint.color = color
         paint.alpha = 48
         canvas.drawRoundRect(geometry.track, 2f * density, 2f * density, paint)
@@ -152,6 +202,7 @@ internal class FixedGroupScrollbar(host: GroupListEdgeLayout) {
         val root = host.get() ?: return false
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             cancel()
+            if (!isVisible) return false
             val geometry = geometry() ?: return false
             val thumb = geometry.thumb
             val inset = 24f * density
@@ -162,6 +213,7 @@ internal class FixedGroupScrollbar(host: GroupListEdgeLayout) {
             list.stopScroll()
             target = WeakReference(list)
             pointer = event.getPointerId(0)
+            onScrollActivity()
             grab = (event.y - thumb.top).coerceIn(0f, thumb.height())
             fingerTop = thumb.top
             pixelsPerThumbPixel = geometry.scrollable.toDouble() /
@@ -205,6 +257,7 @@ internal class FixedGroupScrollbar(host: GroupListEdgeLayout) {
     }
 
     fun cancel() {
+        val wasDragging = isDragging
         pointer = -1
         target.clear()
         draggingThumb = null
@@ -212,11 +265,21 @@ internal class FixedGroupScrollbar(host: GroupListEdgeLayout) {
         host.get()?.let {
             it.parent?.requestDisallowInterceptTouchEvent(false)
             it.postInvalidateOnAnimation()
+            if (wasDragging) {
+                it.removeCallbacks(hide)
+                it.postDelayed(hide, AUTO_HIDE_DELAY)
+            }
         }
     }
 
     fun detach() {
         cancel()
+        host.get()?.removeCallbacks(hide)
+        revealAnimator?.removeAllListeners()
+        revealAnimator?.removeAllUpdateListeners()
+        revealAnimator?.cancel()
+        revealAnimator = null
+        reveal = 0f
         selected.clear()
         for ((list, listener) in lists.entries.toList()) {
             list.removeOnScrollListener(listener)

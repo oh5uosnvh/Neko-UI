@@ -82,6 +82,7 @@ class BaseService {
 
         val binder = Binder(this)
         var connectingJob: Job? = null
+        var probeJob: Job? = null
         var probeGeneration = 0L
         var probeProfileId = 0L
         @Volatile var connectionProbe = ""
@@ -261,6 +262,8 @@ class BaseService {
             DataStore.mixedInboundAuthed = false
 
             if (data.state == State.Stopping) return
+            data.probeJob?.cancel()
+            data.probeJob = null
             if (!msg.isNullOrBlank()) data.publishProbe("failed", error = msg)
             else data.publishProbe("idle")
             data.notification?.destroy()
@@ -400,21 +403,28 @@ class BaseService {
                     }
 
                     startProcesses()
-                    // Core startup is lazy: it does not prove that the selected node is reachable.
-                    // Probe the real URL while still Connecting, and publish its round trip with
-                    // Connected. This is not a post-connect automatic test or synthetic startup ping.
-                    val result = StartupConnectionProbe.measure(DataStore.connectionTestTimeout) {
-                        Libcore.urlTest(proxy.box, DataStore.connectionTestURL, DataStore.connectionTestTimeout)
-                    }
-                    if (data.proxy !== proxy || data.state != State.Connecting) return@runOnMainDispatcher
-                    if (result.error != null) {
-                        val failure = Protocols.genFriendlyMsg(result.error)
-                        stopRunner(false, failure)
-                        return@runOnMainDispatcher
-                    }
+                    // Connected means the real core/VPN tunnel was established. A temporary
+                    // URL failure is a measurement failure, never an instruction to stop VPN.
                     data.changeState(State.Connected)
-                    data.publishProbe("connected", elapsed = result.elapsed)
-
+                    val probeGeneration = data.probeGeneration
+                    data.probeJob?.cancel()
+                    data.probeJob = runOnMainDispatcher {
+                        try {
+                            val result = StartupConnectionProbe.measure(DataStore.connectionTestTimeout) {
+                                Libcore.urlTest(proxy.box, DataStore.connectionTestURL, DataStore.connectionTestTimeout)
+                            }
+                            if (data.proxy !== proxy || data.state != State.Connected ||
+                                data.probeGeneration != probeGeneration || DataStore.selectedProxy != profile.id) return@runOnMainDispatcher
+                            if (result.error != null) {
+                                data.publishProbe("failed", error = Protocols.genFriendlyMsg(result.error))
+                            } else data.publishProbe("connected", elapsed = result.elapsed)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            if (data.proxy === proxy && data.state == State.Connected && data.probeGeneration == probeGeneration)
+                                data.publishProbe("failed", error = Protocols.genFriendlyMsg(error.readableMessage))
+                        }
+                    }
                     lateInit()
                 } catch (_: CancellationException) { // if the job was cancelled, it is canceller's responsibility to call stopRunner
                 } catch (_: UnknownHostException) {

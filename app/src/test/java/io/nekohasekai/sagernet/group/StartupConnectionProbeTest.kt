@@ -22,11 +22,14 @@ class StartupConnectionProbeTest {
         catch(_:CancellationException){}
         assertEquals(1,calls)
     }
-    @Test fun serviceStartupMeasuresBeforePublishingConnectedAndUiOnlyReceivesSnapshot() {
+    @Test fun serviceStartupPublishesConnectedBeforeNonFatalProbeAndUiOnlyReceivesSnapshot() {
         val app=sequenceOf(File("."),File("app")).first{File(it,"src/main/java").isDirectory}
         val service=File(app,"src/main/java/io/nekohasekai/sagernet/bg/BaseService.kt").readText()
         val startup=service.substringAfter("                    startProcesses()")
-        assertTrue(startup.indexOf("StartupConnectionProbe.measure")<startup.indexOf("data.changeState(State.Connected)"))
+        assertTrue(startup.indexOf("data.changeState(State.Connected)") < startup.indexOf("StartupConnectionProbe.measure"))
+        val probe= startup.substringAfter("data.probeJob = runOnMainDispatcher").substringBefore("                    lateInit()")
+        assertFalse(probe.contains("stopRunner("))
+        assertTrue(probe.contains("data.publishProbe(\"failed\""))
         assertTrue(startup.contains("data.publishProbe(\"connected\", elapsed = result.elapsed)"))
         assertTrue(service.contains("data.connectingJob = runOnMainDispatcher"))
         val host=File(app,"src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt").readText()

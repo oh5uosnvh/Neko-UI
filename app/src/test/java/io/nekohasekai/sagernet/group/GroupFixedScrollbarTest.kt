@@ -15,7 +15,13 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.widget.ExactScrollRecyclerView
 import io.nekohasekai.sagernet.widget.GroupListEdgeLayout
 import org.junit.Assert.*
+import org.junit.Before
+import org.junit.After
 import org.junit.Test
+import org.robolectric.shadows.ShadowChoreographer
+import org.robolectric.Shadows.shadowOf
+import android.os.Looper
+import java.time.Duration
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
@@ -28,6 +34,12 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class, qualifiers = "w360dp-h640dp-mdpi")
 class GroupFixedScrollbarTest {
+    @Before fun frames(){ShadowChoreographer.setPaused(true);ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))}
+    @After fun restoreFrames(){ShadowChoreographer.setPaused(false);ShadowChoreographer.setFrameDelay(Duration.ofMillis(1))}
+    private fun reveal(host: GroupListEdgeLayout) {
+        host.fixedScrollbar.onScrollActivity()
+        repeat(11){shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))}
+    }
     private val context: Context get() = RuntimeEnvironment.getApplication()
     private fun measure(view: View, w: Int = 360, h: Int = 640) {
         view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
@@ -49,6 +61,7 @@ class GroupFixedScrollbarTest {
     private fun host(vararg lists: ExactScrollRecyclerView) = GroupListEdgeLayout(context).apply {
         lists.forEach { addView(it, FrameLayout.LayoutParams(-1, -1)); bindList(it) }
         measure(this)
+        reveal(this)
     }
     private fun event(action: Int, x: Float, y: Float) = MotionEvent.obtain(0, 10, action, x, y, 0)
     private fun send(host: GroupListEdgeLayout, action: Int, x: Float, y: Float): Boolean {

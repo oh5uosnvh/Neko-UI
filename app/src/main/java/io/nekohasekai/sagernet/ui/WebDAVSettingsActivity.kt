@@ -113,7 +113,7 @@ class WebDAVSettingsActivity : ThemedActivity() {
                 if (isClickAllowed()) {
                     testWebDAV()
                 } else {
-                    Snackbar.make(requireView(), "请稍后再试", Snackbar.LENGTH_SHORT).show()
+                    io.nekohasekai.sagernet.widget.OutlinedSnackbar.decorate(Snackbar.make(requireView(), "请稍后再试", Snackbar.LENGTH_SHORT)).show()
                 }
                 true
             }
@@ -193,20 +193,20 @@ class WebDAVSettingsActivity : ThemedActivity() {
 
                     onMainDispatcher {
                         if (!isFragmentAlive) return@onMainDispatcher
-                        Snackbar.make(
+                        io.nekohasekai.sagernet.widget.OutlinedSnackbar.decorate(Snackbar.make(
                             requireView(),
                             getString(R.string.webdav_test_success),
                             Snackbar.LENGTH_SHORT
-                        ).show()
+                        )).show()
                     }
                 } catch (e: Exception) {
                     onMainDispatcher {
                         if (!isFragmentAlive) return@onMainDispatcher
-                        Snackbar.make(
+                        io.nekohasekai.sagernet.widget.OutlinedSnackbar.decorate(Snackbar.make(
                             requireView(),
                             getString(R.string.webdav_test_failed, e.message),
                             Snackbar.LENGTH_SHORT
-                        ).show()
+                        )).show()
                     }
                 }
             }

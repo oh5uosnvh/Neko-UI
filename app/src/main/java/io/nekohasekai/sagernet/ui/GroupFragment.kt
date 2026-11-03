@@ -647,6 +647,10 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
     override fun onDestroyView() {
         dismissFilterPicker()
+        if (::groupAdapter.isInitialized) GroupManager.removeListener(groupAdapter)
+        if (::undoManager.isInitialized) undoManager.flush()
+        if (::itemTouchHelper.isInitialized) itemTouchHelper.attachToRecyclerView(null)
+        if (::groupListView.isInitialized) groupListView.adapter = null
         super.onDestroyView()
     }
 

@@ -84,7 +84,7 @@ internal class GroupProfileExport(private val fragment: Fragment) {
         if (fragment is ConfigurationFragment && activity != null) {
             activity.snackbar(message).setDuration(Snackbar.LENGTH_SHORT).show()
         } else {
-            Snackbar.make(view, message, Snackbar.LENGTH_SHORT).show()
+            io.nekohasekai.sagernet.widget.OutlinedSnackbar.decorate(Snackbar.make(view, message, Snackbar.LENGTH_SHORT)).show()
         }
     }
 

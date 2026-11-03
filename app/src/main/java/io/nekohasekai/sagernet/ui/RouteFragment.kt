@@ -104,6 +104,8 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
         outboundPopup?.dismiss()
         outboundPopup = null
         if (::ruleAdapter.isInitialized) ProfileManager.removeListener(ruleAdapter)
+        if (::undoManager.isInitialized) undoManager.flush()
+        if (::ruleListView.isInitialized) ruleListView.adapter = null
         super.onDestroyView()
     }
 

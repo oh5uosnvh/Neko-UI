@@ -38,7 +38,21 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var currentProfile by configurationStore.long(Key.PROFILE_CURRENT)
 
     var selectedProxy by configurationStore.long(Key.PROFILE_ID)
-    var selectedGroup by configurationStore.long(Key.PROFILE_GROUP) { currentGroupId() } // "ungrouped" group id = 1
+    @Volatile private var pendingSelectedGroup = 0L
+    var selectedGroup: Long
+        get() {
+            val staged = pendingSelectedGroup
+            if (staged > 0L) return staged
+            // PreferenceProxy evaluated currentGroupId() eagerly even when a stored ID
+            // existed, adding a group-table query to every UI read.
+            val stored = configurationStore.getLong(Key.PROFILE_GROUP, -1L)
+            return if (stored > 0L) stored else currentGroupId()
+        }
+        set(value) {
+            configurationStore.putLong(Key.PROFILE_GROUP, value)
+            if (pendingSelectedGroup == value) pendingSelectedGroup = 0L
+        }
+    fun stageSelectedGroup(groupId: Long) { if (groupId > 0L) pendingSelectedGroup = groupId }
 
     // only in bg process
     var vpnService: VpnService? = null
@@ -49,7 +63,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var runningTest = false
 
     fun currentGroupId(): Long {
-        val currentSelected = configurationStore.getLong(Key.PROFILE_GROUP, -1)
+        val currentSelected = pendingSelectedGroup.takeIf { it > 0L } ?: configurationStore.getLong(Key.PROFILE_GROUP, -1L)
         if (currentSelected > 0L && SagerDatabase.groupDao.getById(currentSelected) != null) return currentSelected
         val groups = SagerDatabase.groupDao.allGroups()
         if (groups.isNotEmpty()) {
@@ -64,7 +78,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
 
     fun currentGroup(): ProxyGroup {
         var group: ProxyGroup? = null
-        val currentSelected = configurationStore.getLong(Key.PROFILE_GROUP, -1)
+        val currentSelected = selectedGroup
         if (currentSelected > 0L) {
             group = SagerDatabase.groupDao.getById(currentSelected)
         }

@@ -34,11 +34,23 @@ class ProfileNameTextView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null,
     defStyleAttr: Int = android.R.attr.textViewStyle,
 ) : AppCompatTextView(context, attrs, defStyleAttr) {
+    private var transformedSource: String? = null
+    private var transformedValue: CharSequence? = null
+    private fun displayName(source: CharSequence): CharSequence {
+        val key = source.toString()
+        if (key == transformedSource) return transformedValue ?: source
+        return TwoColumnNameWrap.display(source).also { transformedSource = key; transformedValue = it }
+    }
+    private val nameTransformation = object : TransformationMethod {
+        override fun getTransformation(source: CharSequence?, view: View?): CharSequence? = source?.let(::displayName)
+        override fun onFocusChanged(view: View?, sourceText: CharSequence?, focused: Boolean,
+            direction: Int, previouslyFocusedRect: Rect?) = Unit
+    }
     var twoColumnDisplay: Boolean = false
         set(value) {
             if (field == value) return
             field = value
-            transformationMethod = if (value) NAME_TRANSFORMATION else null
+            transformationMethod = if (value) nameTransformation else null
         }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -53,12 +65,4 @@ class ProfileNameTextView @JvmOverloads constructor(
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
     }
 
-    companion object {
-        private val NAME_TRANSFORMATION = object : TransformationMethod {
-            override fun getTransformation(source: CharSequence?, view: View?): CharSequence? =
-                source?.let(TwoColumnNameWrap::display)
-            override fun onFocusChanged(view: View?, sourceText: CharSequence?, focused: Boolean,
-                direction: Int, previouslyFocusedRect: Rect?) = Unit
-        }
-    }
 }

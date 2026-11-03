@@ -93,8 +93,6 @@ class MainActivity : ThemedActivity(),
     /** 尚未创建过的页面：延迟到抽屉关闭动画结束后再执行的切换 */
     private var pendingCommit: (() -> Unit)? = null
 
-    /** 启动预热下标 */
-    private var prewarmIndex = 0
 
     companion object {
         /** 参与实例缓存（重建时按 tag 找回）的页面 */
@@ -104,11 +102,7 @@ class MainActivity : ThemedActivity(),
         )
         private const val NAV_TAG_PREFIX = "main_nav:"
         private const val STATE_NAV_ID = "main_nav_id"
-        private const val PREWARM_DELAY_MS = 300L
-        private const val PREWARM_INTERVAL_MS = 250L
 
-        /** 预热时让页面在屏幕外“可见”若干毫秒，用于生成整页渲染列表 */
-        private const val WARM_FRAME_MS = 80L
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -175,12 +169,8 @@ class MainActivity : ThemedActivity(),
 
         refreshNavMenu(DataStore.enableClashAPI)
 
-        if (savedInstanceState == null) {
-            // 启动后错峰预热其它侧边栏页面，让第一次点击也是热切换
-            binding.root.postDelayed(prewarmRunnable, PREWARM_DELAY_MS)
-            // ☰ 首开预热：240ms 后离屏构建抽屉菜单的绘制列表
-            binding.root.postDelayed(drawerWarmRunnable, 240L)
-        }
+        // Navigation pages are created on demand, never all mounted behind the active page.
+        // Eager hidden prewarm retained >2500 Views and triggered background page work on every gesture.
 
         // sdk 33 notification
         if (Build.VERSION.SDK_INT >= 33) {
@@ -479,12 +469,17 @@ class MainActivity : ThemedActivity(),
                 }
             }
             for (cached in fragmentCache.values) {
-                if (cached !== fragment && cached.isAdded && !cached.isHidden) {
-                    transaction.setMaxLifecycle(cached, Lifecycle.State.STARTED)
-                    transaction.hide(cached)
+                if (cached !== fragment && cached !== old && cached !is ConfigurationFragment && cached.isAdded && !cached.isDetached) {
+                    // Keep the configuration hot, plus the active/recent side page. Others retain
+                    // Fragment state but release their View trees and background listeners.
+                    transaction.setMaxLifecycle(cached, Lifecycle.State.CREATED)
+                    transaction.detach(cached)
                 }
             }
-            if (fragment.isAdded) {
+            if (fragment.isDetached) {
+                transaction.attach(fragment)
+                transaction.show(fragment)
+            } else if (fragment.isAdded) {
                 transaction.show(fragment)
             } else {
                 transaction.add(R.id.fragment_holder, fragment, tagOf(fragment))
@@ -606,117 +601,6 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    /**
-     * 启动后错峰预热其余侧边栏页面（逐个隐藏挂载），让「第一次点击」
-     * 也是热切换。不需要这部分启动开销时，清空 prewarmIds 即可。
-     */
-    private val prewarmIds = intArrayOf(
-        R.id.nav_group,
-        R.id.nav_settings,
-        R.id.nav_route,
-        R.id.nav_tools,
-        R.id.nav_logcat,
-        R.id.nav_about,
-    )
-
-    /**
-     * ☰ 侧边栏首开预热：抽屉关闭时内容在屏外、从未绘制，第一次打开要现画
-     * 整棵菜单树（文本排版 + 显示列表构建），这正是「打开 App 立刻点 ☰ 必卡」
-     * 的主因。这里离屏强制构建一次绘制列表（buildLayer），首开直接复用，
-     * 跑完即还原图层类型。
-     */
-    private val drawerWarmRunnable = object : Runnable {
-        override fun run() {
-            if (isFinishing || isDestroyed) return
-            try {
-                navigation.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                navigation.buildLayer()
-            } catch (_: Throwable) {
-            }
-            navigation.post {
-                try {
-                    navigation.setLayerType(View.LAYER_TYPE_NONE, null)
-                } catch (_: Throwable) {
-                }
-            }
-        }
-    }
-
-    private val prewarmRunnable = object : Runnable {
-        override fun run() {
-            if (isFinishing || isDestroyed) return
-            if (binding.drawerLayout.isOpen) {
-                binding.root.postDelayed(this, PREWARM_INTERVAL_MS)
-                return
-            }
-            // 弹窗/菜单/对话框持有窗口焦点时完全让路，绝不和用户正盯着的东西抢帧
-            if (!binding.root.hasWindowFocus()) {
-                binding.root.postDelayed(this, PREWARM_INTERVAL_MS)
-                return
-            }
-            while (prewarmIndex < prewarmIds.size) {
-                val id = prewarmIds[prewarmIndex++]
-                val fragment = fragmentCache.getOrPut(id) { createFragment(id)!! }
-                if (fragment.isAdded || fragment === currentMainFragment) continue
-                supportFragmentManager.beginTransaction()
-                    .setReorderingAllowed(true)
-                    .add(R.id.fragment_holder, fragment, tagOf(fragment))
-                    .hide(fragment)
-                    .setMaxLifecycle(fragment, Lifecycle.State.STARTED)
-                    .commitAllowingStateLoss()
-                // Keep the fragment instance warm, but never execute all pending transactions
-                // and draw whole hidden pages synchronously in the user's gesture frame.
-                break
-            }
-            if (prewarmIndex < prewarmIds.size) {
-                binding.root.postDelayed(this, PREWARM_INTERVAL_MS)
-            }
-        }
-    }
-
-    /**
-     * 把隐藏页面「首次显示」的开销提前付掉：
-     *
-     * 隐藏（GONE）的视图不会参与 measure/layout/draw，所以第一次显示时仍要
-     * 现做一堆一次性工作——RecyclerView 首建列表项、设置页首次摆出偏好行、
-     * 日志页 50KB 长文首次排版、整页首次生成渲染显示列表……这正是「每页第
-     * 一次点开卡、之后都流畅」的根因。
-     *
-     * 这里：
-     *  1) 手动 measure + layout 整棵树（把建项/排版等一次性成本做掉）；
-     *  2) 让它在屏幕外“可见”过几帧（translationY 移出屏幕，用户看不到、
-     *     也点不到），从而生成整页的渲染显示列表（首次绘制成本）。
-     * 之后用户点开该页，就只剩一次轻量的可见性切换。
-     */
-    private fun warmUpHiddenFragment(fragment: ToolbarFragment) {
-        if (isFinishing || isDestroyed) return
-        val view = fragment.view ?: return
-        if (!fragment.isHidden) return // 用户已打开该页，交给正常流程
-        val holder = binding.fragmentHolder
-        var width = holder.width
-        var height = holder.height
-        if (width <= 0 || height <= 0) {
-            width = binding.root.width
-            height = binding.root.height
-        }
-        if (width <= 0 || height <= 0) return
-
-        view.measure(
-            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
-        )
-        view.layout(0, 0, width, height)
-
-        view.translationY = (height + 64).toFloat()
-        view.visibility = View.VISIBLE
-        view.postDelayed({
-            view.translationY = 0f
-            if (fragment.isHidden && view.isAttachedToWindow) {
-                view.visibility = View.GONE
-            }
-        }, WARM_FRAME_MS)
-    }
-
     private fun syncMainControls() {
         if (!::binding.isInitialized || !::controlOverlay.isInitialized) return
         val configuration = currentMainFragment as? ConfigurationFragment
@@ -793,18 +677,24 @@ class MainActivity : ThemedActivity(),
         if (probe.profileId != DataStore.selectedProxy || controlLatencyGate.isRunning) return
         when (probe.phase) {
             "connecting" -> if (DataStore.serviceState == BaseService.State.Connecting) binding.controlBar.showConnectionTesting()
+                else if (DataStore.serviceState.connected) binding.controlBar.showTesting()
             "connected" -> if (DataStore.serviceState.connected && probe.elapsed >= 0) {
                 controlErrorDetail = null
                 binding.controlBar.showLatency(probe.elapsed)
             }
-            "failed" -> if (!DataStore.serviceState.connected) showControlFailure(probe.error, true)
+            "failed" -> showControlFailure(probe.error, true)
         }
     }
 
     private fun showControlFailure(detail: String, automaticSnackbar: Boolean) {
         val error = detail.ifBlank { getString(R.string.control_bar_unavailable) }
         controlErrorDetail = error
-        binding.controlBar.showFailure(error)
+        val summary = getString(when (LatencyFailureLabel.kind(error)) {
+            LatencyFailureLabel.Kind.TIMEOUT -> R.string.connection_test_timeout_error
+            LatencyFailureLabel.Kind.RESET -> R.string.control_bar_connection_reset
+            LatencyFailureLabel.Kind.UNAVAILABLE -> R.string.control_bar_unavailable
+        })
+        binding.controlBar.showFailure(summary)
         if (automaticSnackbar && error != lastErrorDialog && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
             lastErrorDialog = error
             showControlErrorSnackbar()
@@ -961,7 +851,6 @@ class MainActivity : ThemedActivity(),
             binding.controlBar.onError = null
         }
         super.onDestroy()
-        binding.root.removeCallbacks(prewarmRunnable)
         binding.drawerLayout.removeDrawerListener(drawerListener)
         supportFragmentManager.unregisterFragmentLifecycleCallbacks(navInsetCallbacks)
         pendingCommit = null

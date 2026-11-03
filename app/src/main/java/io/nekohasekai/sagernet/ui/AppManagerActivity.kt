@@ -298,11 +298,11 @@ class AppManagerActivity : ThemedActivity() {
             R.id.action_export_clipboard -> {
                 val success =
                     SagerNet.trySetPrimaryClip("${DataStore.bypass}\n${DataStore.individual}")
-                Snackbar.make(
+                io.nekohasekai.sagernet.widget.OutlinedSnackbar.decorate(Snackbar.make(
                     binding.list,
                     if (success) R.string.action_export_msg else R.string.action_export_err,
                     Snackbar.LENGTH_LONG
-                ).show()
+                )).show()
                 return true
             }
 
@@ -319,16 +319,16 @@ class AppManagerActivity : ThemedActivity() {
                         ) to proxiedAppString.substring(i + 1)
                         binding.bypassGroup.check(if (enabled.toBoolean()) R.id.appProxyModeBypass else R.id.appProxyModeOn)
                         DataStore.individual = apps
-                        Snackbar.make(
+                        io.nekohasekai.sagernet.widget.OutlinedSnackbar.decorate(Snackbar.make(
                             binding.list, R.string.action_import_msg, Snackbar.LENGTH_LONG
-                        ).show()
+                        )).show()
                         initProxiedUids(apps)
                         appsAdapter.notifyItemRangeChanged(0, appsAdapter.itemCount, SWITCH)
                         return true
                     } catch (_: IllegalArgumentException) {
                     }
                 }
-                Snackbar.make(binding.list, R.string.action_import_err, Snackbar.LENGTH_LONG).show()
+                io.nekohasekai.sagernet.widget.OutlinedSnackbar.decorate(Snackbar.make(binding.list, R.string.action_import_err, Snackbar.LENGTH_LONG)).show()
             }
         }
         return super.onOptionsItemSelected(item)

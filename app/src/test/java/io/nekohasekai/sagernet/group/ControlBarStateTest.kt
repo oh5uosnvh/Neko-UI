@@ -169,7 +169,7 @@ class ControlBarStateTest {
         assertEquals(3, seenLight.size)
     }
 
-    @Test fun failuresAreRedInEveryServiceStateAndBothReadoutsOnlyShowErrorDetails() {
+    @Test fun failuresAreRedButConnectedReadoutsCanRetryWithoutDroppingVpn() {
         for (night in listOf(false, true)) withBar(night = night) { bar, _, _ ->
             bar.changeState(BaseService.State.Connected)
             var tests = 0; var errors = 0
@@ -180,11 +180,12 @@ class ControlBarStateTest {
             assertTrue(bar.box(R.id.speed_box).isEnabled)
             assertTrue(bar.box(R.id.latency_box).isEnabled)
             bar.box(R.id.latency_box).performClick()
-            assertEquals(1, errors); assertEquals(1, tests)
+            assertEquals(0, errors); assertEquals(2, tests)
+            bar.showFailure("retry failed"); advance(250)
             bar.changeState(BaseService.State.Connected)
             assertEquals(Color.rgb(244, 67, 54), bar.text(R.id.latency).currentTextColor)
             bar.box(R.id.speed_box).performClick()
-            assertEquals(2, errors); assertEquals(1, tests)
+            assertEquals(0, errors); assertEquals(3, tests)
             bar.showTesting() // Only an explicit host action/clear starts a fresh test after failure.
             assertEquals(bar.resources.getColor(R.color.latency_green,bar.context.theme),bar.text(R.id.latency).currentTextColor)
             bar.showFailure(""); advance(250)
@@ -201,7 +202,7 @@ class ControlBarStateTest {
             assertEquals("startup failed", bar.text(R.id.latency).text.toString())
             assertEquals(Color.rgb(244, 67, 54), bar.text(R.id.latency).currentTextColor)
             bar.box(R.id.latency_box).performClick(); bar.box(R.id.speed_box).performClick()
-            assertEquals(4, errors); assertEquals(1, tests)
+            assertEquals(2, errors); assertEquals(3, tests)
             bar.showLatency(-1); advance(250)
             assertEquals("-- ms", bar.text(R.id.latency).text.toString())
             assertEquals(bar.resources.getColor(R.color.latency_green,bar.context.theme),bar.text(R.id.latency).currentTextColor)

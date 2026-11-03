@@ -106,7 +106,7 @@ class GroupListEdgeLayout @JvmOverloads constructor(
         val edgeLayer = canvas.saveLayer(0f, 0f, width.toFloat(), band, null)
         val pagerState = (child as? androidx.viewpager2.widget.ViewPager2)?.scrollState
             ?: androidx.viewpager2.widget.ViewPager2.SCROLL_STATE_IDLE
-        if (useTopBlur(canvas.isHardwareAccelerated, pagerState)) {
+        if (child.alpha >= .999f && useTopBlur(canvas.isHardwareAccelerated, pagerState)) {
             val blur = renderer ?: LocalBlur(6f * resources.displayMetrics.density)
                 .also { renderer = it }
             // Record ONE sharp sample; reuse it for both sharp and blurred top layers.
