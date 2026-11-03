@@ -222,6 +222,7 @@ class QuickPopupFirstFrameTest {
             // No idle/post/animation advance is allowed between show and this first draw.
             assertEquals(f.groups[19].id, f.frame())
             assertEquals(19, f.layout.findFirstVisibleItemPosition())
+            assertSame("Popup initialization must not focus a recycled row and scroll it into view", f.list, f.list.findFocus())
             assertNotNull(f.list.findViewHolderForItemId(f.groups[19].id))
             assertNull(f.list.findViewHolderForItemId(f.groups[0].id))
             assertEquals(View.VISIBLE, f.list.visibility)

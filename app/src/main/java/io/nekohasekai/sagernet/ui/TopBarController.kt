@@ -647,6 +647,12 @@ internal class TopBarController(
             list.isVerticalScrollBarEnabled = false
             list.setPadding(0, dp(6), 0, dp(6))
             list.clipToPadding = true
+            // Give initial popup focus to the viewport, not an arbitrary recycled row.
+            // Keyboard users can still navigate into descendants; focus must not scroll the first
+            // visible partly-clipped item to its padding edge after an asynchronous row update.
+            list.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
+            list.isFocusableInTouchMode = true
+            list.requestFocus()
             touch.attachToRecyclerView(list)
             adapter.startDrag = { holder ->
                 if (!closed && !drag.isSelected) touch.startDrag(holder)
