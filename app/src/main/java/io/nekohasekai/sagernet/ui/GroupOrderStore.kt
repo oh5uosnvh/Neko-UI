@@ -40,7 +40,7 @@ internal object GroupOrderStore {
                 if (group.userOrder != order) {
                     // This is a fresh row read under the transaction's write lock, NOT a UI copy.
                     group.userOrder = order
-                    dao.updateGroup(group)
+                    dao.updateOrder(group.id, order)
                     changed.add(group)
                 }
             }
@@ -54,17 +54,16 @@ internal object GroupOrderStore {
         GroupOrderWriter(
             write = { save(SagerDatabase.instance, it) },
             read = { SagerDatabase.groupDao.allGroups() },
-            publish = { changed ->
+            publish = {},
+            publishSnapshot = { groups, changed ->
                 var failure: Exception? = null
                 GroupManager.iterator {
-                    for (group in changed) {
-                        try {
-                            groupUpdated(group)
-                        } catch (e: Exception) {
-                            // One stale/destroyed listener must not prevent the others refreshing.
-                            failure = e
-                            Logs.w(e)
-                        }
+                    try {
+                        groupsReordered(groups, changed)
+                    } catch (e: Exception) {
+                        // A detached listener must not stop delivery to the others.
+                        failure = e
+                        Logs.w(e)
                     }
                 }
                 failure?.let { throw it }
@@ -85,6 +84,7 @@ internal class GroupOrderWriter(
     background: CoroutineDispatcher = Dispatchers.IO,
     private val delivery: CoroutineDispatcher = Dispatchers.Main.immediate,
     private val report: (Exception) -> Unit = {},
+    private val publishSnapshot: (suspend (List<ProxyGroup>, List<ProxyGroup>) -> Unit)? = null,
 ) {
     data class Result(
         val revision: Long,
@@ -121,7 +121,9 @@ internal class GroupOrderWriter(
                 withContext(delivery) {
                     if (saved != null) {
                         try {
-                            publish(saved.changed)
+                            val snapshotPublisher = publishSnapshot
+                            if (snapshotPublisher != null) snapshotPublisher(saved.groups, saved.changed)
+                            else publish(saved.changed)
                         } catch (e: Exception) {
                             // The transaction succeeded; reconcile to it rather than pretending
                             // that a notification failure undid the database commit.

@@ -8,11 +8,13 @@ class AboutLifecycleContractTest {
     private val app=sequenceOf(File("."),File("app")).first{File(it,"src/main/java").isDirectory}
     private val source=File(app,"src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt").readText()
     @Test fun backgroundListBuildUsesCapturedContextAfterFragmentDetachNotRequireContextGetString() {
-        val section=source.substringAfter("override fun getMaterialAboutList(activityContext: Context)")
+        val section=source.substringAfter("override fun getMaterialAboutList(activityContext: Context?)")
             .substringBefore("override fun onViewCreated(view: View")
-        assertTrue(section.contains("activityContext.getString(R.string.version_x"))
+        assertTrue(section.contains("AboutResourceContext.resolve(activityContext, listResourcesContext, app)"))
+        assertTrue(section.contains("resourcesContext.getString(R.string.version_x"))
+        assertFalse(section.contains("activityContext.getString"))
         assertFalse(section.contains(".text(getString("))
-        assertTrue(section.contains("activityContext.getString(\n"))
+        assertTrue(section.contains("resourcesContext.getString(\n"))
         assertFalse(section.contains("requireContext().launchCustomTab"))
     }
     @Test fun aboutChildAndLicenseResultAreBoundToRealViewLifecycle() {

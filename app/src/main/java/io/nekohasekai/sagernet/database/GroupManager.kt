@@ -10,6 +10,11 @@ object GroupManager {
         suspend fun groupAdd(group: ProxyGroup)
         suspend fun groupUpdated(group: ProxyGroup)
 
+        /** One committed order snapshot, not a node/DNS change. Legacy listeners remain compatible. */
+        suspend fun groupsReordered(groups: List<ProxyGroup>, changed: List<ProxyGroup>) {
+            for (group in changed) groupUpdated(group)
+        }
+
         suspend fun groupRemoved(groupId: Long)
         suspend fun groupUpdated(groupId: Long)
     }

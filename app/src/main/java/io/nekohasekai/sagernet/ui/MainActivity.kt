@@ -155,7 +155,7 @@ class MainActivity : ThemedActivity(),
             }
         }
         binding.controlBar.onTest = { testControlLatency() }
-        binding.controlBar.onError = { showControlErrorDialog() }
+        binding.controlBar.onError = { showControlErrorSnackbar() }
 
         setContentView(binding.root)
         installControlBarInsets()
@@ -497,13 +497,14 @@ class MainActivity : ThemedActivity(),
             syncMainControls()
         }
 
+        val drawerWasOpen = binding.drawerLayout.isOpen
         binding.drawerLayout.closeDrawers()
-        if (fragment.view != null || !binding.drawerLayout.isOpen) {
-            // 热切换（页面已就绪）或抽屉没开：立即提交，与抽屉动画同步切换
+        if (!drawerWasOpen) {
             pendingCommit = null
             commit()
         } else {
-            // 冷页面：先让抽屉关完，避免 inflation 冻结动画
+            // Even a cached configuration page may lay out hundreds of cards. Run its
+            // show/lifecycle work only after the drawer animation, never in the same frame.
             pendingCommit = commit
         }
     }
@@ -663,10 +664,8 @@ class MainActivity : ThemedActivity(),
                     .hide(fragment)
                     .setMaxLifecycle(fragment, Lifecycle.State.STARTED)
                     .commitAllowingStateLoss()
-                // 立即执行该事务，并在同一拍里补全布局/绘制，
-                // 不留「已挂载但尚未补全」的窗口（避免用户此时点开而错过预热）
-                supportFragmentManager.executePendingTransactions()
-                warmUpHiddenFragment(fragment)
+                // Keep the fragment instance warm, but never execute all pending transactions
+                // and draw whole hidden pages synchronously in the user's gesture frame.
                 break
             }
             if (prewarmIndex < prewarmIds.size) {
@@ -802,30 +801,20 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    private fun showControlFailure(detail: String, automaticDialog: Boolean) {
+    private fun showControlFailure(detail: String, automaticSnackbar: Boolean) {
         val error = detail.ifBlank { getString(R.string.control_bar_unavailable) }
         controlErrorDetail = error
-        val lower = error.lowercase()
-        val summary = when {
-            lower.contains("timeout") || lower.contains("deadline") || error.contains("超时") -> getString(R.string.connection_test_timeout_error)
-            lower.contains("reset") -> getString(R.string.control_bar_connection_reset)
-            else -> getString(R.string.control_bar_unavailable)
-        }
-        binding.controlBar.showFailure(summary)
-        if (automaticDialog && error != lastErrorDialog && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+        binding.controlBar.showFailure(error)
+        if (automaticSnackbar && error != lastErrorDialog && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
             lastErrorDialog = error
-            showControlErrorDialog()
+            showControlErrorSnackbar()
         }
     }
 
-    private fun showControlErrorDialog() {
+    private fun showControlErrorSnackbar() {
         val detail = controlErrorDetail ?: return
         if (isFinishing || isDestroyed || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
-        MaterialAlertDialogBuilder(this).setTitle(R.string.control_bar_connection_failed)
-            .setMessage(detail).setPositiveButton(android.R.string.ok, null)
-            .setNeutralButton(R.string.control_bar_retry_test) { _, _ ->
-                if (DataStore.serviceState.connected) testControlLatency()
-            }.show()
+        snackbar(getString(R.string.connection_test_error, detail)).show()
     }
 
     private fun refreshConfigurationProfileState() {

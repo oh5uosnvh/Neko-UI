@@ -6,11 +6,11 @@ on:
       release_tag:
         description: 'Debug candidate name only; does not create a release or tag'
         required: true
-        default: '1.4.2-mg-pre1-debug-dns07'
+        default: '1.4.2-mg-pre1-debug-dns08'
       version_code:
         description: 'Base version code (>=49; Android code is base x 5)'
         required: true
-        default: '56'
+        default: '57'
       signed:
         description: 'Sign with the verified legacy key (requires secrets)'
         type: boolean

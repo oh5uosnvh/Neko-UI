@@ -89,9 +89,18 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
             }
         }
 
-        override fun getMaterialAboutList(activityContext: Context): MaterialAboutList {
-            // MaterialAboutFragment builds this list on AsyncTask. The Fragment can already
-            // be detached during DayNight recreation; use the task's captured Context only.
+        // Configuration-scoped Application context: no Activity is retained by a queued task.
+        @Volatile private var listResourcesContext: Context? = null
+
+        override fun onAttach(context: Context) {
+            super.onAttach(context)
+            listResourcesContext = AboutResourceContext.snapshot(context)
+        }
+
+        override fun getMaterialAboutList(activityContext: Context?): MaterialAboutList {
+            // Java ListTask calls getActivity() at execution time and can pass null after detach.
+            // Keep the attached locale/night configuration even when an old task finishes.
+            val resourcesContext = AboutResourceContext.resolve(activityContext, listResourcesContext, app)
             fun safeBrowse(url: String) {
                 context?.takeIf { isAdded }?.launchCustomTab(url)
             }
@@ -127,7 +136,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                         .addItem(
                             MaterialAboutActionItem.Builder()
                                 .icon(R.drawable.ic_baseline_layers_24)
-                                .text(activityContext.getString(R.string.version_x, "sing-box"))
+                                .text(resourcesContext.getString(R.string.version_x, "sing-box"))
                                 .subText(Libcore.versionBox())
                                 .setOnClickAction { }
                                 .build())
@@ -153,7 +162,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                                         MaterialAboutActionItem.Builder()
                                             .icon(R.drawable.ic_baseline_nfc_24)
                                             .text(
-                                                activityContext.getString(
+                                                resourcesContext.getString(
                                                     R.string.version_x,
                                                     pluginId
                                                 ) + " (${Plugins.displayExeProvider(pkg.packageName)})"

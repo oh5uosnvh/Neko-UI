@@ -138,8 +138,7 @@ class ControlBarTest {
                 capsule.isEnabled)
             assertEquals(connected, bar.box(R.id.speed_box).isEnabled)
             assertEquals(connected, bar.box(R.id.latency_box).isEnabled)
-            assertEquals(bar.resources.getColor(if (connected) R.color.brand_primary
-                else R.color.brand_primary_light, bar.context.theme), capsuleColor(bar))
+            assertEquals(bar.resources.getColor(R.color.brand_primary_light, bar.context.theme), capsuleColor(bar))
             assertNotNull(bar.findViewById<ImageView>(R.id.capsule_icon).drawable)
             assertNull(bar.animation)
             assertNull(capsule.animation)
@@ -179,7 +178,8 @@ class ControlBarTest {
         var calls = 0
         bar.onTest = {
             calls++
-            assertEquals(bar.context.getString(R.string.control_bar_testing), bar.text(R.id.latency).text)
+            assertEquals(View.VISIBLE, bar.box(R.id.latency_progress).visibility)
+            assertEquals("", bar.text(R.id.latency).text.toString())
             bar.box(R.id.latency_box).performClick() // Re-entrant click also must be ignored.
         }
         bar.box(R.id.speed_box).performClick()
@@ -192,11 +192,11 @@ class ControlBarTest {
         assertFalse(bar.box(R.id.speed_box).isEnabled)
         assertFalse(bar.box(R.id.latency_box).isEnabled)
         assertTrue(bar.box(R.id.capsule).isEnabled) // Stopping remains available while testing.
-        bar.showLatency(56)
+        bar.showLatency(56); advance(250)
         assertEquals("56 ms", bar.text(R.id.latency).text.toString())
         bar.box(R.id.latency_box).performClick()
         assertEquals(2, calls)
-        bar.showLatency(-1)
+        bar.showLatency(-1); advance(250)
         assertEquals("-- ms", bar.text(R.id.latency).text.toString())
         assertTrue(bar.box(R.id.speed_box).isEnabled)
         bar.box(R.id.speed_box).performClick()
@@ -209,12 +209,13 @@ class ControlBarTest {
         bar.changeState(BaseService.State.Connected)
         bar.showTesting()
         bar.showTesting()
-        assertEquals(bar.context.getString(R.string.control_bar_testing), bar.text(R.id.latency).text)
-        bar.showLatency(Int.MIN_VALUE)
+        assertEquals(View.VISIBLE, bar.box(R.id.latency_progress).visibility)
+            assertEquals("", bar.text(R.id.latency).text.toString())
+        bar.showLatency(Int.MIN_VALUE); advance(250)
         assertEquals("-- ms", bar.text(R.id.latency).text.toString())
         assertTrue(bar.box(R.id.latency_box).isEnabled)
         bar.showTesting()
-        bar.showLatency(0)
+        bar.showLatency(0); advance(250)
         assertEquals("0 ms", bar.text(R.id.latency).text.toString())
     }
 
@@ -236,6 +237,7 @@ class ControlBarTest {
         bar.onTest = { throw IllegalStateException("URL test launch error") }
         try { bar.box(R.id.speed_box).performClick(); fail("expected callback exception") }
         catch (_: IllegalStateException) { }
+        advance(250)
         assertEquals("-- ms", bar.text(R.id.latency).text.toString())
         assertTrue(bar.box(R.id.speed_box).isEnabled)
     }
@@ -257,14 +259,15 @@ class ControlBarTest {
 
     @Test fun duplicateConnectedKeepsMeasurementAndDoesNotUnlockTesting() = withBar { bar, _ ->
         bar.changeState(BaseService.State.Connected)
-        bar.showLatency(1234)
+        bar.showLatency(1234); advance(250)
         bar.updateSpeed(1_000_000L, 2_000_000L)
         bar.changeState(BaseService.State.Connected)
         assertEquals("1234 ms", bar.text(R.id.latency).text.toString())
         assertEquals("▼ 2.00 MB/s", bar.text(R.id.speed_down).text.toString())
         bar.showTesting()
         bar.changeState(BaseService.State.Connected)
-        assertEquals(bar.context.getString(R.string.control_bar_testing), bar.text(R.id.latency).text)
+        assertEquals(View.VISIBLE, bar.box(R.id.latency_progress).visibility)
+            assertEquals("", bar.text(R.id.latency).text.toString())
         assertFalse(bar.box(R.id.latency_box).isEnabled)
     }
 
@@ -274,7 +277,7 @@ class ControlBarTest {
         bar.updateSpeed(724_000L, 893_000L)
         bar.changeState(BaseService.State.Stopping)
         assertUnknown(bar)
-        bar.showLatency(8888) // A late callback cannot paint a disconnected view.
+        bar.showLatency(8888); advance(250) // A late callback cannot paint a disconnected view.
         assertUnknown(bar)
         bar.changeState(BaseService.State.Stopped)
         bar.changeState(BaseService.State.Connecting)
@@ -310,7 +313,7 @@ class ControlBarTest {
         host.removeView(bar)
         assertUnknown(bar)
         bar.showTesting()
-        bar.showLatency(42)
+        bar.showLatency(42); advance(250)
         bar.updateSpeed(1_000_000L, 2_000_000L)
         assertUnknown(bar)
         assertFalse(bar.box(R.id.latency_box).isEnabled)
@@ -343,13 +346,13 @@ class ControlBarTest {
             for(state in BaseService.State.values()) {
                 bar.changeState(state)
                 for(ms in listOf(-1,0,56,299,300,9999,Int.MAX_VALUE)) {
-                    bar.showLatency(ms)
-                    for(id in listOf(R.id.speed_down,R.id.speed_up,R.id.latency)) {
+                    bar.showLatency(ms); advance(250)
+                    for(id in listOf(R.id.speed_down,R.id.speed_up)) {
                         assertEquals(expected,bar.text(id).currentTextColor)
                     }
                 }
                 bar.showTesting()
-                assertEquals(expected,bar.text(R.id.latency).currentTextColor)
+                assertEquals(bar.resources.getColor(R.color.latency_green,bar.context.theme),bar.text(R.id.latency).currentTextColor)
             }
             assertEquals(expected,bar.text(R.id.capsule_label).currentTextColor)
         }
@@ -393,7 +396,7 @@ class ControlBarTest {
         assertEquals(dp(bar, 18), bar.getChildAt(0).paddingEnd)
         assertEquals(latency.height / 2f, (label.top + label.bottom) / 2f, 1f)
         for (id in listOf(R.id.speed_down, R.id.speed_up, R.id.capsule_label, R.id.latency)) {
-            assertTextFits(bar.text(id))
+            if (id != R.id.latency || bar.text(id).visibility == View.VISIBLE) assertTextFits(bar.text(id))
         }
     }
 
@@ -407,7 +410,7 @@ class ControlBarTest {
                     bar.resources.displayMetrics.scaledDensity, 0.05f)
                 bar.changeState(BaseService.State.Connected)
                 bar.updateSpeed(1_234_567_890L, 9_876_543_210L)
-                bar.showLatency(9999)
+                bar.showLatency(9999); advance(250)
                 measure(host, dp(bar, 320 - 28), dp(bar, 76))
                 assertRegionsFit(bar)
                 assertCapsulePair(bar)
@@ -422,7 +425,7 @@ class ControlBarTest {
                 // Long/Int maxima are formatter/state tests, not a realistic 320dp UI requirement.
                 bar.changeState(BaseService.State.Connected)
                 bar.updateSpeed(724_567L, 99_123_456L)
-                bar.showLatency(9999)
+                bar.showLatency(9999); advance(250)
                 measure(host, dp(bar, 320 - 28), dp(bar, 76))
                 assertRegionsFit(bar)
                 assertCapsulePair(bar)
@@ -443,7 +446,7 @@ class ControlBarTest {
                     bar.text(R.id.speed_down).typeface)
                 assertEquals(Typeface.create("sans-serif", Typeface.NORMAL),
                     bar.text(R.id.speed_up).typeface)
-                assertEquals(if (night) Color.WHITE else Color.BLACK,
+                assertEquals(bar.resources.getColor(R.color.latency_green,bar.context.theme),
                     bar.text(R.id.latency).currentTextColor)
             }
         }

@@ -9,32 +9,21 @@ import android.text.TextUtils
 import android.util.TypedValue
 import android.view.View
 import androidx.appcompat.widget.AppCompatTextView
-import androidx.core.graphics.ColorUtils
 import com.google.android.material.tabs.TabLayout
 import io.nekohasekai.sagernet.R
 
 /** TabView keeps click, accessibility, quick-long-press and the stable group ID binding. */
 class GroupTabPill(context: Context) : AppCompatTextView(context) {
     init {
-        val selected = color(R.attr.colorPrimary)
-        val material = color(R.attr.colorMaterial300)
+        val selected = color(R.attr.colorMaterial300)
         val night = resources.configuration.uiMode and
             android.content.res.Configuration.UI_MODE_NIGHT_MASK ==
             android.content.res.Configuration.UI_MODE_NIGHT_YES
         val foreground = if (night) Color.WHITE else Color.BLACK
         val low = color(R.attr.colorLayerLow)
-        // Both fills remain theme-derived. Only the unselected tone may be
-        // pulled toward the day/night Low surface when white/black needs help.
-        var unselected = material
-        if (ColorUtils.calculateContrast(foreground, unselected) < 4.5) {
-            for (step in 1..10) {
-                unselected = ColorUtils.blendARGB(material, low, step / 10f)
-                if (ColorUtils.calculateContrast(foreground, unselected) >= 4.5) break
-            }
-        }
         background = StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_selected), surface(selected))
-            addState(intArrayOf(), surface(unselected))
+            addState(intArrayOf(), surface(low))
         }
         setTextColor(foreground)
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
@@ -54,6 +43,7 @@ class GroupTabPill(context: Context) : AppCompatTextView(context) {
         shape = GradientDrawable.RECTANGLE
         cornerRadius = dp(1000).toFloat()
         setColor(fill)
+        setStroke(dp(1), color(R.attr.colorLayerStroke))
     }
     private fun color(attr: Int): Int {
         val values = context.obtainStyledAttributes(intArrayOf(attr))

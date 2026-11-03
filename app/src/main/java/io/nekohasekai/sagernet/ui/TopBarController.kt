@@ -520,8 +520,7 @@ internal class TopBarController(
             return
         }
         val target = index.coerceIn(0, list.size - 1)
-        host.groupPager.setCurrentItem(target, false)
-        DataStore.selectedGroup = list[target].id
+        host.requestGroupPage(target)
     }
 
     private fun jumpToFirstGroup() = jumpTo(0)
@@ -535,18 +534,18 @@ internal class TopBarController(
             return
         }
         val selectedId = host.selectedItem?.id ?: DataStore.selectedProxy
-        if (selectedId > 0L) {
-            val entity = SagerDatabase.proxyDao.getById(selectedId)
-            if (entity != null) {
-                val index = list.indexOfFirst { it.id == entity.groupId }
+        if (selectedId <= 0L) { jumpToFirstGroup(); return }
+        runOnDefaultDispatcher {
+            val groupId = SagerDatabase.proxyDao.getById(selectedId)?.groupId
+            onMainDispatcher {
+                if (!host.isAdded || host.viewLifecycleOwnerLiveData.value == null) return@onMainDispatcher
+                val index = groups().indexOfFirst { it.id == groupId }
                 if (index >= 0) {
                     jumpTo(index)
                     host.snackbar(R.string.jump_hint_selected)
-                    return
-                }
+                } else jumpToFirstGroup()
             }
         }
-        jumpToFirstGroup()
     }
 
     // ------------------------------------------------------------ 分组快速列表
@@ -576,7 +575,7 @@ internal class TopBarController(
             return
         }
         dismissGroupPicker()
-        if (host.select) host.groupPager.setCurrentItem(index, false) else jumpTo(index)
+        host.requestGroupPage(index)
     }
 
     /** Owns only display state. The process-wide writer outlives this popup/fragment. */
@@ -620,7 +619,7 @@ internal class TopBarController(
         private val drag = GroupPickerDragCallback(
             adapter,
             commit = { persist(it) },
-            cancelled = { showFailure(); refreshNeeded = true },
+            cancelled = { /* User cancellation rolls back moves, not a failed DB write. */ },
             settled = { onSettled() },
         )
         private val touch = ItemTouchHelper(drag)
@@ -702,7 +701,6 @@ internal class TopBarController(
                 val position = adapter.ids.indexOf(selectedItemGroupId())
                 if (position >= 0) layout.scrollToPositionWithOffset(position, 0)
                 popup.showAsDropDown(anchor, pickerOffsetX(anchor, popup.width), gap)
-                loadCounts()
                 // Reopening before a previous write's notification must not revive old order.
                 requestRefresh()
             } catch (e: Exception) {
@@ -719,6 +717,7 @@ internal class TopBarController(
             // failure still needs a visible acknowledgement rather than being lost silently.
             deferredResult?.second?.error?.let { showFailure() }
             deferredResult = null
+            deferredOrder = null
             val generation = ++editGeneration
             pendingSaves++
             GroupOrderStore.submit(ids) { result ->
@@ -737,6 +736,9 @@ internal class TopBarController(
         }
 
         private fun replaceKeepingViewport(fresh: List<ProxyGroup>) {
+            val names = fresh.associate { it.id to it.displayName() }
+            if (adapter.ids == fresh.map { it.id } && displayedNames == names) return
+            displayedNames = names
             // A full row refresh must retain the user's exact pixel offset, not just the ID.
             // Capture only an already-laid-out anchor; otherwise keep show()'s pending first-frame seed.
             val first = layout.findFirstVisibleItemPosition()
@@ -751,21 +753,27 @@ internal class TopBarController(
             }
         }
 
+        private var displayedNames = initial.associate { it.id to it.displayName() }
+        private var displayedCounts: Map<Long, Long> = emptyMap()
+        private var deferredOrder: List<ProxyGroup>? = null
+
+        private fun visibleOrder(fresh: List<ProxyGroup>): List<ProxyGroup> {
+            val visibleIds = (adapter.ids + groups().map { it.id }).toSet()
+            return fresh.filter { !it.ungrouped || it.id in visibleIds }
+        }
+
         private fun accept(result: GroupOrderWriter.Result) {
-            val fresh = result.groups
-            if (fresh != null) {
-                // Match the pager's hidden-empty-ungrouped policy without querying counts
-                // on the UI thread. Existing visible rows stay visible until the next refresh.
-                val visibleIds = (adapter.ids + groups().map { it.id }).toSet()
-                confirmed = fresh.filter { !it.ungrouped || it.id in visibleIds }
-            }
+            result.groups?.let { confirmed = visibleOrder(it) }
+            deferredOrder = null
             replaceKeepingViewport(confirmed)
             if (result.error != null) showFailure()
-            loadCounts()
+            // Order-only commits do not invalidate node counts.
         }
 
         private fun onSettled() {
             if (closed || drag.isDragging) return
+            val hasResult = deferredResult != null || deferredOrder != null
+            if (!hasResult && (!refreshNeeded || pendingSaves > 0)) return
             if (list.isSettling) {
                 awaitSettled()
                 return
@@ -774,6 +782,10 @@ internal class TopBarController(
                 deferredResult = null
                 if (generation == editGeneration) accept(result)
             }
+            if (pendingSaves == 0) deferredOrder?.let {
+                deferredOrder = null
+                replaceKeepingViewport(it)
+            }
             if (pendingSaves == 0 && refreshNeeded) requestRefresh()
         }
 
@@ -781,7 +793,7 @@ internal class TopBarController(
             if (closed) return
             refreshNeeded = true
             if (displayBusy() || pendingSaves > 0) {
-                if (!drag.isDragging) awaitSettled()
+                if (!drag.isDragging && pendingSaves == 0) awaitSettled()
                 return
             }
             refreshNeeded = false
@@ -790,18 +802,19 @@ internal class TopBarController(
             refreshing?.cancel()
             refreshing = runOnDefaultDispatcher {
                 try {
+                    val counts = PendingProfileDeletes.counts()
                     val fresh = SagerDatabase.groupDao.allGroups().filter {
-                        !it.ungrouped || PendingProfileDeletes.count(it.id) > 0L
+                        !it.ungrouped || (counts[it.id] ?: 0L) > 0L
                     }
                     onMainDispatcher {
                         if (closed || generation != refreshGeneration) return@onMainDispatcher
                         if (displayBusy() || pendingSaves > 0 || edits != editGeneration) {
                             refreshNeeded = true
-                            if (!drag.isDragging) awaitSettled()
+                            if (!drag.isDragging && pendingSaves == 0) awaitSettled()
                         } else {
                             confirmed = fresh
                             replaceKeepingViewport(fresh)
-                            loadCounts()
+                            applyCounts(counts)
                         }
                     }
                 } catch (e: CancellationException) {
@@ -813,14 +826,20 @@ internal class TopBarController(
             }
         }
 
+        private fun applyCounts(fresh: Map<Long, Long>) {
+            val visible = adapter.ids.associateWith { fresh[it] ?: 0L }
+            if (visible == displayedCounts) return
+            displayedCounts = visible
+            adapter.updateCounts(visible)
+        }
+
         private fun loadCounts() {
             if (closed) return
             counting?.cancel()
-            val ids = adapter.ids
             counting = runOnDefaultDispatcher {
                 try {
-                    val counts = ids.associateWith { PendingProfileDeletes.count(it) }
-                    onMainDispatcher { if (!closed) adapter.updateCounts(counts) }
+                    val counts = PendingProfileDeletes.counts()
+                    onMainDispatcher { if (!closed) applyCounts(counts) }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -850,6 +869,16 @@ internal class TopBarController(
             touch.attachToRecyclerView(null)
             list.adapter = null
             deferredResult = null
+        }
+
+        override suspend fun groupsReordered(groups: List<ProxyGroup>, changed: List<ProxyGroup>) = onMainDispatcher {
+            if (closed) return@onMainDispatcher
+            confirmed = visibleOrder(groups)
+            if (pendingSaves > 0) return@onMainDispatcher // the latest own receipt reconciles once
+            if (displayBusy()) {
+                deferredOrder = confirmed
+                if (!drag.isDragging) awaitSettled()
+            } else replaceKeepingViewport(confirmed)
         }
 
         override suspend fun groupAdd(group: ProxyGroup) = onMainDispatcher { requestRefresh() }

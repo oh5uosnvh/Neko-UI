@@ -43,9 +43,27 @@ class GroupListEdgeLayout @JvmOverloads constructor(
     }
     private var renderer: LocalBlur? = null
     private val baseTop = WeakHashMap<RecyclerView, Int>()
+    internal val fixedScrollbar = FixedGroupScrollbar(this)
+
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        // Postdraw: NOT recorded in card RenderNode/fade, NOT translated with ViewPager.
+        fixedScrollbar.draw(canvas)
+    }
+
+    override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
+        if (fixedScrollbar.touch(event)) return true
+        return super.dispatchTouchEvent(event)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        baseTop.keys.toList().filterIsInstance<ExactScrollRecyclerView>().forEach(fixedScrollbar::bind)
+    }
 
     /** Keep the existing 4dp gap and all CURRENT bottom/control-overlay insets. */
     fun bindList(list: RecyclerView) {
+        if (list is ExactScrollRecyclerView) fixedScrollbar.bind(list)
         if (!baseTop.containsKey(list)) {
             baseTop[list] = list.paddingTop
             val host = WeakReference(this)
@@ -86,18 +104,25 @@ class GroupListEdgeLayout @JvmOverloads constructor(
         save = canvas.save()
         canvas.clipRect(0f, 0f, width.toFloat(), band)
         val edgeLayer = canvas.saveLayer(0f, 0f, width.toFloat(), band, null)
-        more = super.drawChild(canvas, child, drawingTime) || more
-        if (Build.VERSION.SDK_INT >= 31 && canvas.isHardwareAccelerated) {
+        val pagerState = (child as? androidx.viewpager2.widget.ViewPager2)?.scrollState
+            ?: androidx.viewpager2.widget.ViewPager2.SCROLL_STATE_IDLE
+        if (useTopBlur(canvas.isHardwareAccelerated, pagerState)) {
             val blur = renderer ?: LocalBlur(6f * resources.displayMetrics.density)
                 .also { renderer = it }
-            // Include a small sampling gutter below the band to avoid a seam.
-            blur.record(width, (band + blur.gutter).toInt().coerceAtMost(height)) {
-                super.drawChild(it, child, drawingTime)
+            // Record ONE sharp sample; reuse it for both sharp and blurred top layers.
+            // The pager itself is traversed at most twice, never three times per frame.
+            blur.record(width, (band + blur.gutter).toInt().coerceAtMost(height), drawingTime) {
+                more = super.drawChild(it, child, drawingTime) || more
             }
+            blur.drawSharp(canvas)
             val blurLayer = canvas.saveLayer(0f, 0f, width.toFloat(), band, null)
             blur.draw(canvas)
             canvas.drawRect(0f, 0f, width.toFloat(), band, blurMask)
             canvas.restoreToCount(blurLayer)
+        } else {
+            // Manual swipes AND Tab-triggered settling take the same cheap fade path.
+            // No RenderNode recording while the horizontal pager is moving.
+            more = super.drawChild(canvas, child, drawingTime) || more
         }
         canvas.drawRect(0f, 0f, width.toFloat(), band, fade)
         canvas.restoreToCount(edgeLayer)
@@ -106,26 +131,49 @@ class GroupListEdgeLayout @JvmOverloads constructor(
     }
 
     override fun onDetachedFromWindow() {
-        if (Build.VERSION.SDK_INT >= 31) renderer?.release()
+        renderer?.takeIf { Build.VERSION.SDK_INT >= 31 }?.release()
         renderer = null
+        fixedScrollbar.detach()
         super.onDetachedFromWindow()
     }
+
+    internal fun useTopBlur(hardware: Boolean, pagerState: Int): Boolean =
+        Build.VERSION.SDK_INT >= 31 && hardware &&
+            pagerState == androidx.viewpager2.widget.ViewPager2.SCROLL_STATE_IDLE
 
     @TargetApi(31)
     private class LocalBlur(radius: Float) {
         val gutter = radius * 2f
+        private val sample = RenderNode("group-list-top-sample")
         private val node = RenderNode("group-list-top-band").apply {
             setRenderEffect(RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP))
         }
-        fun record(width: Int, height: Int, draw: (Canvas) -> Unit) {
-            node.setPosition(0, 0, width, height)
-            val recording = node.beginRecording(width, height)
+        private var lastFrame = Long.MIN_VALUE
+        private var lastWidth = 0
+        private var lastHeight = 0
+        fun record(width: Int, height: Int, frame: Long, draw: (Canvas) -> Unit) {
+            // ViewGroup may request the same child draw more than once for one frame.
+            if (frame == lastFrame && width == lastWidth && height == lastHeight) return
+            sample.setPosition(0, 0, width, height)
+            val recording = sample.beginRecording(width, height)
             try {
                 recording.clipRect(0, 0, width, height)
                 draw(recording)
-            } finally { node.endRecording() }
+            } finally { sample.endRecording() }
+            if (width != lastWidth || height != lastHeight) {
+                node.setPosition(0, 0, width, height)
+                val blurred = node.beginRecording(width, height)
+                try { blurred.drawRenderNode(sample) } finally { node.endRecording() }
+            }
+            lastFrame = frame
+            lastWidth = width
+            lastHeight = height
         }
+        fun drawSharp(canvas: Canvas) = canvas.drawRenderNode(sample)
         fun draw(canvas: Canvas) = canvas.drawRenderNode(node)
-        fun release() = node.discardDisplayList()
+        fun release() {
+            sample.discardDisplayList()
+            node.discardDisplayList()
+        }
     }
 }

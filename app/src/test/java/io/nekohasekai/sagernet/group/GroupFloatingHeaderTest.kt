@@ -110,10 +110,10 @@ class GroupFloatingHeaderTest {
             val pill = first.customView as GroupTabPill
             assertTrue(pill.isSelected)
             assertEquals(if (night) Color.WHITE else Color.BLACK, pill.currentTextColor)
-            assertEquals(color(context, R.attr.colorPrimary),
+            assertEquals(color(context, R.attr.colorMaterial300),
                 (pill.background.current as GradientDrawable).color!!.defaultColor)
             val other = second.customView as GroupTabPill
-            assertNotEquals(color(context, R.attr.colorLayerHigh),
+            assertEquals(color(context, R.attr.colorLayerLow),
                 (other.background.current as GradientDrawable).color!!.defaultColor)
             assertEquals(if (night) Color.WHITE else Color.BLACK, other.currentTextColor)
             assertFalse(pill.isClickable)
@@ -122,7 +122,7 @@ class GroupFloatingHeaderTest {
             second.select()
             assertFalse(pill.isSelected)
             assertTrue(other.isSelected)
-            assertEquals(color(context, R.attr.colorPrimary),
+            assertEquals(color(context, R.attr.colorMaterial300),
                 (other.background.current as GradientDrawable).color!!.defaultColor)
         }
     }

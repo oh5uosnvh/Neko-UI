@@ -132,6 +132,9 @@ data class ProxyGroup(
         @Insert
         fun createGroup(group: ProxyGroup): Long
 
+        @Query("UPDATE proxy_groups SET userOrder = :order WHERE id = :groupId")
+        fun updateOrder(groupId: Long, order: Long): Int
+
         @Update
         fun updateGroup(group: ProxyGroup)
 

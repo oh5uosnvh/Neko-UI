@@ -31,6 +31,18 @@ internal object PendingProfileDeletes {
         synchronized(guard) { (physical - pending.values.count { it == groupId }).coerceAtLeast(0L) }
     }
 
+    /** One aggregate query; keep logical Undo counts consistent with physical deletion. */
+    fun counts(db: SagerDatabase = SagerDatabase.instance): Map<Long, Long> = synchronized(databaseAccess) {
+        val physical = HashMap<Long, Long>()
+        db.query("SELECT groupId, COUNT(*) FROM proxy_entities GROUP BY groupId", emptyArray()).use { cursor ->
+            while (cursor.moveToNext()) physical[cursor.getLong(0)] = cursor.getLong(1)
+        }
+        synchronized(guard) {
+            val hidden = pending.values.groupingBy { it }.eachCount()
+            physical.mapValues { (id, count) -> (count - (hidden[id] ?: 0)).coerceAtLeast(0L) }
+        }
+    }
+
     fun commit(nodes: List<ProxyEntity>, db: SagerDatabase = SagerDatabase.instance, clearSelection: Boolean = true) = synchronized(databaseAccess) {
         val ids = nodes.map { it.id }.distinct()
         db.runInTransaction {

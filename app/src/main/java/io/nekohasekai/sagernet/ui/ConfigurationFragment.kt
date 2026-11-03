@@ -375,9 +375,35 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
     }
 
+    private val pageRequests = GroupPageRequests()
+    private var pageRequestPosted = false
+    private var pageTabListener: TabLayout.OnTabSelectedListener? = null
+
+    /** Only user clicks animate; restoration/order alignment keeps setCurrentItem(..., false). */
+    fun requestGroupPage(position: Int) {
+        val groupId = adapter.groupList.getOrNull(position)?.id ?: return
+        pageRequests.request(groupId)
+        schedulePageRequest()
+    }
+
+    private fun schedulePageRequest() {
+        if (pageRequestPosted || viewLifecycleOwnerLiveData.value == null) return
+        pageRequestPosted = true
+        groupPager.postOnAnimation {
+            pageRequestPosted = false
+            if (viewLifecycleOwnerLiveData.value == null) return@postOnAnimation
+            pageRequests.applyWhenIdle(groupPager, adapter.groupList.map { it.id }, isRestoringGroup)
+        }
+    }
+
     val updateSelectedCallback = object : ViewPager2.OnPageChangeCallback() {
+        override fun onPageScrollStateChanged(state: Int) {
+            if (state == ViewPager2.SCROLL_STATE_IDLE) schedulePageRequest()
+        }
+
         override fun onPageSelected(position: Int) {
-            if (!isRestoringGroup && adapter.groupList.size > position) {
+            if (!isRestoringGroup) adapter.selectedGroupIndex = position
+            if (!select && !isRestoringGroup && position in adapter.groupList.indices) {
                 val newId = adapter.groupList[position].id
                 if (DataStore.selectedGroup != newId) {
                     DataStore.selectedGroup = newId
@@ -569,6 +595,17 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
             tabLongPressBindings[tab.view] = java.lang.ref.WeakReference(binding)
         }.also { it.attach() }
+        // Keep Mediator's page/adapter observers; replace only its immediate click writer.
+        tabLayout.clearOnTabSelectedListeners()
+        pageTabListener = object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab) {
+                if (!isRestoringGroup && tab.position != groupPager.currentItem) requestGroupPage(tab.position)
+            }
+            override fun onTabUnselected(tab: TabLayout.Tab) = Unit
+            override fun onTabReselected(tab: TabLayout.Tab) {
+                if (!isRestoringGroup && tab.position != groupPager.currentItem) requestGroupPage(tab.position)
+            }
+        }.also { tabLayout.addOnTabSelectedListener(it) }
 
         toolbar.setOnClickListener {
             val fragment = getCurrentGroupFragment()
@@ -638,6 +675,11 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     override fun onDestroyView() {
+        pageRequests.clear()
+        pageRequestPosted = false
+        pageTabListener?.let { tabLayout.removeOnTabSelectedListener(it) }
+        pageTabListener = null
+        if (::groupPager.isInitialized) groupPager.unregisterOnPageChangeCallback(updateSelectedCallback)
         groupTabsMediator?.detach()
         groupTabsMediator = null
         tabLongPressBindings.values.mapNotNull { it.get() }.forEach { it.unbind() }
@@ -647,6 +689,12 @@ class ConfigurationFragment @JvmOverloads constructor(
         searchQueryText = ""
         topBar.detach()
         searchScope.detach()
+        DataStore.profileCacheStore.unregisterChangeListener(this)
+        DataStore.configurationStore.unregisterChangeListener(displayPrefListener)
+        if (::adapter.isInitialized) {
+            GroupManager.removeListener(adapter)
+            ProfileManager.removeListener(adapter)
+        }
         super.onDestroyView()
     }
 
@@ -696,7 +744,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
             }
 
-            refreshAddressDisplayPreferences()
+            if (lastAppliedAlwaysShowAddress != DataStore.alwaysShowAddress) refreshAddressDisplayPreferences()
             // 顺序兜底：分组页拖动排序的广播若因竞态未生效，按数据库顺序校正
             adapter.syncOrderFromDb()
         }
@@ -1805,9 +1853,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         fun reload(now: Boolean = false) {
             val generation = reloadGeneration.incrementAndGet()
 
-            if (!select) {
-                groupPager.unregisterOnPageChangeCallback(updateSelectedCallback)
-            }
+            groupPager.unregisterOnPageChangeCallback(updateSelectedCallback)
 
             runOnDefaultDispatcher {
                 var newGroupList = ArrayList(SagerDatabase.groupDao.allGroups())
@@ -1870,17 +1916,17 @@ class ConfigurationFragment @JvmOverloads constructor(
                                                 tabLayout.setScrollPosition(selectedGroupIndex, 0f, true)
                                             }
                                             isRestoringGroup = false
+                                            schedulePageRequest()
                                         }
                                     }
                                 } else {
                                     isRestoringGroup = false
+                                    schedulePageRequest()
                                 }
                                 val hideTab = groupList.size < 2
                                 tabLayout.isGone = hideTab
                                 toolbar.elevation = if (hideTab) 0F else dp2px(4).toFloat()
-                                if (!select) {
-                                    groupPager.registerOnPageChangeCallback(updateSelectedCallback)
-                                }
+                                groupPager.registerOnPageChangeCallback(updateSelectedCallback)
                             }
                         }
                     }
@@ -1972,6 +2018,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     tabLayout.post {
                         if (generation == removalGeneration && isCurrentGroupPagerAdapter(this@GroupPagerAdapter)) {
                             isRestoringGroup = false
+                            schedulePageRequest()
                         }
                     }
                 }
@@ -1991,35 +2038,34 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
 
         private var reorderGeneration = 0L
+        private var pendingOrder: List<ProxyGroup>? = null
+        private var orderPosted = false
 
-        override suspend fun groupUpdated(group: ProxyGroup) {
+        override suspend fun groupsReordered(groups: List<ProxyGroup>, changed: List<ProxyGroup>) {
             onMainDispatcher {
                 if (viewLifecycleOwnerLiveData.value == null || !isCurrentGroupPagerAdapter(this@GroupPagerAdapter)) return@onMainDispatcher
-                val index = groupList.indexOfFirst { it.id == group.id }
-                if (index == -1) return@onMainDispatcher
-                val orderChanged = groupList[index].userOrder != group.userOrder
-                groupList[index] = group
-                if (!orderChanged) {
-                    tabLayout.getTabAt(index)?.text = group.displayName()
-                    return@onMainDispatcher
-                }
-                val currentId = DataStore.selectedGroup
-                val generation = ++reorderGeneration
-                isRestoringGroup = true
-                tabLayout.post {
-                    if (generation != reorderGeneration || viewLifecycleOwnerLiveData.value == null ||
-                        !isCurrentGroupPagerAdapter(this@GroupPagerAdapter)) return@post
-                    val target = groupList.sortedWith(compareBy({ it.userOrder }, { it.id }))
-                    for (i in target.indices) {
-                        val old = groupList.indexOfFirst { it.id == target[i].id }
-                        if (old != i) {
-                            groupList.add(i, groupList.removeAt(old))
-                            notifyItemMoved(old, i)
-                        }
-                    }
+                pendingOrder = groups
+                if (orderPosted) return@onMainDispatcher
+                orderPosted = true
+                tabLayout.postOnAnimation {
+                    orderPosted = false
+                    val snapshot = pendingOrder ?: return@postOnAnimation
+                    pendingOrder = null
+                    if (viewLifecycleOwnerLiveData.value == null || !isCurrentGroupPagerAdapter(this@GroupPagerAdapter)) return@postOnAnimation
+                    val existing = groupList.associateBy { it.id }
+                    val ordered = snapshot.mapNotNull { existing[it.id] }
+                    if (ordered.size != groupList.size) return@postOnAnimation
+                    val orders = snapshot.associate { it.id to it.userOrder }
+                    ordered.forEach { it.userOrder = orders.getValue(it.id) }
+                    if (ordered.map { it.id } == groupList.map { it.id }) return@postOnAnimation
+                    val currentId = groupList.getOrNull(groupPager.currentItem)?.id
+                    val generation = ++reorderGeneration
+                    isRestoringGroup = true
+                    groupList = ArrayList(ordered)
+                    // One stable-ID invalidation; never N notifyItemMoved/Mediator rebuilds.
+                    notifyDataSetChanged()
                     val selected = groupList.indexOfFirst { it.id == currentId }
                     if (selected >= 0) {
-                        DataStore.selectedGroup = currentId
                         selectedGroupIndex = selected
                         groupPager.setCurrentItem(selected, false)
                         tabLayout.setScrollPosition(selected, 0f, true)
@@ -2027,47 +2073,30 @@ class ConfigurationFragment @JvmOverloads constructor(
                     tabLayout.post {
                         if (generation == reorderGeneration && isCurrentGroupPagerAdapter(this@GroupPagerAdapter)) {
                             isRestoringGroup = false
+                            schedulePageRequest()
                         }
                     }
                 }
             }
         }
 
-        /**
-         * 从数据库校正分组顺序（兜底保险丝）：分组页拖动排序的广播若因竞态
-         * 没有落到标签栏，页面每次显示时按数据库 userOrder 就地对齐一次。
-         * 只在「集合一致、仅顺序不同」时动作，增删场景仍走 reload()。
-         */
+        override suspend fun groupUpdated(group: ProxyGroup) {
+            onMainDispatcher {
+                if (viewLifecycleOwnerLiveData.value == null || !isCurrentGroupPagerAdapter(this@GroupPagerAdapter)) return@onMainDispatcher
+                val index = groupList.indexOfFirst { it.id == group.id }
+                if (index < 0) return@onMainDispatcher
+                val orderChanged = groupList[index].userOrder != group.userOrder
+                groupList[index] = group
+                io.nekohasekai.sagernet.widget.GroupTabPill.bindTab(tabLayout.getTabAt(index) ?: return@onMainDispatcher, group.displayName())
+                if (orderChanged) groupsReordered(groupList.sortedWith(compareBy({ it.userOrder }, { it.id })), listOf(group))
+            }
+        }
+
+        /** Group-only fallback after returning from management; no profile/DNS reload. */
         fun syncOrderFromDb() {
             runOnDefaultDispatcher {
-                val fresh = SagerDatabase.groupDao.allGroups()
-                val orderedIds = fresh.sortedBy { it.userOrder }.map { it.id }
-                val orderById = fresh.associate { it.id to it.userOrder }
-                tabLayout.post {
-                    if (!::groupPager.isInitialized || !::tabLayout.isInitialized) return@post
-                    val currentId = groupList.getOrNull(groupPager.currentItem)?.id
-                    val existing = groupList.associateBy { it.id }
-                    val reordered = orderedIds.mapNotNull { existing[it] }
-                    if (reordered.size != groupList.size) return@post
-                    if (reordered.map { it.id } == groupList.map { it.id }) return@post
-                    for (g in reordered) {
-                        orderById[g.id]?.let { g.userOrder = it }
-                    }
-                    groupList.clear()
-                    groupList.addAll(reordered)
-                    notifyDataSetChanged()
-                    val newIndex = groupList.indexOfFirst { it.id == currentId }
-                    if (newIndex >= 0) {
-                        groupPager.setCurrentItem(newIndex, false)
-                        tabLayout.post {
-                            val tab = tabLayout.getTabAt(newIndex)
-                            if (tab != null && !tab.isSelected) {
-                                tab.select()
-                            }
-                            tabLayout.setScrollPosition(newIndex, 0f, true)
-                        }
-                    }
-                }
+                val fresh = SagerDatabase.groupDao.allGroups().sortedWith(compareBy({ it.userOrder }, { it.id }))
+                groupsReordered(fresh, emptyList())
             }
         }
 
@@ -2102,6 +2131,9 @@ class ConfigurationFragment @JvmOverloads constructor(
             container: ViewGroup?,
             savedInstanceState: Bundle?,
         ): View {
+            if (!::proxyGroup.isInitialized) {
+                savedInstanceState?.getParcelable<ProxyGroup>("proxyGroup")?.let { proxyGroup = it }
+            }
             return LayoutProfileListBinding.inflate(inflater).root
         }
 
@@ -2132,10 +2164,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         override fun onViewStateRestored(savedInstanceState: Bundle?) {
             super.onViewStateRestored(savedInstanceState)
 
-            savedInstanceState?.getParcelable<ProxyGroup>("proxyGroup")?.also {
-                proxyGroup = it
-                onViewCreated(requireView(), null)
-            }
+            // proxyGroup was restored before onViewCreated; never construct a second adapter/listener here.
         }
 
         private val isEnabled: Boolean
@@ -2264,16 +2293,11 @@ class ConfigurationFragment @JvmOverloads constructor(
             super.onResume()
             if (lastAddressPreference != DataStore.alwaysShowAddress) refreshAddressDisplay()
 
-            if (::configurationListView.isInitialized && configurationListView.size == 0) {
-                configurationListView.adapter = adapter
-                runOnDefaultDispatcher {
-                    adapter?.reloadProfiles()
-                }
-            } else if (!::configurationListView.isInitialized) {
-                onViewCreated(requireView(), null)
-            }
+            val currentAdapter = adapter
+            if (currentAdapter != null && !currentAdapter.hasCurrentSearchResult() &&
+                !currentAdapter.isProfileLoadInFlight()) currentAdapter.reloadProfiles()
             checkOrderMenu()
-            configurationListView.requestFocus()
+            // Resuming a neighbouring page must not steal focus and clamp its scroll anchor.
         }
 
         fun checkOrderMenu() {
@@ -2417,7 +2441,14 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
 
         override fun onDestroyView() {
-            adapter?.cancelSearch()
+            adapter?.let {
+                it.cancelSearch()
+                ProfileManager.removeListener(it)
+                GroupManager.removeListener(it)
+            }
+            if (::itemTouchHelper.isInitialized) itemTouchHelper.attachToRecyclerView(null)
+            if (::configurationListView.isInitialized) configurationListView.adapter = null
+            adapter = null
             super.onDestroyView()
         }
 
@@ -2449,6 +2480,8 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             fun hasCurrentSearchResult(): Boolean =
                 appliedSearchRequest?.let { batchLoadGeneration.accepts(it) } == true
+
+            fun isProfileLoadInFlight(): Boolean = searchLoading?.isActive == true
 
             fun cancelSearch() {
                 batchLoadGeneration.invalidate()
@@ -2958,6 +2991,11 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             override suspend fun groupAdd(group: ProxyGroup) = Unit
             override suspend fun groupRemoved(groupId: Long) = Unit
+
+            override suspend fun groupsReordered(groups: List<ProxyGroup>, changed: List<ProxyGroup>) {
+                // Group order is not node order or DNS. Only update metadata; never load profiles.
+                groups.firstOrNull { it.id == proxyGroup.id }?.let { proxyGroup.userOrder = it.userOrder }
+            }
 
             override suspend fun groupUpdated(group: ProxyGroup) {
                 if (group.id != proxyGroup.id) return

@@ -138,7 +138,7 @@
                 android:includeFontPadding="false"
                 android:maxLines="1"
                 android:text="@string/control_bar_latency_unknown"
-                android:textColor="@color/control_bar_text"
+                android:textColor="@color/latency_green"
                 android:textSize="16sp"
                 android:textStyle="normal"
                 app:autoSizeTextType="uniform"
@@ -146,6 +146,16 @@
                 app:autoSizeMaxTextSize="16sp"
                 app:autoSizeStepGranularity="0.5sp"
                 tools:text="9999 ms" />
+
+            <androidx.appcompat.widget.AppCompatImageView
+                android:id="@+id/latency_progress"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_gravity="end|center_vertical"
+                android:visibility="gone"
+                android:importantForAccessibility="no"
+                app:tint="@color/latency_green"
+                app:srcCompat="@drawable/ic_control_connecting" />
         </FrameLayout>
     </LinearLayout>
 </merge>

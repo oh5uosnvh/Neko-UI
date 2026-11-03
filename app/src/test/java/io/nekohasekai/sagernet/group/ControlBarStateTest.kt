@@ -126,26 +126,19 @@ class ControlBarStateTest {
         assertNoAnimation(bar)
     }
 
-    @Test fun fadeAndBackgroundHaveRealIntermediateFramesAndFinishAtTheRealState() = withBar { bar, _, context ->
-        val light = attr(context, R.attr.colorMaterial300)
-        val primary = attr(context, R.attr.colorPrimary)
-        assertEquals(light, color(bar))
+    @Test fun fadeHasRealIntermediateFramesWhileAllStatesKeepTheLightThemeFill() = withBar { bar, _, context ->
+        val light=attr(context,R.attr.colorMaterial300)
+        assertEquals(light,color(bar))
         bar.changeState(BaseService.State.Connected)
-        val fade = field(bar, "fadeAnimator") as ValueAnimator
-        val tint = field(bar, "colorAnimator") as ValueAnimator
-        fade.currentPlayTime = 32
-        tint.currentPlayTime = 75
-        val alpha = bar.box(R.id.capsule_pair).alpha
-        assertTrue("fade must not be a hard swap", alpha > 0f && alpha < 1f)
-        assertNotEquals(light, color(bar))
-        assertNotEquals(primary, color(bar))
+        val fade=field(bar,"fadeAnimator") as ValueAnimator
+        fade.currentPlayTime=32
+        assertTrue(bar.box(R.id.capsule_pair).alpha>0f && bar.box(R.id.capsule_pair).alpha<1f)
+        assertEquals(light,color(bar))
         bar.changeState(BaseService.State.Connected)
-        assertSame(fade, field(bar, "fadeAnimator"))
-        assertSame(tint, field(bar, "colorAnimator"))
+        assertSame(fade,field(bar,"fadeAnimator"))
         advance(180)
-        assertEquals(primary, color(bar))
-        assertEquals(bar.context.getString(R.string.control_bar_connected), bar.text(R.id.capsule_label).text)
-        assertTrue(bar.box(R.id.capsule).isSelected)
+        assertEquals(light,color(bar))
+        assertEquals(bar.context.getString(R.string.control_bar_connected),bar.text(R.id.capsule_label).text)
         assertNoAnimation(bar)
     }
 
@@ -163,7 +156,7 @@ class ControlBarStateTest {
                 bar.changeState(BaseService.State.Connecting); advance(180)
                 assertEquals(light, color(bar))
                 bar.changeState(BaseService.State.Connected); advance(180)
-                assertEquals(primary, color(bar))
+                assertEquals(light, color(bar))
                 bar.changeState(BaseService.State.Stopped); advance(180)
                 assertEquals(light, color(bar))
                 context.theme.applyStyle(R.style.Theme_SagerNet_Amber, true)
@@ -182,7 +175,7 @@ class ControlBarStateTest {
             var tests = 0; var errors = 0
             bar.onTest = { tests++ }; bar.onError = { errors++ }
             bar.box(R.id.speed_box).performClick()
-            bar.showFailure(bar.context.getString(R.string.control_bar_failure))
+            bar.showFailure(bar.context.getString(R.string.control_bar_failure)); advance(250)
             assertEquals(Color.rgb(244, 67, 54), bar.text(R.id.latency).currentTextColor)
             assertTrue(bar.box(R.id.speed_box).isEnabled)
             assertTrue(bar.box(R.id.latency_box).isEnabled)
@@ -193,25 +186,25 @@ class ControlBarStateTest {
             bar.box(R.id.speed_box).performClick()
             assertEquals(2, errors); assertEquals(1, tests)
             bar.showTesting() // Only an explicit host action/clear starts a fresh test after failure.
-            assertEquals(if (night) Color.WHITE else Color.BLACK, bar.text(R.id.latency).currentTextColor)
-            bar.showFailure("")
+            assertEquals(bar.resources.getColor(R.color.latency_green,bar.context.theme),bar.text(R.id.latency).currentTextColor)
+            bar.showFailure(""); advance(250)
             assertEquals("-- ms", bar.text(R.id.latency).text.toString())
             assertEquals(Color.rgb(244, 67, 54), bar.text(R.id.latency).currentTextColor)
             bar.clearMeasurements()
-            assertEquals(if (night) Color.WHITE else Color.BLACK, bar.text(R.id.latency).currentTextColor)
-            bar.showFailure("short\nfull sensitive detail is host-owned")
+            assertEquals(bar.resources.getColor(R.color.latency_green,bar.context.theme),bar.text(R.id.latency).currentTextColor)
+            bar.showFailure("short\nfull sensitive detail is host-owned"); advance(250)
             assertEquals("short", bar.text(R.id.latency).text.toString())
-            bar.showLatency(42)
+            bar.showLatency(42); advance(250)
             assertEquals("42 ms", bar.text(R.id.latency).text.toString())
             bar.changeState(BaseService.State.Stopped)
-            bar.showFailure("startup failed")
+            bar.showFailure("startup failed"); advance(250)
             assertEquals("startup failed", bar.text(R.id.latency).text.toString())
             assertEquals(Color.rgb(244, 67, 54), bar.text(R.id.latency).currentTextColor)
             bar.box(R.id.latency_box).performClick(); bar.box(R.id.speed_box).performClick()
             assertEquals(4, errors); assertEquals(1, tests)
-            bar.showLatency(-1)
+            bar.showLatency(-1); advance(250)
             assertEquals("-- ms", bar.text(R.id.latency).text.toString())
-            assertEquals(if (night) Color.WHITE else Color.BLACK, bar.text(R.id.latency).currentTextColor)
+            assertEquals(bar.resources.getColor(R.color.latency_green,bar.context.theme),bar.text(R.id.latency).currentTextColor)
         }
     }
 
@@ -231,7 +224,7 @@ class ControlBarStateTest {
         bar.showTesting(); bar.updateSpeed(10_000, 20_000)
         bar.visibility = View.GONE
         assertNoAnimation(bar)
-        bar.showLatency(999); bar.showFailure("late"); bar.updateSpeed(1_000_000, 2_000_000)
+        bar.showLatency(999); bar.showFailure("late"); bar.updateSpeed(1_000_000, 2_000_000); advance(250)
         assertEquals("-- ms", bar.text(R.id.latency).text.toString())
         assertEquals("▼ -- kB/s", bar.text(R.id.speed_down).text.toString())
         bar.visibility = View.VISIBLE
@@ -317,19 +310,19 @@ class ControlBarStateTest {
         bar.changeState(BaseService.State.Connecting)
         bar.showConnectionTesting(); bar.showConnectionTesting()
         bar.changeState(BaseService.State.Connecting)
-        assertEquals(bar.context.getString(R.string.control_bar_testing), bar.text(R.id.latency).text)
+        assertEquals(View.VISIBLE,bar.box(R.id.latency_progress).visibility)
         assertFalse(bar.box(R.id.speed_box).isEnabled)
         bar.box(R.id.speed_box).performClick(); bar.box(R.id.latency_box).performClick()
         assertEquals(0, manualTests)
         bar.changeState(BaseService.State.Stopped)
-        bar.showFailure("startup failed")
+        bar.showFailure("startup failed"); advance(250)
         assertEquals(Color.rgb(244, 67, 54), bar.text(R.id.latency).currentTextColor)
         bar.changeState(BaseService.State.Connecting)
         assertEquals("-- ms", bar.text(R.id.latency).text.toString())
-        assertEquals(Color.BLACK, bar.text(R.id.latency).currentTextColor)
+        assertEquals(bar.resources.getColor(R.color.latency_green,bar.context.theme),bar.text(R.id.latency).currentTextColor)
         bar.showConnectionTesting()
         bar.changeState(BaseService.State.Connected)
-        bar.showLatency(28)
+        bar.showLatency(28); advance(250)
         assertEquals("28 ms", bar.text(R.id.latency).text.toString())
         assertTrue(bar.box(R.id.speed_box).isEnabled)
         assertEquals(0, manualTests)

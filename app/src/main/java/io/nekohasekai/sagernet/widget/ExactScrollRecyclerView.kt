@@ -25,6 +25,42 @@ class ExactScrollRecyclerView @JvmOverloads constructor(
         )
     }
 
+    private var fixedScrollbar = false
+
+    /** The viewport owns the ONLY track/thumb while bound; disable library drawing/touch. */
+    internal fun useFixedScrollbar(enabled: Boolean) {
+        fixedScrollbar = enabled
+        trackingTouch = false
+        if (enabled) removeOnItemTouchListener(this) else {
+            removeOnItemTouchListener(this)
+            addOnItemTouchListener(this)
+        }
+        setFastScrollEnabled(!enabled)
+    }
+
+    internal fun scrollFixedPixels(delta: Int, edge: Int) {
+        if (isComputingLayout || isLayoutSuppressed) return
+        val manager = layoutManager as? androidx.recyclerview.widget.LinearLayoutManager ?: return
+        val count = adapter?.itemCount ?: return
+        if (count == 0) return
+        if (edge != 0) {
+            // Explicit end anchors avoid metric estimates leaving long/unequal rows short
+            // of the real endpoints. GridLayoutManager inherits the same pixel API.
+            val reversed = manager.reverseLayout
+            val position = if ((edge < 0) != reversed) 0 else count - 1
+            val child = manager.findViewByPosition(position)
+            val extent = height - paddingTop - paddingBottom
+            val childHeight = child?.let { manager.getDecoratedMeasuredHeight(it) } ?: 0
+            val offset = if ((edge < 0) != reversed) 0 else extent - childHeight
+            manager.scrollToPositionWithOffset(position, offset)
+            // The remaining actual pixel scroll lets RecyclerView clamp against measured
+            // rows rather than an item-count fraction (including unknown last-row height).
+            post { if (!isComputingLayout && !isLayoutSuppressed) scrollBy(0, if (edge < 0) -height else height) }
+        } else if (delta != 0) {
+            scrollBy(0, delta)
+        }
+    }
+
     private var downY = 0
     private var grabOffset = 0
     private var trackingTouch = false
@@ -36,6 +72,7 @@ class ExactScrollRecyclerView @JvmOverloads constructor(
     private fun thumbPosition(): Point = thumbPositionField.get(scrollbar()).let { it as Point }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (fixedScrollbar) return super.dispatchTouchEvent(event)
         val y = event.y.toInt()
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {

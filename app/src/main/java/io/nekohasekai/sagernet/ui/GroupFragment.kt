@@ -516,18 +516,16 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
         // 官方语义：clearView（松手落位）时统一落库；在此官方点之后追加一轮广播，
         // 让配置页标签栏与 ☴ 快速列表即时跟随新顺序。拖动中途零落库、零广播。
-        fun commitMove() = runOnDefaultDispatcher {
-            // 后台线程只碰快照；updated 的增删全部在主线程锁内完成
-            val moved = synchronized(updated) {
-                val snapshot = ArrayList(updated)
+        fun commitMove() {
+            val changed = synchronized(updated) {
+                val any = updated.isNotEmpty()
                 updated.clear()
-                snapshot
+                any
             }
-            for (group in moved) {
-                SagerDatabase.groupDao.updateGroup(group)
-            }
-            for (group in moved) {
-                GroupManager.iterator { groupUpdated(group) }
+            if (!changed) return
+            // Same FIFO writer as the popup: never persist stale whole group objects.
+            GroupOrderStore.submit(groupList.map { it.id }) { result ->
+                result.error?.let { Logs.w(it) }
             }
         }
 
@@ -587,6 +585,19 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                     groupList.removeAt(index)
                     notifyItemRemoved(index)
                 }
+            }
+        }
+
+        override suspend fun groupsReordered(groups: List<ProxyGroup>, changed: List<ProxyGroup>) {
+            onMainDispatcher {
+                if (suppressSelfEcho) return@onMainDispatcher
+                val orders = groups.associate { it.id to it.userOrder }
+                val before = groupList.map { it.id }
+                // An order echo must not flush Undo or reread/rebind every node/group.
+                fullList.forEach { group -> orders[group.id]?.let { group.userOrder = it } }
+                fullList.sortWith(compareBy({ it.userOrder }, { it.id }))
+                rebuildVisible()
+                if (before != groupList.map { it.id }) notifyDataSetChanged()
             }
         }
 

@@ -17,6 +17,7 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.content.Context
+import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.MotionEvent
@@ -68,6 +69,12 @@ class ControlBar @JvmOverloads constructor(
     private val capsuleIcon: ImageView
     private val capsuleLabel: TextView
     private val latency: TextView
+    private val latencyProgress: ImageView
+    private var latencyAnimator: ObjectAnimator? = null
+    private var latencyTransition: ValueAnimator? = null
+    private var measurementGeneration = 0L
+    private var testingStarted = 0L
+    private var pendingMeasurement: Runnable? = null
     private var currentState = BaseService.State.Idle
     private var testing = false
     private var togglePending = false
@@ -111,6 +118,7 @@ class ControlBar @JvmOverloads constructor(
         capsuleIcon = findViewById(R.id.capsule_icon)
         capsuleLabel = findViewById(R.id.capsule_label)
         latency = findViewById(R.id.latency)
+        latencyProgress = findViewById(R.id.latency_progress)
 
         val buttonSemantics = object : AccessibilityDelegate() {
             override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
@@ -147,7 +155,8 @@ class ControlBar @JvmOverloads constructor(
             Presentation.DISCONNECTED -> R.string.control_bar_connect_action
         })
         // Do not erase a measurement, release a test lock, or restart animations on duplicates.
-        if (previous != state) resetMeasurements() // New Connecting clears any prior failure.
+        val completingStartup = previous == BaseService.State.Connecting && state == BaseService.State.Connected && testing
+        if (previous != state && !completingStartup) resetMeasurements() // New Connecting clears any prior failure.
         // The host reapplies a failed startup snapshot AFTER its authoritative Stopped state.
         if (changedPresentation) {
             if (shouldAnimateCapsule()) animatePresentation() else settlePresentation()
@@ -251,9 +260,7 @@ class ControlBar @JvmOverloads constructor(
     }
 
     private fun updateCapsuleColor(animate: Boolean) {
-        val color = if (currentState == BaseService.State.Connected)
-            themeColor(R.attr.colorPrimary, R.color.brand_primary)
-        else themeColor(R.attr.colorMaterial300, R.color.brand_primary_light)
+        val color = themeColor(R.attr.colorMaterial300, R.color.brand_primary_light)
         if (animate && targetCapsuleColor == color && (colorAnimator != null || capsuleColor == color)) return
         colorAnimator?.removeAllListeners()
         colorAnimator?.removeAllUpdateListeners()
@@ -310,57 +317,114 @@ class ControlBar @JvmOverloads constructor(
         updateSpeedDescription()
     }
 
-    /** Idempotent; the click handler also acquires this lock before calling the host. */
+    /** Idempotent; a test acquires its lock synchronously before invoking the host. */
     fun showTesting() {
         if (!canReceiveMeasurements() || testing) return
-        failed = false
-        latency.setTextColor(resources.getColor(R.color.control_bar_text, context.theme))
-        testing = true
-        latency.setText(R.string.control_bar_testing)
-        updateLatencyDescription()
-        updateEnabledState()
+        beginLatencyTesting()
     }
 
-    /** Service-owned startup probe presentation, independent of onTest/manual test acquisition. */
     fun showConnectionTesting() {
         if (!canShowReadouts() || currentState != BaseService.State.Connecting || testing) return
+        beginLatencyTesting()
+    }
+
+    private fun beginLatencyTesting() {
+        cancelLatencyPresentation()
+        measurementGeneration++
+        testingStarted = SystemClock.uptimeMillis()
         testing = true
         failed = false
-        latency.setTextColor(resources.getColor(R.color.control_bar_text, context.theme))
-        latency.setText(R.string.control_bar_testing)
+        latency.text = ""
+        latency.setTextColor(resources.getColor(R.color.latency_green, context.theme))
+        latency.visibility = View.INVISIBLE
+        latencyProgress.visibility = View.VISIBLE
+        latencyProgress.alpha = 0f
+        latencyProgress.setColorFilter(resources.getColor(R.color.latency_green, context.theme))
+        latencyAnimator = ObjectAnimator.ofFloat(latencyProgress, View.ROTATION, 0f, 360f).apply {
+            duration = 900L
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            start()
+        }
+        latencyTransition = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 100L
+            addUpdateListener { latencyProgress.alpha = it.animatedValue as Float }
+            start()
+        }
         updateLatencyDescription()
         updateEnabledState()
     }
 
-    /** Negative ms remains an unknown/not-measured compatibility result, not a red failure. */
     fun showLatency(ms: Int) {
-        testing = false
-        failed = false
-        latency.setTextColor(resources.getColor(R.color.control_bar_text, context.theme))
-        latency.text = if (!canReceiveMeasurements() || ms < 0) {
-            context.getString(R.string.control_bar_latency_unknown)
-        } else {
-            // Stable ASCII digits, independent of the device's numeric locale.
-            context.getString(R.string.control_bar_latency_value, ms.toString())
-        }
-        updateLatencyDescription()
-        updateEnabledState()
+        finishLatency(ms, null)
     }
 
-    /** Any real service state may fail, including Stopped. Host owns detail and generation checks. */
     fun showFailure(summary: String) {
-        testing = false
-        if (!canShowReadouts()) {
-            resetMeasurements()
-        } else {
-            failed = true
-            // Bound one-line UI text; empty/unknown failures retain the familiar -- ms label.
-            latency.text = summary.lineSequence().firstOrNull()?.trim()?.take(32)
+        finishLatency(-1, summary)
+    }
+
+    private fun finishLatency(ms: Int, error: String?) {
+        val wait = if (testing) (150L - (SystemClock.uptimeMillis() - testingStarted)).coerceAtLeast(0) else 0L
+        pendingMeasurement?.let { removeCallbacks(it) }
+        val generation = measurementGeneration
+        val completion = Runnable {
+            if (generation != measurementGeneration) return@Runnable
+            pendingMeasurement = null
+            if (!canShowReadouts()) {
+                resetMeasurements()
+                updateEnabledState()
+                return@Runnable
+            }
+            testing = false
+            failed = error != null
+            latency.text = if (error != null) error.lineSequence().firstOrNull()?.trim()?.take(32)
                 ?.takeIf { it.isNotEmpty() } ?: context.getString(R.string.control_bar_latency_unknown)
-            latency.setTextColor(resources.getColor(R.color.control_bar_failure, context.theme))
+            else if (currentState != BaseService.State.Connected || ms < 0) context.getString(R.string.control_bar_latency_unknown)
+            else context.getString(R.string.control_bar_latency_value, ms.toString())
+            latency.setTextColor(resources.getColor(if (failed) R.color.control_bar_failure else R.color.latency_green, context.theme))
+            latencyAnimator?.cancel(); latencyAnimator = null
+            latencyTransition?.removeAllUpdateListeners(); latencyTransition?.cancel()
+            latencyTransition = null
+            latency.visibility = View.VISIBLE
+            if (latencyProgress.visibility == View.VISIBLE) {
+                latency.alpha = 0f
+                latencyTransition = ValueAnimator.ofFloat(0f, 1f).apply {
+                    duration = 100L
+                    addUpdateListener {
+                        val fraction = it.animatedValue as Float
+                        latency.alpha = fraction
+                        latencyProgress.alpha = 1f - fraction
+                    }
+                    addListener(object : AnimatorListenerAdapter() {
+                        override fun onAnimationEnd(animation: Animator) {
+                            latency.alpha = 1f
+                            latencyProgress.visibility = View.GONE
+                            latencyProgress.rotation = 0f
+                            latencyTransition = null
+                        }
+                    })
+                    start()
+                }
+            } else latency.alpha = 1f
             updateLatencyDescription()
+            updateEnabledState()
         }
-        updateEnabledState()
+        if (wait > 0L) {
+            pendingMeasurement = completion
+            postDelayed(completion, wait)
+        } else completion.run()
+    }
+
+    private fun cancelLatencyPresentation() {
+        pendingMeasurement?.let { removeCallbacks(it) }; pendingMeasurement = null
+        latencyAnimator?.cancel(); latencyAnimator = null
+        latencyTransition?.removeAllListeners(); latencyTransition?.removeAllUpdateListeners()
+        latencyTransition?.cancel(); latencyTransition = null
+        latencyProgress.rotation = 0f
+        latencyProgress.alpha = 1f
+        latencyProgress.visibility = View.GONE
+        latency.alpha = 1f
+        latency.visibility = View.VISIBLE
     }
 
     private fun canShowReadouts() = !detached && isAttachedToWindow && isShown && windowVisible
@@ -431,9 +495,11 @@ class ControlBar @JvmOverloads constructor(
     }
 
     private fun resetMeasurements() {
+        measurementGeneration++
+        cancelLatencyPresentation()
         testing = false
         failed = false
-        latency.setTextColor(resources.getColor(R.color.control_bar_text, context.theme))
+        latency.setTextColor(resources.getColor(R.color.latency_green, context.theme))
         val unknown = context.getString(R.string.control_bar_speed_unknown)
         speedDown.text = context.getString(R.string.control_bar_speed_down, unknown)
         speedUp.text = context.getString(R.string.control_bar_speed_up, unknown)
@@ -529,6 +595,10 @@ class ControlBar @JvmOverloads constructor(
         if (ready && (event.actionMasked == MotionEvent.ACTION_UP ||
                 event.actionMasked == MotionEvent.ACTION_CANCEL)) {
             sidePressed = false
+            speedBox.isPressed = false
+            latencyBox.isPressed = false
+            speedBox.cancelLongPress()
+            latencyBox.cancelLongPress()
             updateSideRippleState()
         }
         return handled
@@ -543,7 +613,7 @@ class ControlBar @JvmOverloads constructor(
         val visible = canShowReadouts()
         val pressed = visible && (sidePressed || (speedBox.isEnabled && speedBox.isPressed) ||
             (latencyBox.isEnabled && latencyBox.isPressed))
-        val focused = visible && ((speedBox.isEnabled && speedBox.isFocused) ||
+        val focused = visible && !isInTouchMode && ((speedBox.isEnabled && speedBox.isFocused) ||
             (latencyBox.isEnabled && latencyBox.isFocused))
         sideRipple.state = when {
             pressed -> intArrayOf(android.R.attr.state_enabled, android.R.attr.state_pressed)
