@@ -215,10 +215,10 @@ class LayeredThemeResourceTest {
                 tabs.addTab(tabs.newTab().setText("First"))
                 tabs.addTab(tabs.newTab().setText("Second"))
                 val colors = tabs.tabTextColors!!
-                assertEquals(color(context, android.R.attr.textColorSecondary), colors.defaultColor)
-                assertEquals(color(context, R.attr.colorPrimary), colors.getColorForState(
+                assertEquals(color(context, android.R.attr.textColorPrimary), colors.defaultColor)
+                assertEquals(color(context, android.R.attr.textColorPrimary), colors.getColorForState(
                     intArrayOf(android.R.attr.state_selected), Color.MAGENTA))
-                assertEquals(color(context, R.attr.colorPrimary),
+                assertEquals(Color.TRANSPARENT,
                     org.robolectric.util.ReflectionHelpers.getField<Int>(tabs, "tabSelectedIndicatorColor"))
                 val popup = ContextThemeWrapper(toolbar.context, toolbar.popupTheme)
                 assertEquals(color(context, R.attr.colorLayerHigh),
@@ -251,7 +251,13 @@ class LayeredThemeResourceTest {
                         val tabs = root.findViewById<TabLayout>(R.id.group_tab)
                         assertSame(foreground, tabs.parent)
                         assertTrue(foreground.indexOfChild(tabs) > foreground.indexOfChild(child))
-                        assertEquals(Color.TRANSPARENT, (tabs.background as ColorDrawable).color)
+                        val tabBackground = tabs.background
+                        val fill = when (tabBackground) {
+                            is ColorDrawable -> tabBackground.color
+                            is com.google.android.material.shape.MaterialShapeDrawable -> tabBackground.fillColor!!.defaultColor
+                            else -> throw AssertionError("Unexpected actual Tab background type")
+                        }
+                        assertEquals(Color.TRANSPARENT, fill)
                         assertEquals(0f, tabs.elevation, 0f)
                     } else {
                         assertTrue(child.parent is LinearLayout)

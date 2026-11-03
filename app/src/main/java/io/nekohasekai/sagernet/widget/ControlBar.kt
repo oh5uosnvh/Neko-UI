@@ -180,8 +180,7 @@ class ControlBar @JvmOverloads constructor(
         }))
     }
 
-    private fun shouldAnimateCapsule() = ready && !detached && isAttachedToWindow && isShown &&
-        windowVisible && windowVisibility == View.VISIBLE
+    private fun shouldAnimateCapsule() = ready && canShowReadouts()
 
     private fun stopConnectingAnimation() {
         connectingAnimator?.cancel()
@@ -364,8 +363,7 @@ class ControlBar @JvmOverloads constructor(
         updateEnabledState()
     }
 
-    private fun canShowReadouts() = !detached && isShown && windowVisible &&
-        windowVisibility == View.VISIBLE
+    private fun canShowReadouts() = !detached && isAttachedToWindow && isShown && windowVisible
 
     private fun canReceiveMeasurements() = canShowReadouts() && currentState == BaseService.State.Connected
 
@@ -407,7 +405,7 @@ class ControlBar @JvmOverloads constructor(
     }
 
     private fun requestToggle() {
-        if (detached || !isShown || !windowVisible || windowVisibility != View.VISIBLE || togglePending || isTransitioning()) return
+        if (!canShowReadouts() || togglePending || isTransitioning()) return
         val callback = onToggle ?: return
         // No optimistic state/icon/latency changes. Lock until the host reports its real state.
         togglePending = true
@@ -425,8 +423,7 @@ class ControlBar @JvmOverloads constructor(
         currentState == BaseService.State.Stopping
 
     private fun updateEnabledState() {
-        capsule.isEnabled = !detached && isShown && windowVisible &&
-            windowVisibility == View.VISIBLE && !togglePending && !isTransitioning()
+        capsule.isEnabled = canShowReadouts() && !togglePending && !isTransitioning()
         val canTest = canShowReadouts() && !testing &&
             (if (failed) onError != null else currentState == BaseService.State.Connected)
         speedBox.isEnabled = canTest
@@ -543,7 +540,7 @@ class ControlBar @JvmOverloads constructor(
     }
 
     private fun updateSideRippleState() {
-        val visible = !detached && isShown && windowVisible && windowVisibility == View.VISIBLE
+        val visible = canShowReadouts()
         val pressed = visible && (sidePressed || (speedBox.isEnabled && speedBox.isPressed) ||
             (latencyBox.isEnabled && latencyBox.isPressed))
         val focused = visible && ((speedBox.isEnabled && speedBox.isFocused) ||

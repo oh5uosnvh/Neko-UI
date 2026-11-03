@@ -66,6 +66,7 @@ class ControlBarStateTest {
         host.measure(View.MeasureSpec.makeMeasureSpec(584, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(152, View.MeasureSpec.EXACTLY))
         host.layout(0, 0, 584, 152)
+        advance(32) // Let the actual window attach/visibility callbacks settle before state assertions.
         try { block(bar, host, context) }
         finally { controller.pause().stop().destroy() }
     }
