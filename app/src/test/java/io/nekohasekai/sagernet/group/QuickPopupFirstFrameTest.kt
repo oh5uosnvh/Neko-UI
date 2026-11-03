@@ -33,7 +33,9 @@ import io.nekohasekai.sagernet.ui.GroupPickerAdapter
 import io.nekohasekai.sagernet.ui.GroupPickerRecyclerView
 import io.nekohasekai.sagernet.ui.TopBarController
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import moe.matsuri.nb4a.TempDatabase
 import org.junit.After
 import org.junit.Assert.*
@@ -193,14 +195,18 @@ class QuickPopupFirstFrameTest {
             }
         }
 
-        fun awaitRefresh() {
-            val job = ReflectionHelpers.getField<Job?>(session, "refreshing") ?: return
+        fun await(job: Job, label: String) {
             val deadline = System.nanoTime() + 3_000_000_000L
             while (!job.isCompleted && System.nanoTime() < deadline) {
                 advance(16)
                 Thread.yield()
             }
-            assertTrue("The refresh must complete", job.isCompleted)
+            assertTrue("$label must complete without blocking a paused Main looper", job.isCompleted)
+        }
+
+        fun awaitRefresh() {
+            val job = ReflectionHelpers.getField<Job?>(session, "refreshing") ?: return
+            await(job, "Refresh")
             advance()
         }
 
@@ -209,7 +215,7 @@ class QuickPopupFirstFrameTest {
                 ReflectionHelpers.getField<Job?>(session, "counting"))
             ReflectionHelpers.callInstanceMethod<Void>(session, "close")
             popup.dismiss()
-            runBlocking { jobs.forEach { it.join() } }
+            jobs.forEach { await(it, "Cancelled session work") }
             activityController.pause().stop().destroy()
             environment.close()
         }
@@ -258,7 +264,10 @@ class QuickPopupFirstFrameTest {
             assertEquals(first, f.frame())
             assertEquals(top, f.layout.findViewByPosition(27)!!.top)
             f.advance()
-            runBlocking { GroupManager.iterator { groupUpdated(f.groups[27]) } }
+            val broadcast = CoroutineScope(Dispatchers.Default).launch {
+                GroupManager.iterator { groupUpdated(f.groups[27]) }
+            }
+            f.await(broadcast, "Group broadcast")
             f.awaitRefresh()
             assertEquals(first, f.frame())
             assertEquals(top, f.layout.findViewByPosition(27)!!.top)
