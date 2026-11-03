@@ -61,7 +61,18 @@ internal class GroupPickerAdapter(
             if (list.isSettling) list.postOnAnimation(this)
             else {
                 countsDirty = false
+                // A text-only payload can still make LinearLayoutManager clamp a partly
+                // visible first row to the padding edge. Retain its exact visual offset.
+                val layout = list.layoutManager as? androidx.recyclerview.widget.LinearLayoutManager
+                val first = layout?.findFirstVisibleItemPosition() ?: RecyclerView.NO_POSITION
+                val anchorId = rows.getOrNull(first)?.id
+                val anchorView = if (first >= 0) layout?.findViewByPosition(first) else null
+                val offset = anchorView?.let { layout!!.getDecoratedTop(it) - list.paddingTop }
                 notifyItemRangeChanged(0, itemCount, COUNTS)
+                if (anchorId != null && offset != null) {
+                    val position = rows.indexOfFirst { it.id == anchorId }
+                    if (position >= 0) layout?.scrollToPositionWithOffset(position, offset)
+                }
             }
         }
     }
