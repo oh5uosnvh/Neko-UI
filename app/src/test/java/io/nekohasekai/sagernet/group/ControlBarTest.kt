@@ -6,7 +6,6 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.StateListDrawable
 import android.os.Looper
 import android.os.Parcelable
 import android.util.SparseArray
@@ -75,7 +74,7 @@ class ControlBarTest {
         host.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
         host.layout(0, 0, width, height)
-        shadowOf(Looper.getMainLooper()).idle()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(180))
     }
 
     private fun assertUnknown(bar: ControlBar) {
@@ -85,8 +84,7 @@ class ControlBarTest {
     }
 
     private fun capsuleColor(bar: ControlBar): Int {
-        val drawable = bar.box(R.id.capsule).background as StateListDrawable
-        return (drawable.current as GradientDrawable).color!!.defaultColor
+        return (bar.box(R.id.capsule).background as GradientDrawable).color!!.defaultColor
     }
 
     @Test fun mergeInflatesOnceAndColdStateHasNoInventedMeasurements() = withBar { bar, _ ->
@@ -105,14 +103,18 @@ class ControlBarTest {
         assertNotNull(bar.findViewById<ImageView>(R.id.capsule_icon).drawable)
     }
 
-    @Test fun everyServiceStateUsesOnlyConnectedOrDisconnectedVisuals() = withBar { bar, _ ->
+    @Test fun everyServiceStateUsesTheAuthoritativeThreeStateVisuals() = withBar { bar, _ ->
         for (state in BaseService.State.values()) {
             bar.changeState(state)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(180))
             val connected = state == BaseService.State.Connected
             val capsule = bar.box(R.id.capsule)
             assertEquals("state=$state", connected, capsule.isSelected)
-            assertEquals(bar.context.getString(if (connected) R.string.control_bar_connected
-                else R.string.control_bar_disconnected), bar.text(R.id.capsule_label).text)
+            assertEquals(bar.context.getString(when (state) {
+                BaseService.State.Connected -> R.string.control_bar_connected
+                BaseService.State.Connecting -> R.string.control_bar_connecting
+                else -> R.string.control_bar_disconnected
+            }), bar.text(R.id.capsule_label).text)
             assertEquals(!listOf(BaseService.State.Connecting, BaseService.State.Stopping).contains(state),
                 capsule.isEnabled)
             assertEquals(connected, bar.box(R.id.speed_box).isEnabled)
@@ -330,7 +332,7 @@ class ControlBarTest {
                 bar.showTesting()
                 assertEquals(expected,bar.text(R.id.latency).currentTextColor)
             }
-            assertEquals(Color.WHITE,bar.text(R.id.capsule_label).currentTextColor)
+            assertEquals(expected,bar.text(R.id.capsule_label).currentTextColor)
         }
     }
 
@@ -415,12 +417,12 @@ class ControlBarTest {
         }
     }
 
-    @Test fun downUpTypefaceWeightsReverseBetweenDayAndNight() {
+    @Test fun bothSpeedLinesUseNormalSansSerifInDayAndNight() {
         for (night in listOf(false, true)) {
             withBar(night = night) { bar, _ ->
-                assertEquals(Typeface.create(if (night) "sans-serif-light" else "sans-serif-black", Typeface.NORMAL),
+                assertEquals(Typeface.create("sans-serif", Typeface.NORMAL),
                     bar.text(R.id.speed_down).typeface)
-                assertEquals(Typeface.create(if (night) "sans-serif-black" else "sans-serif-light", Typeface.NORMAL),
+                assertEquals(Typeface.create("sans-serif", Typeface.NORMAL),
                     bar.text(R.id.speed_up).typeface)
                 assertEquals(if (night) Color.WHITE else Color.BLACK,
                     bar.text(R.id.latency).currentTextColor)
@@ -437,6 +439,7 @@ class ControlBarTest {
             withBar(locale = locale) { bar, _ ->
                 assertEquals(disconnected, bar.text(R.id.capsule_label).text.toString())
                 bar.changeState(BaseService.State.Connected)
+                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(180))
                 assertEquals(connected, bar.text(R.id.capsule_label).text.toString())
                 for (id in listOf(R.id.speed_box, R.id.capsule, R.id.latency_box)) {
                     val view = bar.box(id)

@@ -16,6 +16,10 @@ import androidx.activity.result.component2
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.widget.NestedScrollView
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.recyclerview.widget.RecyclerView
 import com.danielstone.materialaboutlibrary.MaterialAboutFragment
 import com.danielstone.materialaboutlibrary.items.MaterialAboutActionItem
@@ -58,16 +62,18 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
         ViewCompat.setOnApplyWindowInsetsListener(view, ListListener)
         toolbar.setTitle(R.string.menu_about)
 
-        parentFragmentManager.beginTransaction()
+        childFragmentManager.beginTransaction()
             .replace(R.id.about_fragment_holder, AboutContent())
             .commitAllowingStateLoss()
 
-        runOnDefaultDispatcher {
-            val license = view.context.assets.open("LICENSE").bufferedReader().readText()
-            onMainDispatcher {
-                binding.license.text = license
-                Linkify.addLinks(binding.license, Linkify.EMAIL_ADDRESSES or Linkify.WEB_URLS)
+        val resourcesContext = view.context
+        viewLifecycleOwner.lifecycleScope.launch {
+            val license = withContext(Dispatchers.IO) {
+                resourcesContext.assets.open("LICENSE").bufferedReader().use { it.readText() }
             }
+            if (this@AboutFragment.view !== view) return@launch
+            binding.license.text = license
+            Linkify.addLinks(binding.license, Linkify.EMAIL_ADDRESSES or Linkify.WEB_URLS)
         }
     }
 
@@ -76,7 +82,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
         val requestIgnoreBatteryOptimizations = registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) { (resultCode, _) ->
-            if (resultCode == Activity.RESULT_OK) {
+            if (resultCode == Activity.RESULT_OK && isAdded && !parentFragmentManager.isStateSaved) {
                 parentFragmentManager.beginTransaction()
                     .replace(R.id.about_fragment_holder, AboutContent())
                     .commitAllowingStateLoss()
@@ -84,6 +90,11 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
         }
 
         override fun getMaterialAboutList(activityContext: Context): MaterialAboutList {
+            // MaterialAboutFragment builds this list on AsyncTask. The Fragment can already
+            // be detached during DayNight recreation; use the task's captured Context only.
+            fun safeBrowse(url: String) {
+                context?.takeIf { isAdded }?.launchCustomTab(url)
+            }
             return MaterialAboutList.Builder()
                 .addCard(
                     MaterialAboutCard.Builder()
@@ -94,7 +105,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                                 .text(R.string.app_version)
                                 .subText(SagerNet.appVersionNameForDisplay)
                                 .setOnClickAction {
-                                    requireContext().launchCustomTab(
+                                    safeBrowse(
                                         "https://github.com/MatsuriDayo/NekoBoxForAndroid/releases"
                                     )
                                 }
@@ -116,7 +127,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                         .addItem(
                             MaterialAboutActionItem.Builder()
                                 .icon(R.drawable.ic_baseline_layers_24)
-                                .text(getString(R.string.version_x, "sing-box"))
+                                .text(activityContext.getString(R.string.version_x, "sing-box"))
                                 .subText(Libcore.versionBox())
                                 .setOnClickAction { }
                                 .build())
@@ -126,7 +137,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                                 .text(R.string.donate)
                                 .subText(R.string.donate_info)
                                 .setOnClickAction {
-                                    requireContext().launchCustomTab(
+                                    safeBrowse(
                                         "https://matsuridayo.github.io/index_docs/#donate"
                                     )
                                 }
@@ -142,14 +153,14 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                                         MaterialAboutActionItem.Builder()
                                             .icon(R.drawable.ic_baseline_nfc_24)
                                             .text(
-                                                getString(
+                                                activityContext.getString(
                                                     R.string.version_x,
                                                     pluginId
                                                 ) + " (${Plugins.displayExeProvider(pkg.packageName)})"
                                             )
                                             .subText("v" + pkg.versionName)
                                             .setOnClickAction {
-                                                startActivity(Intent().apply {
+                                                activity?.takeUnless { it.isFinishing || it.isDestroyed }?.startActivity(Intent().apply {
                                                     action =
                                                         Settings.ACTION_APPLICATION_DETAILS_SETTINGS
                                                     data = Uri.fromParts(
@@ -173,6 +184,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                                             .text(R.string.ignore_battery_optimizations)
                                             .subText(R.string.ignore_battery_optimizations_sum)
                                             .setOnClickAction {
+                                                if (!isAdded || activity?.isDestroyed != false) return@setOnClickAction
                                                 requestIgnoreBatteryOptimizations.launch(
                                                     Intent(
                                                         Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
@@ -194,7 +206,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                                 .icon(R.drawable.ic_baseline_sanitizer_24)
                                 .text(R.string.github)
                                 .setOnClickAction {
-                                    requireContext().launchCustomTab(
+                                    safeBrowse(
                                         "https://github.com/MatsuriDayo/NekoBoxForAndroid"
 
                                     )
@@ -205,7 +217,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                                 .icon(R.drawable.ic_qu_shadowsocks_foreground)
                                 .text(R.string.telegram)
                                 .setOnClickAction {
-                                    requireContext().launchCustomTab(
+                                    safeBrowse(
                                         "https://t.me/MatsuriDayo"
                                     )
                                 }
@@ -224,7 +236,8 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
         }
 
         fun checkUpdate(checkPreview: Boolean) {
-            runOnIoDispatcher {
+            val owner = viewLifecycleOwnerLiveData.value ?: return
+            owner.lifecycleScope.launch(Dispatchers.IO) {
                 try {
                     val client = Libcore.newHttpClient().apply {
                         modernTLS()
@@ -261,7 +274,8 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                     }
                     runOnMainDispatcher {
                         if (haveUpdate) {
-                            val context = requireContext()
+                            val context = context?.takeIf { isAdded && viewLifecycleOwnerLiveData.value === owner }
+                                ?: return@runOnMainDispatcher
                             MaterialAlertDialogBuilder(context)
                                 .setTitle(R.string.update_dialog_title)
                                 .setMessage(
@@ -281,9 +295,12 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                             Toast.makeText(app, R.string.check_update_no, Toast.LENGTH_SHORT).show()
                         }
                     }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
                 } catch (e: Exception) {
                     Logs.w(e)
                     runOnMainDispatcher {
+                        if (viewLifecycleOwnerLiveData.value !== owner) return@runOnMainDispatcher
                         Toast.makeText(app, e.readableMessage, Toast.LENGTH_SHORT).show()
                     }
                 }

@@ -4,4 +4,5 @@
     <color name="control_bar_text">#FF000000</color>
     <color name="control_bar_surface">#FFFFFFFF</color>
     <color name="control_bar_border">#59000000</color>
+    <color name="control_bar_failure">#FFF44336</color>
 </resources>

@@ -123,9 +123,9 @@ internal class GroupPickerAdapter(
             addView(label, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
         val handle = TextView(context).apply {
-            text = "☷"
+            text = "≡"
             gravity = Gravity.CENTER
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
             setTextColor(secondaryColor)
             contentDescription = context.getString(R.string.group_reorder_handle)
             isClickable = true
@@ -254,6 +254,10 @@ internal class GroupPickerDragCallback(
 
     override fun isLongPressDragEnabled() = false
     override fun isItemViewSwipeEnabled() = false
+
+    override fun interpolateOutOfBoundsScroll(recyclerView: RecyclerView, viewSize: Int,
+        viewSizeOutOfBounds: Int, totalSize: Int, msSinceStartScroll: Long): Int =
+        GroupDragScroll.pixels(recyclerView, viewSizeOutOfBounds)
 
     override fun onSelectedChanged(viewHolder: RecyclerView.ViewHolder?, actionState: Int) {
         if (!closed && actionState == ItemTouchHelper.ACTION_STATE_DRAG && viewHolder != null) {

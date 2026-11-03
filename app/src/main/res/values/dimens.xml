@@ -3,11 +3,11 @@
     <dimen name="main_list_padding_bottom">88dp</dimen>
     <dimen name="bottom_sheet_padding">8dp</dimen>
 
-    <dimen name="card_corner_radius">16dp</dimen>
+    <dimen name="card_corner_radius">24dp</dimen>
     <dimen name="card_elevation">1dp</dimen>
     <dimen name="card_stroke_width">1dp</dimen>
     <dimen name="card_stroke_width_selected">2dp</dimen>
-    <dimen name="profile_card_corner_radius">10dp</dimen>
+    <dimen name="profile_card_corner_radius">24dp</dimen>
     <dimen name="profile_card_selected_bar_width">5dp</dimen>
     <dimen name="profile_card_elevation_classic">2dp</dimen>
 
@@ -27,10 +27,11 @@
     <dimen name="topbar_segment_cell_min_width">48dp</dimen>
     <dimen name="topbar_segment_cell_padding_h">8dp</dimen>
 
-    <dimen name="popup_corner_radius">12dp</dimen>
+    <dimen name="popup_corner_radius">24dp</dimen>
     <dimen name="dialog_corner_radius">24dp</dimen>
     <dimen name="dialog_background_inset">24dp</dimen>
 
+    <dimen name="choice_corner_radius">24dp</dimen>
     <dimen name="nav_item_corner_radius">14dp</dimen>
     <dimen name="button_corner_radius">12dp</dimen>
 

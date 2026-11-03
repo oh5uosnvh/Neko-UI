@@ -101,7 +101,8 @@ data class ProxyGroup(
     }
 
     fun displayName(): String {
-        return name.takeIf { !it.isNullOrBlank() } ?: app.getString(R.string.group_default)
+        val raw = name.takeIf { !it.isNullOrBlank() } ?: return app.getString(R.string.group_default)
+        return io.nekohasekai.sagernet.group.GroupDisplayName.withoutFileSuffix(raw)
     }
 
     @androidx.room.Dao

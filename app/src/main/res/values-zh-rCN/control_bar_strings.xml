@@ -9,4 +9,8 @@
     <string name="control_bar_disconnect_action">断开代理</string>
     <string name="control_bar_speed_description">下载和上传速度：%1$s，%2$s。点按测试延迟。</string>
     <string name="control_bar_latency_description">延迟：%1$s。点按测试延迟。</string>
+    <string name="control_bar_connecting">连接中</string>
+    <string name="control_bar_connecting_compact">连接中</string>
+    <string name="control_bar_failure">失败</string>
+    <string name="control_bar_failure_description">延迟：%1$s。点按查看错误详情。</string>
 </resources>

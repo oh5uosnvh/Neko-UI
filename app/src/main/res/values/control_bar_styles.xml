@@ -11,9 +11,11 @@
         <item name="autoSizeStepGranularity">0.5sp</item>
     </style>
     <style name="ControlBarSpeed.Down" parent="ControlBarSpeed">
-        <item name="android:fontFamily">sans-serif-black</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:textStyle">normal</item>
     </style>
     <style name="ControlBarSpeed.Up" parent="ControlBarSpeed">
-        <item name="android:fontFamily">sans-serif-light</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:textStyle">normal</item>
     </style>
 </resources>

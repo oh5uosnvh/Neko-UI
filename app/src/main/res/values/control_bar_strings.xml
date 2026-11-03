@@ -16,4 +16,8 @@
     <string name="control_bar_speed_up_unknown" translatable="false">▲ -- kB/s</string>
     <string name="control_bar_latency_unknown" translatable="false">-- ms</string>
     <string name="control_bar_latency_value" translatable="false">%1$s ms</string>
+    <string name="control_bar_connecting">Connecting</string>
+    <string name="control_bar_connecting_compact">Wait</string>
+    <string name="control_bar_failure">Failed</string>
+    <string name="control_bar_failure_description">Latency: %1$s. Show error details.</string>
 </resources>

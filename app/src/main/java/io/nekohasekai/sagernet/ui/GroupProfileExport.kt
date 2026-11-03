@@ -79,7 +79,13 @@ internal class GroupProfileExport(private val fragment: Fragment) {
 
     private fun showResult(message: Int) {
         val view = fragment.view ?: return
-        if (fragment.isAdded) Snackbar.make(view, message, Snackbar.LENGTH_SHORT).show()
+        if (!fragment.isAdded) return
+        val activity = fragment.activity as? MainActivity
+        if (fragment is ConfigurationFragment && activity != null) {
+            activity.snackbar(message).setDuration(Snackbar.LENGTH_SHORT).show()
+        } else {
+            Snackbar.make(view, message, Snackbar.LENGTH_SHORT).show()
+        }
     }
 
     internal companion object {

@@ -399,7 +399,9 @@ internal class TopBarController(
             ?.setBackgroundColor(0x00000000)
         sv.findViewById<EditText>(androidx.appcompat.R.id.search_src_text)?.apply {
             setTextColor(iconColor)
-            setHintTextColor(0x99FFFFFF.toInt())
+            // The hint uses the same page day/night foreground as entered text;
+            // a fixed white hint disappears on the day-mode top bar.
+            setHintTextColor(iconColor)
         }
         // 不再隐藏 search_mag_icon：原版展开后左侧就是这枚放大镜，
         // 隐掉它反而和原版长得不一样。

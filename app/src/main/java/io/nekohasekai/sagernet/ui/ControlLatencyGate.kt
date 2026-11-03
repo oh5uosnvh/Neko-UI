@@ -5,6 +5,7 @@ internal class ControlLatencyGate {
     data class Request(val generation: Long, val selectedId: Long, val runningId: Long)
     private var generation = 0L
     private var current: Request? = null
+    val isRunning: Boolean get() = current != null
 
     fun begin(selectedId: Long, runningId: Long): Request? {
         if (current != null) return null

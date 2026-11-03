@@ -120,9 +120,25 @@ class LayeredThemeResourceTest {
                 assertFalse(all(root).any{it.tagName.contains("LayeredContentFrameLayout")})
                 assertFalse(all(root).any{it.getAttributeNS(ns,"background")=="@drawable/bg_layer_high"})
                 val child=all(root).single{it.getAttributeNS(ns,"id")=="@+id/$id"}
-                assertEquals("LinearLayout",(child.parentNode as Element).tagName)
-                assertEquals("0dp",child.getAttributeNS(ns,"layout_height"))
-                assertEquals("1",child.getAttributeNS(ns,"layout_weight"))
+                if (layout == "group_list") {
+                    val foreground = child.parentNode as Element
+                    assertEquals("io.nekohasekai.sagernet.widget.GroupListEdgeLayout", foreground.tagName)
+                    assertEquals("LinearLayout", (foreground.parentNode as Element).tagName)
+                    assertEquals("0dp", foreground.getAttributeNS(ns,"layout_height"))
+                    assertEquals("1", foreground.getAttributeNS(ns,"layout_weight"))
+                    assertEquals("match_parent", child.getAttributeNS(ns,"layout_height"))
+                    assertFalse(child.hasAttributeNS(ns,"layout_weight"))
+                    val tabs = all(root).single { it.getAttributeNS(ns,"id") == "@+id/group_tab" }
+                    assertSame(foreground, tabs.parentNode)
+                    assertEquals("@android:color/transparent", tabs.getAttributeNS(ns,"background"))
+                    assertEquals("top", tabs.getAttributeNS(ns,"layout_gravity"))
+                    assertEquals("group_pager", child.getAttributeNS(ns,"id").substringAfter('/'))
+                    assertTrue(child.compareDocumentPosition(tabs).toInt() and 4 != 0)
+                } else {
+                    assertEquals("LinearLayout",(child.parentNode as Element).tagName)
+                    assertEquals("0dp",child.getAttributeNS(ns,"layout_height"))
+                    assertEquals("1",child.getAttributeNS(ns,"layout_weight"))
+                }
             }
             assertFalse(File(app,"src/main/res/drawable/bg_layer_high.xml").exists())
             assertFalse(File(app,"src/main/java/io/nekohasekai/sagernet/widget/LayeredContentFrameLayout.kt").exists())
@@ -223,9 +239,25 @@ class LayeredThemeResourceTest {
                     val root=LayoutInflater.from(context).inflate(layout,FrameLayout(context),false)
                     val child=root.findViewById<View>(id)
                     assertNotNull(child)
-                    assertTrue(child.parent is LinearLayout)
-                    val params=child.layoutParams as LinearLayout.LayoutParams
-                    assertEquals(0,params.height);assertEquals(1f,params.weight,0f)
+                    if (layout == R.layout.layout_group_list) {
+                        val foreground = root.findViewById<io.nekohasekai.sagernet.widget.GroupListEdgeLayout>(
+                            R.id.group_list_foreground)
+                        assertSame(foreground, child.parent)
+                        assertTrue(foreground.parent is LinearLayout)
+                        val outer = foreground.layoutParams as LinearLayout.LayoutParams
+                        assertEquals(0, outer.height); assertEquals(1f, outer.weight, 0f)
+                        val pagerParams = child.layoutParams as FrameLayout.LayoutParams
+                        assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, pagerParams.height)
+                        val tabs = root.findViewById<TabLayout>(R.id.group_tab)
+                        assertSame(foreground, tabs.parent)
+                        assertTrue(foreground.indexOfChild(tabs) > foreground.indexOfChild(child))
+                        assertEquals(Color.TRANSPARENT, (tabs.background as ColorDrawable).color)
+                        assertEquals(0f, tabs.elevation, 0f)
+                    } else {
+                        assertTrue(child.parent is LinearLayout)
+                        val params=child.layoutParams as LinearLayout.LayoutParams
+                        assertEquals(0,params.height);assertEquals(1f,params.weight,0f)
+                    }
                     assertEquals(color(context,R.attr.colorLayerLow),(root.background as ColorDrawable).color)
                     root.measure(View.MeasureSpec.makeMeasureSpec(360,View.MeasureSpec.EXACTLY),
                         View.MeasureSpec.makeMeasureSpec(640,View.MeasureSpec.EXACTLY))

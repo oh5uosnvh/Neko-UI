@@ -37,7 +37,7 @@
                     android:paddingTop="8dp"
                     android:paddingBottom="8dp">
 
-                    <TextView
+                    <io.nekohasekai.sagernet.widget.ProfileNameTextView
                         android:id="@+id/profile_name"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -46,7 +46,7 @@
                         android:breakStrategy="simple"
                         android:hyphenationFrequency="none"
                         android:lineBreakStyle="loose"
-                        android:lineBreakWordStyle="phrase"
+                        android:lineBreakWordStyle="none"
                         android:textAppearance="?android:attr/textAppearanceSmall"
                         android:textColor="?android:attr/textColorPrimary"
                         android:textStyle="bold"

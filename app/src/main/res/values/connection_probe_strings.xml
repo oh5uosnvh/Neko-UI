@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="control_bar_connection_failed">Connection failed</string>
+    <string name="control_bar_connection_reset">Reset</string>
+    <string name="control_bar_unavailable">Unavailable</string>
+    <string name="control_bar_retry_test">Test again</string>
+</resources>

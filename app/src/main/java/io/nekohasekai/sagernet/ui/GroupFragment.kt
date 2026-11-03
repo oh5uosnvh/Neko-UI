@@ -184,11 +184,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 totalSize: Int,
                 msSinceStartScroll: Long,
             ): Int {
-                val maxScroll = recyclerView.resources.getDimensionPixelSize(
-                    R.dimen.item_touch_helper_max_drag_scroll_per_frame
-                )
-                val speed = (maxScroll * 0.5f).toInt().coerceAtLeast(1)
-                return if (viewSizeOutOfBounds > 0) speed else -speed
+                return GroupDragScroll.pixels(recyclerView, viewSizeOutOfBounds)
             }
         })
         itemTouchHelper.attachToRecyclerView(groupListView)
@@ -296,7 +292,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         val ctx = requireContext()
 
         val card = com.google.android.material.card.MaterialCardView(ctx).apply {
-            radius = dp2px(12).toFloat()
+            radius = resources.getDimension(R.dimen.popup_corner_radius)
             cardElevation = dp2px(8).toFloat()
             strokeWidth = 0
             val ta = ctx.obtainStyledAttributes(intArrayOf(R.attr.colorSurface))

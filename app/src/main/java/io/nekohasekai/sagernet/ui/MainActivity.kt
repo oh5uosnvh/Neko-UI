@@ -78,6 +78,9 @@ class MainActivity : ThemedActivity(),
     private val controlLatencyGate = ControlLatencyGate()
     private var controlLatencyJob: Job? = null
     private lateinit var controlOverlay: ConfigurationControlOverlay
+    private var startupProbe: ConnectionProbeStatus? = null
+    private var controlErrorDetail: String? = null
+    private var lastErrorDialog = ""
 
     // ---- 侧边栏切换优化 ----
     // 官方实现每次点击都是 new Fragment + replace()，事务恰好在抽屉关闭动画
@@ -152,6 +155,7 @@ class MainActivity : ThemedActivity(),
             }
         }
         binding.controlBar.onTest = { testControlLatency() }
+        binding.controlBar.onError = { showControlErrorDialog() }
 
         setContentView(binding.root)
         installControlBarInsets()
@@ -224,6 +228,7 @@ class MainActivity : ThemedActivity(),
         if (restoredFragment != null) {
             currentMainFragment = restoredFragment
             syncMainControls()
+            renderConnectionProbe()
         }
     }
 
@@ -723,7 +728,9 @@ class MainActivity : ThemedActivity(),
             root?.translationY != 0f, root?.isAttachedToWindow == true,
         )
         // Navigation is not a service acknowledgement: it must not release a pending VPN request.
+        val wasVisible = binding.controlBar.visibility == View.VISIBLE
         controlOverlay.show(root, visible)
+        if (visible && !wasVisible) renderConnectionProbe()
     }
 
     private fun installControlBarInsets() {
@@ -752,22 +759,73 @@ class MainActivity : ThemedActivity(),
         }
         val request = controlLatencyGate.begin(DataStore.selectedProxy, DataStore.currentProfile) ?: return
         binding.controlBar.showTesting()
+        controlErrorDetail = null
         controlLatencyJob = lifecycleScope.launch {
             try {
                 val elapsed = withContext(Dispatchers.IO) { urlTest() }
                 if (controlLatencyGate.finish(request, DataStore.serviceState.connected,
                         DataStore.selectedProxy, DataStore.currentProfile)) {
+                    startupProbe = startupProbe?.copy(elapsed = elapsed, phase = "connected", error = "")
                     binding.controlBar.showLatency(elapsed)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
+            } catch (error: Exception) {
                 if (controlLatencyGate.finish(request, DataStore.serviceState.connected,
                         DataStore.selectedProxy, DataStore.currentProfile)) {
-                    binding.controlBar.showLatency(-1)
+                    showControlFailure(error.readableMessage, true)
                 }
             }
         }
+    }
+
+    override fun connectionProbe(snapshot: String) {
+        val probe = ConnectionProbeStatus.parse(snapshot) ?: return
+        if (probe.profileId != DataStore.selectedProxy) return
+        val previous = startupProbe
+        if (previous != null && previous.profileId == probe.profileId && previous.generation > probe.generation) return
+        startupProbe = probe
+        renderConnectionProbe()
+    }
+
+    private fun renderConnectionProbe() {
+        if (!::binding.isInitialized || binding.controlBar.visibility != View.VISIBLE) return
+        val probe = startupProbe ?: return
+        if (probe.profileId != DataStore.selectedProxy || controlLatencyGate.isRunning) return
+        when (probe.phase) {
+            "connecting" -> if (DataStore.serviceState == BaseService.State.Connecting) binding.controlBar.showConnectionTesting()
+            "connected" -> if (DataStore.serviceState.connected && probe.elapsed >= 0) {
+                controlErrorDetail = null
+                binding.controlBar.showLatency(probe.elapsed)
+            }
+            "failed" -> if (!DataStore.serviceState.connected) showControlFailure(probe.error, true)
+        }
+    }
+
+    private fun showControlFailure(detail: String, automaticDialog: Boolean) {
+        val error = detail.ifBlank { getString(R.string.control_bar_unavailable) }
+        controlErrorDetail = error
+        val lower = error.lowercase()
+        val summary = when {
+            lower.contains("timeout") || lower.contains("deadline") || error.contains("超时") -> getString(R.string.connection_test_timeout_error)
+            lower.contains("reset") -> getString(R.string.control_bar_connection_reset)
+            else -> getString(R.string.control_bar_unavailable)
+        }
+        binding.controlBar.showFailure(summary)
+        if (automaticDialog && error != lastErrorDialog && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            lastErrorDialog = error
+            showControlErrorDialog()
+        }
+    }
+
+    private fun showControlErrorDialog() {
+        val detail = controlErrorDetail ?: return
+        if (isFinishing || isDestroyed || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+        MaterialAlertDialogBuilder(this).setTitle(R.string.control_bar_connection_failed)
+            .setMessage(detail).setPositiveButton(android.R.string.ok, null)
+            .setNeutralButton(R.string.control_bar_retry_test) { _, _ ->
+                if (DataStore.serviceState.connected) testControlLatency()
+            }.show()
     }
 
     private fun refreshConfigurationProfileState() {
@@ -798,16 +856,27 @@ class MainActivity : ThemedActivity(),
         msg: String? = null,
     ) {
         DataStore.serviceState = state
+        if (state == BaseService.State.Connecting) {
+            startupProbe = null
+            controlErrorDetail = null
+            lastErrorDialog = ""
+        }
         if (!state.connected) invalidateControlLatency()
         binding.controlBar.changeState(state) // Only an actual service acknowledgement unlocks toggle.
         refreshConfigurationProfileState()
         syncMainControls()
-        if (msg != null) snackbar(getString(R.string.vpn_error, msg)).show()
+        renderConnectionProbe()
+        if (!msg.isNullOrBlank()) showControlFailure(msg, true)
     }
 
     override fun snackbarInternal(text: CharSequence): Snackbar {
         return Snackbar.make(binding.coordinator, text, Snackbar.LENGTH_LONG).apply {
-            if (binding.controlBar.isShown) anchorView = binding.controlBar
+            if (binding.controlBar.isShown) {
+                anchorView = binding.controlBar
+                setBackgroundTint(resources.getColor(R.color.control_bar_surface, theme))
+                setTextColor(resources.getColor(R.color.control_bar_text, theme))
+                setActionTextColor(resources.getColor(R.color.control_bar_text, theme))
+            }
         }
     }
 
@@ -816,13 +885,15 @@ class MainActivity : ThemedActivity(),
     }
 
     val connection = SagerConnection(SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND, true)
-    override fun onServiceConnected(service: ISagerNetService) = changeState(
-        try {
+    override fun onServiceConnected(service: ISagerNetService) {
+        val state = try {
             BaseService.State.values()[service.state]
         } catch (_: RemoteException) {
             BaseService.State.Idle
         }
-    )
+        changeState(state)
+        runCatching { service.connectionProbe }.getOrNull()?.let { connectionProbe(it) }
+    }
 
     override fun onServiceDisconnected() = changeState(BaseService.State.Idle)
     override fun onBinderDied() {
@@ -866,7 +937,12 @@ class MainActivity : ThemedActivity(),
     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
         when (key) {
             Key.SERVICE_MODE -> onBinderDied()
-            Key.PROFILE_ID, Key.PROFILE_CURRENT -> invalidateControlLatency()
+            Key.PROFILE_ID, Key.PROFILE_CURRENT -> {
+                startupProbe = null
+                controlErrorDetail = null
+                lastErrorDialog = ""
+                invalidateControlLatency()
+            }
             Key.PROXY_APPS, Key.BYPASS_MODE, Key.INDIVIDUAL -> {
                 if (DataStore.serviceState.canStop) {
                     snackbar(getString(R.string.need_reload)).setAction(R.string.apply) {
@@ -893,6 +969,7 @@ class MainActivity : ThemedActivity(),
         if (::binding.isInitialized) {
             binding.controlBar.onToggle = null
             binding.controlBar.onTest = null
+            binding.controlBar.onError = null
         }
         super.onDestroy()
         binding.root.removeCallbacks(prewarmRunnable)

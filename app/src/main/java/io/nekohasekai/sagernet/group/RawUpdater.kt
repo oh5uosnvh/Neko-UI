@@ -106,7 +106,7 @@ object RawUpdater : GroupUpdater() {
                     }
                 }
                 if (remoteName.isNotBlank()) {
-                    proxyGroup.name = remoteName
+                    proxyGroup.name = GroupDisplayName.withoutFileSuffix(remoteName)
                     SagerDatabase.groupDao.updateGroup(proxyGroup)
                 }
             }

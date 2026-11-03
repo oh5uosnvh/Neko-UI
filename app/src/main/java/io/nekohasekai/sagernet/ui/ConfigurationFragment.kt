@@ -382,6 +382,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                 if (DataStore.selectedGroup != newId) {
                     DataStore.selectedGroup = newId
                 }
+                if (searchQueryText.isNotBlank() || searchResultsAdapter != null) {
+                    onSearchQueryChanged(searchQueryText)
+                }
             }
         }
     }
@@ -404,20 +407,28 @@ class ConfigurationFragment @JvmOverloads constructor(
      */
     private var duplicateCleanupInProgress = false
 
-    private fun onSearchQueryChanged(query: String) {
-        val totalHits = if (searchScope.current == SearchScopeController.Scope.GROUP) {
-            val a = getCurrentGroupFragment()?.adapter
-            a?.filter(query, global = false)
-            if (query.isBlank()) 0 else (a?.configurationIdList?.size ?: 0)
-        } else {
-            // 全局搜索：让当前正在看的分组列表直接展示全库匹配的所有节点！
-            val a = getCurrentGroupFragment()?.adapter
-            a?.filter(query, global = true)
-            if (query.isBlank()) 0 else (a?.configurationIdList?.size ?: 0)
-        }
+    /** The visible page owns search results; other pages must never retain a global snapshot. */
+    private var searchQueryText = ""
+    private var searchResultsAdapter: GroupFragment.ConfigurationAdapter? = null
 
-        // 有搜索词且命中了节点才滑出删除按钮，否则缩回去
-        searchScope.updateDeleteVisibility(query.isNotBlank() && totalHits > 0)
+    private fun onSearchQueryChanged(query: String) {
+        searchQueryText = query
+        val current = getCurrentGroupFragment()?.adapter
+        if (searchResultsAdapter !== current) {
+            searchResultsAdapter?.filter("", global = false)
+            searchResultsAdapter = current
+        }
+        // Old rows are still on screen while the new query loads. They are not deletable results.
+        searchScope.updateDeleteVisibility(false)
+        current?.filter(query, global = searchScope.current == SearchScopeController.Scope.GLOBAL)
+    }
+
+    private fun onSearchResultsChanged(source: GroupFragment.ConfigurationAdapter) {
+        if (getCurrentGroupFragment()?.adapter !== source) return
+        searchScope.updateDeleteVisibility(
+            searchQueryText.isNotBlank() && source.hasCurrentSearchResult() &&
+                source.configurationIdList.isNotEmpty(),
+        )
     }
 
     /** 批量删除当前搜索匹配出的所有节点 */
@@ -426,6 +437,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         if (query.isBlank()) return
 
         val a = getCurrentGroupFragment()?.adapter ?: return
+        if (!a.hasCurrentSearchResult()) return
         val toDelete = a.configurationIdList.mapNotNull { a.configurationList[it] }
 
         if (toDelete.isEmpty()) return
@@ -439,7 +451,8 @@ class ConfigurationFragment @JvmOverloads constructor(
             .setMessage(msg)
             .setPositiveButton(R.string.yes) { _, _ ->
                 val page = getCurrentGroupFragment() ?: return@setPositiveButton
-                if (!page.isUndoReady()) return@setPositiveButton
+                if (!page.isUndoReady() || page.adapter !== a || !a.hasCurrentSearchResult() ||
+                    topBar.searchField?.query?.toString() != query) return@setPositiveButton
                 val actions = a.stageBatchRemoval(toDelete)
                 page.undoManager.remove(actions)
                 onSearchQueryChanged(query)
@@ -480,7 +493,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             // 而且只要存在非 always 项，AppCompat 还会自动补一个 ⋮ 溢出按钮。
             // 📄+ / ⋮ 的弹出改由我们指定锚点（AppCompatPopupWindowHelper）。
             toolbar.inflateMenu(R.menu.add_profile_menu)
-            toolbar.menu.findItem(R.id.action_global_mode)?.isChecked = DataStore.globalMode
+            prepareConfigurationMenu(toolbar.menu)
             toolbar.setOnMenuItemClickListener(this)
 
             topBar.attach(toolbar, object : TopBarController.Callbacks {
@@ -498,6 +511,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
 
                 override fun onMoreClicked(anchor: View) {
+                    // Self-drawn overflow does not trigger onPrepareOptionsMenu.
+                    prepareConfigurationMenu(toolbar.menu)
                     AppCompatPopupWindowHelper.show(
                         toolbar.menu.findItem(R.id.action_misc)?.subMenu, anchor,
                         onClick = { onMenuItemClick(it) },
@@ -537,7 +552,9 @@ class ConfigurationFragment @JvmOverloads constructor(
 
         groupTabsMediator = TabLayoutMediator(tabLayout, groupPager) { tab, position ->
             val groupId = adapter.groupList.getOrNull(position)?.id
-            tab.text = adapter.groupList.getOrNull(position)?.displayName()
+            io.nekohasekai.sagernet.widget.GroupTabPill.bindTab(
+                tab, adapter.groupList.getOrNull(position)?.displayName(),
+            )
             tabLongPressBindings.remove(tab.view)?.get()?.unbind()
             val binding = QuickLongPress(tab.view) { v ->
                 // Resolve the stable ID at trigger time, not a captured position
@@ -592,8 +609,13 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     }
 
-    override fun onPrepareOptionsMenu(menu: Menu) {
+    internal fun prepareConfigurationMenu(menu: Menu) {
         menu.findItem(R.id.action_global_mode)?.isChecked = DataStore.globalMode
+        menu.findItem(R.id.action_always_show_address)?.isChecked = DataStore.alwaysShowAddress
+    }
+
+    override fun onPrepareOptionsMenu(menu: Menu) {
+        prepareConfigurationMenu(menu)
         super.onPrepareOptionsMenu(menu)
     }
 
@@ -620,6 +642,11 @@ class ConfigurationFragment @JvmOverloads constructor(
         groupTabsMediator = null
         tabLongPressBindings.values.mapNotNull { it.get() }.forEach { it.unbind() }
         tabLongPressBindings.clear()
+        searchResultsAdapter?.cancelSearch()
+        searchResultsAdapter = null
+        searchQueryText = ""
+        topBar.detach()
+        searchScope.detach()
         super.onDestroyView()
     }
 
@@ -1108,6 +1135,14 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             R.id.action_connection_url_test -> {
                 urlTest()
+            }
+
+            R.id.action_always_show_address -> {
+                // Toggle the stored value, not a possibly stale popup clone's checkbox.
+                DataStore.alwaysShowAddress = !DataStore.alwaysShowAddress
+                item.isChecked = DataStore.alwaysShowAddress
+                refreshAddressDisplayPreferences()
+                return true
             }
 
             R.id.action_global_mode -> {
@@ -1738,6 +1773,9 @@ class ConfigurationFragment @JvmOverloads constructor(
         runOnMainDispatcher {
             if (!isAdded) return@runOnMainDispatcher
             lastAppliedAlwaysShowAddress = DataStore.alwaysShowAddress
+            if (view != null && !select) {
+                toolbar.menu.findItem(R.id.action_always_show_address)?.isChecked = lastAppliedAlwaysShowAddress
+            }
             val cached = if (::adapter.isInitialized) adapter.groupFragments.values.toList() else emptyList()
             val restored = childFragmentManager.fragments.filterIsInstance<GroupFragment>()
             (cached + restored).distinct().forEach { it.refreshAddressDisplay() }
@@ -2352,6 +2390,10 @@ class ConfigurationFragment @JvmOverloads constructor(
             if (!::proxyGroup.isInitialized) return
 
             configurationListView = view.findViewById(R.id.configuration_list)
+            (parentFragment as? ConfigurationFragment)?.view
+                ?.findViewById<io.nekohasekai.sagernet.widget.GroupListEdgeLayout>(
+                    R.id.group_list_foreground,
+                )?.bindList(configurationListView)
             setupLayoutManager()
             configurationListView.layoutManager = layoutManager
             adapter = ConfigurationAdapter()
@@ -2371,6 +2413,12 @@ class ConfigurationFragment @JvmOverloads constructor(
                 undoManager = UndoSnackbarManager(activity as MainActivity, adapter!!)
                 setupItemTouchHelper()
             }
+            adapter?.reloadProfiles()
+        }
+
+        override fun onDestroyView() {
+            adapter?.cancelSearch()
+            super.onDestroyView()
         }
 
         override fun onDestroy() {
@@ -2394,11 +2442,30 @@ class ConfigurationFragment @JvmOverloads constructor(
                 setHasStableIds(true)
             }
 
-            private val batchLoadGeneration = AtomicLong()
+            private val batchLoadGeneration = ProfileSearchGeneration()
+            private var searchLoading: Job? = null
+            private var appliedSearchRequest: ProfileSearchGeneration.Request? = null
+            private var groupSearchAnchor: Triple<Long?, Int, Int>? = null
 
-            private fun presentBatchSnapshot(ids: List<Long>, nodes: Map<Long, ProxyEntity>) {
-                val first = (configurationListView.layoutManager as? LinearLayoutManager)?.findFirstVisibleItemPosition() ?: 0
-                val anchorId = configurationIdList.getOrNull(first.coerceAtLeast(0))
+            fun hasCurrentSearchResult(): Boolean =
+                appliedSearchRequest?.let { batchLoadGeneration.accepts(it) } == true
+
+            fun cancelSearch() {
+                batchLoadGeneration.invalidate()
+                searchLoading?.cancel()
+                appliedSearchRequest = null
+            }
+
+            private fun presentBatchSnapshot(
+                ids: List<Long>, nodes: Map<Long, ProxyEntity>,
+                restoreAnchor: Triple<Long?, Int, Int>? = null,
+            ) {
+                val manager = configurationListView.layoutManager as? LinearLayoutManager
+                val first = restoreAnchor?.second ?: manager?.findFirstVisibleItemPosition() ?: 0
+                val anchorId = restoreAnchor?.first ?: configurationIdList.getOrNull(first.coerceAtLeast(0))
+                val offset = restoreAnchor?.third ?: manager?.findViewByPosition(first)?.let {
+                    manager.getDecoratedTop(it) - configurationListView.paddingTop
+                } ?: 0
                 val previousIds = configurationIdList.toList()
                 val oldNodes = HashMap(configurationList)
                 val nextIds = ids.distinct().filterNot { PendingProfileDeletes.contains(it) }
@@ -2417,10 +2484,13 @@ class ConfigurationFragment @JvmOverloads constructor(
                 if (diff != null) diff.dispatchUpdatesTo(this) else notifyDataSetChanged()
                 val position = anchorId?.let { configurationIdList.indexOf(it) } ?: -1
                 if (configurationIdList.isNotEmpty()) {
-                    configurationListView.scrollToPosition(if (position >= 0) position else first.coerceIn(0, configurationIdList.lastIndex))
+                    val target = if (position >= 0) position else first.coerceIn(0, configurationIdList.lastIndex)
+                    if (manager != null) manager.scrollToPositionWithOffset(target, offset)
+                    else configurationListView.scrollToPosition(target)
                 }
                 configurationListView.requestLayout()
                 configurationListView.invalidate()
+                (parentFragment as? ConfigurationFragment)?.onSearchResultsChanged(this)
             }
 
             var configurationIdList: MutableList<Long> = mutableListOf()
@@ -2614,32 +2684,53 @@ class ConfigurationFragment @JvmOverloads constructor(
             private val updated = HashSet<ProxyEntity>()
 
             fun filter(name: String, global: Boolean = false) {
-                if (name.isEmpty()) {
-                    reloadProfiles()
-                    return
+                val query = ProfileSearchQuery(name, proxyGroup.id, global)
+                if (groupSearchAnchor == null && name.isNotBlank()) {
+                    val manager = configurationListView.layoutManager as? LinearLayoutManager
+                    val first = manager?.findFirstVisibleItemPosition()?.coerceAtLeast(0) ?: 0
+                    val offset = manager?.findViewByPosition(first)?.let {
+                        manager.getDecoratedTop(it) - configurationListView.paddingTop
+                    } ?: 0
+                    groupSearchAnchor = Triple(configurationIdList.getOrNull(first), first, offset)
                 }
-                val lower = name.lowercase()
-                if (global) {
-                    // 全局搜索：直接从全库查询匹配节点，装填进当前可见列表展示
-                    val allProfiles = SagerDatabase.proxyDao.getAll()
-                    val matched = allProfiles.filter {
-                        it.displayName().lowercase().contains(lower) ||
-                                it.displayType().lowercase().contains(lower) ||
-                                it.displayAddress().lowercase().contains(lower)
+                // Scope is part of the request. Never suppress GROUP -> GLOBAL -> GROUP
+                // just because the user kept the same text.
+                val request = batchLoadGeneration.begin(query)
+                searchLoading?.cancel()
+                appliedSearchRequest = null
+                (parentFragment as? ConfigurationFragment)?.onSearchResultsChanged(this)
+                val order = proxyGroup.order
+                searchLoading = runOnDefaultDispatcher {
+                    try {
+                        val source = if (query.isGlobal) SagerDatabase.proxyDao.getAll()
+                            else PendingProfileDeletes.loadGroup(query.groupId)
+                        var profiles = query.select(source, { it.groupId }, { node, lower ->
+                            node.displayName().lowercase().contains(lower) ||
+                                node.displayType().lowercase().contains(lower) ||
+                                node.displayAddress().lowercase().contains(lower)
+                        }, { PendingProfileDeletes.contains(it.id) })
+                        if (!query.isGlobal) profiles = when (order) {
+                            GroupOrder.BY_NAME -> profiles.sortedBy { it.displayName() }
+                            GroupOrder.BY_DELAY -> profiles.sortedBy { if (it.status == 1) it.ping else 114514 }
+                            else -> profiles
+                        }
+                        val map = profiles.associateBy { it.id }
+                        val ids = profiles.map { it.id }
+                        onMainDispatcher {
+                            if (batchLoadGeneration.accepts(request) && isAdded && proxyGroup.id == query.groupId &&
+                                ::configurationListView.isInitialized && configurationListView.adapter === this@ConfigurationAdapter) {
+                                appliedSearchRequest = request
+                                presentBatchSnapshot(ids, map, if (name.isBlank()) groupSearchAnchor else null)
+                                if (name.isBlank()) groupSearchAnchor = null
+                            }
+                        }
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) {
+                        Logs.w(e)
+                        onMainDispatcher {
+                            if (batchLoadGeneration.accepts(request) && isAdded) snackbar(e.readableMessage).show()
+                        }
                     }
-                    configurationList.clear()
-                    matched.forEach { configurationList[it.id] = it }
-                    configurationIdList.clear()
-                    configurationIdList.addAll(matched.map { it.id })
-                    notifyDataSetChanged()
-                } else {
-                    configurationIdList.clear()
-                    configurationIdList.addAll(configurationList.filter {
-                        it.value.displayName().lowercase().contains(lower) ||
-                                it.value.displayType().lowercase().contains(lower) ||
-                                it.value.displayAddress().lowercase().contains(lower)
-                    }.keys)
-                    notifyDataSetChanged()
                 }
             }
 
@@ -2729,7 +2820,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             fun stageBatchRemoval(nodes: List<ProxyEntity>): List<Pair<Int, ProxyEntity>> {
-                batchLoadGeneration.incrementAndGet()
+                batchLoadGeneration.invalidate()
                 val ids = nodes.map { it.id }.toHashSet()
                 val positions = configurationIdList.withIndex().associate { it.value to it.index }
                 val actions = nodes.map { (positions[it.id] ?: -1) to it }
@@ -2743,7 +2834,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             override fun undo(actions: List<Pair<Int, ProxyEntity>>) {
                 val snapshot = actions.toList()
                 configurationListView.post {
-                    batchLoadGeneration.incrementAndGet()
+                    batchLoadGeneration.invalidate()
                     PendingProfileDeletes.undo(snapshot.map { it.second })
                     val nodes = HashMap(configurationList)
                     snapshot.forEach { (_, node) -> nodes[node.id] = node }
@@ -2881,29 +2972,19 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             fun reloadProfiles() {
-                val generation = batchLoadGeneration.incrementAndGet()
-                val groupId = proxyGroup.id
-                val order = proxyGroup.order
-                runOnDefaultDispatcher {
-                    try {
-                        var profiles = PendingProfileDeletes.loadGroup(groupId)
-                        profiles = when (order) {
-                            GroupOrder.BY_NAME -> profiles.sortedBy { it.displayName() }
-                            GroupOrder.BY_DELAY -> profiles.sortedBy { if (it.status == 1) it.ping else 114514 }
-                            else -> profiles
-                        }
-                        val map = profiles.associateBy { it.id }
-                        val ids = profiles.map { it.id }
-                        onMainDispatcher {
-                            if (generation == batchLoadGeneration.get() && isAdded && proxyGroup.id == groupId &&
-                                ::configurationListView.isInitialized && configurationListView.adapter === this@ConfigurationAdapter) {
-                                presentBatchSnapshot(ids, map)
-                            }
-                        }
-                    } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                    catch (e: Exception) {
-                        Logs.w(e)
-                        onMainDispatcher { if (isAdded) snackbar(e.readableMessage).show() }
+                // GroupManager/onResume may call from Default; view state and ticket creation
+                // are serialized with scope clicks on Main before any database work starts.
+                runOnMainDispatcher {
+                    if (!isAdded || !::configurationListView.isInitialized ||
+                        configurationListView.adapter !== this@ConfigurationAdapter) return@runOnMainDispatcher
+                    val host = parentFragment as? ConfigurationFragment
+                    val active = host?.takeIf { it.searchQueryText.isNotBlank() &&
+                        it.getCurrentGroupFragment()?.adapter === this@ConfigurationAdapter }
+                    val query = batchLoadGeneration.currentQuery
+                    if (active != null) {
+                        filter(active.searchQueryText, active.searchScope.current == SearchScopeController.Scope.GLOBAL)
+                    } else {
+                        filter(query?.text.orEmpty(), query?.global == true)
                     }
                 }
             }

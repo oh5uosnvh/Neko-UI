@@ -112,7 +112,7 @@ class ThemedChoiceMenuTest {
         val fill = (primary and 0x00ffffff) or ((Color.alpha(primary) * 0.16f).toInt() shl 24)
         assertEquals(fill, card.color!!.defaultColor)
         assertTrue(Color.alpha(card.color!!.defaultColor) > 0)
-        assertCorners(card, context.resources.getDimension(R.dimen.nav_item_corner_radius))
+        assertCorners(card, context.resources.getDimension(R.dimen.choice_corner_radius))
         assertEquals(if (selected) context.resources.getDimensionPixelSize(
             R.dimen.card_stroke_width_selected) else 0, shadowOf(card).strokeWidth)
         if (selected) assertEquals(primary, shadowOf(card).strokeColor)

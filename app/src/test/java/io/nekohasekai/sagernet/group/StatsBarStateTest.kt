@@ -136,7 +136,7 @@ class StatsBarStateTest {
         assertFalse(show(hidden=true));assertFalse(show(visible=false));assertFalse(show(offscreen=true))
         assertFalse(show(attached=false))
     }
-    @Test fun hidingAndReshowingOnlyChangesVisibilityAndKeepsPendingAndTestingLocks()=withLayout { b,overlay ->
+    @Test fun hidingCancelsPresentationButReshowPreservesPendingPermissionAndRearmsMeasurement()=withLayout { b,overlay ->
         b.controlBar.changeState(BaseService.State.Idle)
         overlay.show(b.fragmentHolder,true)
         var toggles=0;b.controlBar.onToggle={toggles++}
@@ -150,8 +150,9 @@ class StatsBarStateTest {
         b.controlBar.findViewById<View>(R.id.latency_box).performClick()
         assertEquals(1,tests)
         overlay.show(null,false);overlay.show(b.fragmentHolder,true)
-        assertFalse(b.controlBar.findViewById<View>(R.id.speed_box).isEnabled)
-        assertFalse(b.controlBar.findViewById<View>(R.id.latency_box).isEnabled)
+        assertTrue(b.controlBar.findViewById<View>(R.id.speed_box).isEnabled)
+        assertTrue(b.controlBar.findViewById<View>(R.id.latency_box).isEnabled)
+        assertEquals("-- ms",b.controlBar.findViewById<TextView>(R.id.latency).text.toString())
         b.controlBar.showLatency(42)
         assertTrue(b.controlBar.findViewById<View>(R.id.latency_box).isEnabled)
     }

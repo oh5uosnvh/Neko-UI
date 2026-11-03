@@ -161,6 +161,11 @@
                 android:checked="false"
                 app:showAsAction="never" />
             <item
+                android:id="@+id/action_always_show_address"
+                android:title="@string/always_show_address"
+                android:checkable="true"
+                app:showAsAction="never" />
+            <item
                 android:id="@+id/action_order_layout"
                 android:title="@string/sort_and_layout">
                 <menu>

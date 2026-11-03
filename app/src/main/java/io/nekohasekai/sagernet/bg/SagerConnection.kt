@@ -43,6 +43,7 @@ class SagerConnection(
         fun cbSpeedUpdate(stats: SpeedDisplayData) {}
         suspend fun cbTrafficUpdate(data: TrafficDataBatch) {}
         fun cbSelectorUpdate(id: Long) {}
+        fun connectionProbe(snapshot: String) {}
 
         fun stateChanged(state: BaseService.State, profileName: String?, msg: String?)
 
@@ -90,6 +91,14 @@ class SagerConnection(
             val callback = callback ?: return
             runOnMainDispatcher {
                 callback.cbSelectorUpdate(id)
+            }
+        }
+
+        override fun connectionProbe(snapshot: String?) {
+            if (snapshot.isNullOrBlank()) return
+            val target = callback ?: return
+            runOnMainDispatcher {
+                if (callback === target && connectionActive) target.connectionProbe(snapshot)
             }
         }
 

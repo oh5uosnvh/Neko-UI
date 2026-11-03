@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 顶部标签栏：官方上游 master 原文。唯一偏离：tabRippleColor 设为透明
-     （需求指定：点按/长按分组名不出现按压底色），其余逐行与官方一致。 -->
+<!-- Opaque toolbar above a full-height pager; transparent theme-pill tabs float
+     in front. Only scrolling content near the toolbar baseline is softened. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
@@ -15,26 +15,43 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content" />
 
-    <com.google.android.material.tabs.TabLayout
-        android:id="@+id/group_tab"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="?attr/colorLayerLow"
-        android:elevation="4dp"
-        android:visibility="gone"
-        app:tabIndicatorColor="?tabIndicatorColor"
-        app:tabIndicatorFullWidth="false"
-        app:tabMode="scrollable"
-        app:tabPaddingStart="16dp"
-        app:tabRippleColor="@android:color/transparent"
-        app:tabSelectedTextColor="?tabSelectedTextColor"
-        app:tabTextColor="?tabTextColor"
-        app:tabUnboundedRipple="false" />
-
-    <androidx.viewpager2.widget.ViewPager2
-        android:id="@+id/group_pager"
+    <!-- Pager owns the full area below the opaque app bar. Only individual pills
+         are foreground surfaces; scrolling cards continue behind their gaps. -->
+    <io.nekohasekai.sagernet.widget.GroupListEdgeLayout
+        android:id="@+id/group_list_foreground"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="1"
+        android:clipChildren="true"
+        android:clipToPadding="false">
+
+        <androidx.viewpager2.widget.ViewPager2
+            android:id="@+id/group_pager"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <com.google.android.material.tabs.TabLayout
+            android:id="@+id/group_tab"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:background="@android:color/transparent"
+            android:elevation="0dp"
+            android:visibility="gone"
+            app:tabBackground="@android:color/transparent"
+            app:tabIndicatorColor="@android:color/transparent"
+            app:tabIndicatorHeight="0dp"
+            app:tabIndicatorFullWidth="false"
+            app:tabMinWidth="0dp"
+            app:tabMode="scrollable"
+            app:tabPaddingStart="4dp"
+            app:tabPaddingEnd="4dp"
+            app:tabPaddingTop="7dp"
+            app:tabPaddingBottom="7dp"
+            app:tabRippleColor="@android:color/transparent"
+            app:tabSelectedTextColor="?android:attr/textColorPrimary"
+            app:tabTextColor="?android:attr/textColorPrimary"
+            app:tabUnboundedRipple="false" />
+    </io.nekohasekai.sagernet.widget.GroupListEdgeLayout>
 
 </LinearLayout>

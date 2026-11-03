@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="control_bar_connection_failed">连接失败</string>
+    <string name="control_bar_connection_reset">连接重置</string>
+    <string name="control_bar_unavailable">不可用</string>
+    <string name="control_bar_retry_test">重新测试</string>
+</resources>

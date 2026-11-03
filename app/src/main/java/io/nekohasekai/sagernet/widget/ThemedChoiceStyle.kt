@@ -23,7 +23,7 @@ object ThemedChoiceStyle {
 
     fun itemCard(context: Context, selected: Boolean): GradientDrawable = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
-        cornerRadius = context.resources.getDimension(R.dimen.nav_item_corner_radius)
+        cornerRadius = context.resources.getDimension(R.dimen.choice_corner_radius)
         val primary = color(context, R.attr.colorPrimary)
         setColor(ColorUtils.setAlphaComponent(primary, (Color.alpha(primary) * FILL_ALPHA).toInt()))
         if (selected) setStroke(

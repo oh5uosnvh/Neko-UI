@@ -26,6 +26,7 @@ import libcore.Libcore
 import moe.matsuri.nb4a.Protocols
 import moe.matsuri.nb4a.utils.Util
 import java.net.UnknownHostException
+import org.json.JSONObject
 
 class BaseService {
 
@@ -81,6 +82,16 @@ class BaseService {
 
         val binder = Binder(this)
         var connectingJob: Job? = null
+        var probeGeneration = 0L
+        var probeProfileId = 0L
+        @Volatile var connectionProbe = ""
+
+        fun publishProbe(phase: String, elapsed: Int = -1, error: String? = null) {
+            connectionProbe = JSONObject().put("version", 1).put("generation", probeGeneration)
+                .put("profileId", probeProfileId).put("phase", phase).put("elapsed", elapsed)
+                .put("error", error ?: "").toString()
+            binder.connectionProbeChanged(connectionProbe)
+        }
 
         fun changeState(s: State, msg: String? = null) {
             if (state == s && msg == null) return
@@ -104,6 +115,11 @@ class BaseService {
 
         override fun getState(): Int = (data?.state ?: State.Idle).ordinal
         override fun getProfileName(): String = data?.proxy?.displayProfileName ?: "Idle"
+        override fun getConnectionProbe(): String = data?.connectionProbe.orEmpty()
+
+        fun connectionProbeChanged(snapshot: String) = launch {
+            broadcast { it.connectionProbe(snapshot) }
+        }
 
         override fun registerCallback(cb: ISagerNetServiceCallback, id: Int) {
             if (id == SagerConnection.CONNECTION_ID_RESTART_BG) {
@@ -245,6 +261,8 @@ class BaseService {
             DataStore.mixedInboundAuthed = false
 
             if (data.state == State.Stopping) return
+            if (!msg.isNullOrBlank()) data.publishProbe("failed", error = msg)
+            else data.publishProbe("idle")
             data.notification?.destroy()
             data.notification = null
             this as Service
@@ -363,8 +381,11 @@ class BaseService {
                 data.closeReceiverRegistered = true
             }
 
+            data.probeGeneration++
+            data.probeProfileId = profile.id
             data.changeState(State.Connecting)
-            runOnMainDispatcher {
+            data.publishProbe("connecting")
+            data.connectingJob = runOnMainDispatcher {
                 try {
                     data.notification = createNotification(ServiceNotification.genTitle(profile))
 
@@ -379,7 +400,20 @@ class BaseService {
                     }
 
                     startProcesses()
+                    // Core startup is lazy: it does not prove that the selected node is reachable.
+                    // Probe the real URL while still Connecting, and publish its round trip with
+                    // Connected. This is not a post-connect automatic test or synthetic startup ping.
+                    val result = StartupConnectionProbe.measure(DataStore.connectionTestTimeout) {
+                        Libcore.urlTest(proxy.box, DataStore.connectionTestURL, DataStore.connectionTestTimeout)
+                    }
+                    if (data.proxy !== proxy || data.state != State.Connecting) return@runOnMainDispatcher
+                    if (result.error != null) {
+                        val failure = Protocols.genFriendlyMsg(result.error)
+                        stopRunner(false, failure)
+                        return@runOnMainDispatcher
+                    }
                     data.changeState(State.Connected)
+                    data.publishProbe("connected", elapsed = result.elapsed)
 
                     lateInit()
                 } catch (_: CancellationException) { // if the job was cancelled, it is canceller's responsibility to call stopRunner
