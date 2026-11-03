@@ -728,6 +728,21 @@ internal class TopBarController(
             }
         }
 
+        private fun replaceKeepingViewport(fresh: List<ProxyGroup>) {
+            // A full row refresh must retain the user's exact pixel offset, not just the ID.
+            // Capture only an already-laid-out anchor; otherwise keep show()'s pending first-frame seed.
+            val first = layout.findFirstVisibleItemPosition()
+            val anchorId = adapter.ids.getOrNull(first)
+            val anchorView = if (first >= 0) layout.findViewByPosition(first) else null
+            val offset = anchorView?.let { layout.getDecoratedTop(it) - list.paddingTop }
+            adapter.replace(fresh)
+            if (anchorId != null && offset != null && fresh.isNotEmpty()) {
+                val moved = fresh.indexOfFirst { it.id == anchorId }
+                val position = if (moved >= 0) moved else first.coerceIn(0, fresh.lastIndex)
+                layout.scrollToPositionWithOffset(position, offset)
+            }
+        }
+
         private fun accept(result: GroupOrderWriter.Result) {
             val fresh = result.groups
             if (fresh != null) {
@@ -736,7 +751,7 @@ internal class TopBarController(
                 val visibleIds = (adapter.ids + groups().map { it.id }).toSet()
                 confirmed = fresh.filter { !it.ungrouped || it.id in visibleIds }
             }
-            adapter.replace(confirmed)
+            replaceKeepingViewport(confirmed)
             if (result.error != null) showFailure()
             loadCounts()
         }
@@ -777,7 +792,7 @@ internal class TopBarController(
                             if (!drag.isDragging) awaitSettled()
                         } else {
                             confirmed = fresh
-                            adapter.replace(fresh)
+                            replaceKeepingViewport(fresh)
                             loadCounts()
                         }
                     }

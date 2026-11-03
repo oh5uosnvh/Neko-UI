@@ -37,11 +37,12 @@ class RouteOutboundTouchFeedbackTest {
         private val controller = Robolectric.buildActivity(Activity::class.java).setup().visible()
         val activity = controller.get()
         val environment = QuickPopupTestEnvironment()
-        val context = ContextThemeWrapper(activity.createConfigurationContext(
-            Configuration(activity.resources.configuration).apply {
+        val context = ContextThemeWrapper(activity, R.style.Theme_SagerNet_Blue).apply {
+            applyOverrideConfiguration(Configuration(activity.resources.configuration).apply {
                 uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
                     if (night) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
-            }), R.style.Theme_SagerNet_Blue)
+            })
+        }
         val fragment = RouteFragment()
         private val adapter = environment.allocate(RouteFragment.RuleAdapter::class.java)
         val binding = LayoutRouteItemBinding.inflate(android.view.LayoutInflater.from(context))
