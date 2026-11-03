@@ -22,7 +22,10 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.widget.ControlBar
 import org.junit.Assert.*
+import org.junit.Before
+import org.junit.After
 import org.junit.Test
+import org.robolectric.shadows.ShadowChoreographer
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
@@ -36,6 +39,22 @@ import kotlin.math.roundToInt
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class)
 class ControlBarTest {
+    @Before fun pauseFrames() {
+        ShadowChoreographer.setPaused(true)
+        ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
+    }
+    @After fun restoreFrames() {
+        ShadowChoreographer.setPaused(false)
+        ShadowChoreographer.setFrameDelay(Duration.ofMillis(1))
+    }
+    private fun advance(ms: Long) {
+        var remaining = ms
+        while (remaining > 0) {
+            val step = minOf(16L, remaining)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(step))
+            remaining -= step
+        }
+    }
     private fun ControlBar.text(id: Int) = findViewById<TextView>(id)
     private fun ControlBar.box(id: Int) = findViewById<View>(id)
     private fun dp(view: View, value: Int) = (view.resources.displayMetrics.density * value).roundToInt()
@@ -74,7 +93,7 @@ class ControlBarTest {
         host.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
         host.layout(0, 0, width, height)
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(180))
+        advance(180)
     }
 
     private fun assertUnknown(bar: ControlBar) {
@@ -106,7 +125,7 @@ class ControlBarTest {
     @Test fun everyServiceStateUsesTheAuthoritativeThreeStateVisuals() = withBar { bar, _ ->
         for (state in BaseService.State.values()) {
             bar.changeState(state)
-            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(180))
+            advance(180)
             val connected = state == BaseService.State.Connected
             val capsule = bar.box(R.id.capsule)
             assertEquals("state=$state", connected, capsule.isSelected)
@@ -439,7 +458,7 @@ class ControlBarTest {
             withBar(locale = locale) { bar, _ ->
                 assertEquals(disconnected, bar.text(R.id.capsule_label).text.toString())
                 bar.changeState(BaseService.State.Connected)
-                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(180))
+                advance(180)
                 assertEquals(connected, bar.text(R.id.capsule_label).text.toString())
                 for (id in listOf(R.id.speed_box, R.id.capsule, R.id.latency_box)) {
                     val view = bar.box(id)

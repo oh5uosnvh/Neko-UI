@@ -22,7 +22,10 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.widget.ControlBar
 import org.junit.Assert.*
+import org.junit.Before
+import org.junit.After
 import org.junit.Test
+import org.robolectric.shadows.ShadowChoreographer
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
@@ -37,6 +40,14 @@ import java.time.Duration
 @Config(sdk = [28], application = Application::class)
 @LooperMode(LooperMode.Mode.PAUSED)
 class ControlBarStateTest {
+    @Before fun pauseFrames() {
+        ShadowChoreographer.setPaused(true)
+        ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
+    }
+    @After fun restoreFrames() {
+        ShadowChoreographer.setPaused(false)
+        ShadowChoreographer.setFrameDelay(Duration.ofMillis(1))
+    }
     private fun withBar(theme: Int = R.style.Theme_SagerNet, night: Boolean = false,
         block: (ControlBar, FrameLayout, ContextThemeWrapper) -> Unit) {
         val controller = Robolectric.buildActivity(AppCompatActivity::class.java)
@@ -67,7 +78,14 @@ class ControlBarStateTest {
         ControlBar::class.java.getDeclaredMethod("onWindowVisibilityChanged", Int::class.javaPrimitiveType)
             .apply { isAccessible = true }.invoke(bar, visibility)
     }
-    private fun advance(ms: Long) = shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ms))
+    private fun advance(ms: Long) {
+        var remaining = ms
+        while (remaining > 0) {
+            val step = minOf(16L, remaining)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(step))
+            remaining -= step
+        }
+    }
     private fun color(bar: ControlBar) =
         (bar.box(R.id.capsule).background as GradientDrawable).color!!.defaultColor
     private fun attr(context: ContextThemeWrapper, id: Int): Int = TypedValue().let {

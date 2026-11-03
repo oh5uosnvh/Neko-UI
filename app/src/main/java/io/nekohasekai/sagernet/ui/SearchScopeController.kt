@@ -13,43 +13,6 @@ import androidx.appcompat.widget.SearchView
 import androidx.core.view.ViewCompat
 import io.nekohasekai.sagernet.R
 
-/** A query is identified by text, stable group ID AND scope, never just its text. */
-internal data class ProfileSearchQuery(val text: String, val groupId: Long, val global: Boolean) {
-    // Clearing a global search always restores the original group, not the whole database.
-    val isGlobal: Boolean get() = global && text.isNotBlank()
-
-    fun <T> select(
-        nodes: List<T>,
-        group: (T) -> Long,
-        matches: (T, String) -> Boolean,
-        deleted: (T) -> Boolean = { false },
-    ): List<T> {
-        val lower = text.lowercase()
-        return nodes.filter {
-            !deleted(it) && (isGlobal || group(it) == groupId) &&
-                (text.isBlank() || matches(it, lower))
-        }
-    }
-}
-
-/** Shared by searches, reloads and logical deletes: even an identical query gets a new ticket. */
-internal class ProfileSearchGeneration {
-    data class Request(val query: ProfileSearchQuery, val generation: Long)
-    private var generation = 0L
-    @Volatile var currentQuery: ProfileSearchQuery? = null
-        private set
-
-    @Synchronized fun begin(query: ProfileSearchQuery): Request {
-        currentQuery = query
-        return Request(query, ++generation)
-    }
-
-    @Synchronized fun invalidate() { ++generation }
-
-    @Synchronized fun accepts(request: Request): Boolean =
-        request.generation == generation && request.query == currentQuery
-}
-
 /**
  * 搜索框内的 [删除] 与 [分组/全局] 按钮控制器。
  *
