@@ -424,9 +424,9 @@ internal class TopBarController(
 
     // ---------------------------------------------------------------- 外观
 
-    /** 顶栏前景色：从 toolbar 的 context 取（带 actionBarTheme，才是白色） */
+    /** Use the page's day/night text color, not the Toolbar's dark ActionBar overlay. */
     private fun resolveForeground(toolbar: Toolbar): Int {
-        val ta = toolbar.context.obtainStyledAttributes(
+        val ta = context.obtainStyledAttributes(
             intArrayOf(android.R.attr.textColorPrimary)
         )
         val color = ta.getColor(0, 0xFFFFFFFF.toInt())
@@ -639,12 +639,6 @@ internal class TopBarController(
             inputMethodMode = PopupWindow.INPUT_METHOD_NOT_NEEDED
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         }
-        private val scrollToSelected = Runnable {
-            if (!closed) {
-                val position = adapter.ids.indexOf(selectedItemGroupId())
-                if (position >= 0) layout.scrollToPositionWithOffset(position, 0)
-            }
-        }
 
         init {
             list.layoutManager = layout
@@ -695,8 +689,11 @@ internal class TopBarController(
             groupPickerSession = this
             GroupManager.addListener(this)
             try {
+                // Seed the first layout before attaching the popup. Posting this scroll
+                // would render row zero for one frame before jumping to the selected ID.
+                val position = adapter.ids.indexOf(selectedItemGroupId())
+                if (position >= 0) layout.scrollToPositionWithOffset(position, 0)
                 popup.showAsDropDown(anchor, pickerOffsetX(anchor, popup.width), gap)
-                list.post(scrollToSelected)
                 loadCounts()
                 // Reopening before a previous write's notification must not revive old order.
                 requestRefresh()
@@ -817,7 +814,6 @@ internal class TopBarController(
             if (closed) return
             closed = true
             GroupManager.removeListener(this)
-            list.removeCallbacks(scrollToSelected)
             list.removeCallbacks(settleRefresh)
             refreshing?.cancel()
             counting?.cancel()

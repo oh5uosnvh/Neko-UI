@@ -16,7 +16,7 @@
         android:id="@+id/tools_tab"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="?colorPrimary"
+        android:background="?attr/colorLayerLow"
         android:elevation="4dp"
         app:tabIndicatorColor="?tabIndicatorColor"
         app:tabIndicatorFullWidth="false"
@@ -27,9 +27,19 @@
         app:tabTextColor="?tabTextColor"
         app:tabUnboundedRipple="false" />
 
-    <androidx.viewpager2.widget.ViewPager2
-        android:id="@+id/tools_pager"
+    <io.nekohasekai.sagernet.widget.LayeredContentFrameLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="10dp"
+        android:background="@drawable/bg_layer_high"
+        android:clipToOutline="false">
+
+        <androidx.viewpager2.widget.ViewPager2
+            android:id="@+id/tools_pager"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+    </io.nekohasekai.sagernet.widget.LayeredContentFrameLayout>
 
 </LinearLayout>

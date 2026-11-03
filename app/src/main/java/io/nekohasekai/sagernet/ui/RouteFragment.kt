@@ -396,7 +396,10 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 routeOutbound.isFocusable = true
                 routeOutbound.minHeight = (40 * resources.displayMetrics.density).toInt()
                 routeOutbound.gravity = android.view.Gravity.CENTER_VERTICAL
-                routeOutbound.setBackgroundResource(android.R.drawable.list_selector_background)
+                // Match the edit pencil's theme ripple on every recycled bind.
+                routeOutbound.setBackgroundResource(routeOutbound.context.theme.resolveResourceId(
+                    androidx.appcompat.R.attr.selectableItemBackgroundBorderless,
+                ))
                 routeOutbound.setOnClickListener { anchor ->
                     showQuickOutbound(anchor, rule.id, rule.outbound)
                 }

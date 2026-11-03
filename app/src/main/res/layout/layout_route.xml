@@ -14,17 +14,25 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
-        <io.nekohasekai.sagernet.widget.ExactScrollRecyclerView
-            android:id="@+id/route_list"
+        <io.nekohasekai.sagernet.widget.LayeredContentFrameLayout
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:padding="4dp"
-            android:scrollbarSize="0dp"
-            app:fastScrollAutoHide="true"
-            app:fastScrollThumbColor="?colorPrimary"
-            app:fastScrollThumbInactiveColor="?colorPrimary">
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_layer_high"
+            android:clipToOutline="false">
 
-        </io.nekohasekai.sagernet.widget.ExactScrollRecyclerView>
+            <io.nekohasekai.sagernet.widget.ExactScrollRecyclerView
+                android:id="@+id/route_list"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:padding="4dp"
+                android:scrollbarSize="0dp"
+                app:fastScrollAutoHide="true"
+                app:fastScrollThumbColor="?colorPrimary"
+                app:fastScrollThumbInactiveColor="?colorPrimary" />
+
+        </io.nekohasekai.sagernet.widget.LayeredContentFrameLayout>
 
     </LinearLayout>
 

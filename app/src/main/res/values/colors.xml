@@ -300,7 +300,15 @@
     <color name="color_route_proxy">#1E88E5</color>   <!-- 代理：蓝色 -->
     <color name="color_route_config">#8E24AA</color>  <!-- 配置：紫色 -->
 
-    <color name="preference_simple_menu_background">#FAFAFA</color>
+    <!-- MD two-layer palette: chrome/window below, rounded content above. -->
+    <color name="layer_low">#F0F0F0</color>
+    <color name="layer_high">#FFFFFF</color>
+    <color name="layer_stroke">#59000000</color>
+    <color name="brand_primary">#607D8B</color>
+    <color name="brand_primary_light">#90A4AE</color>
+    <color name="latency_green">#4CAF50</color>
+
+    <color name="preference_simple_menu_background">@color/layer_high</color>
 
     <!-- 卡片默认细边框：约 12% 黑（低对比分隔线），夜间见 values-night/colors.xml -->
     <color name="card_stroke">#29000000</color>

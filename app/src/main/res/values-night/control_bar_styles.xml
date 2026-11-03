@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="ControlBarSpeed.Down" parent="ControlBarSpeed">
+        <item name="android:fontFamily">sans-serif-light</item>
+    </style>
+    <style name="ControlBarSpeed.Up" parent="ControlBarSpeed">
+        <item name="android:fontFamily">sans-serif-black</item>
+    </style>
+</resources>

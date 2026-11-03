@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="control_bar_connected">已連線</string>
+    <string name="control_bar_disconnected">未連線</string>
+    <string name="control_bar_connected_compact">已連線</string>
+    <string name="control_bar_disconnected_compact">未連線</string>
+    <string name="control_bar_testing">測試中…</string>
+    <string name="control_bar_connect_action">連線代理</string>
+    <string name="control_bar_disconnect_action">中斷代理連線</string>
+    <string name="control_bar_speed_description">下載和上傳速度：%1$s，%2$s。點按測試延遲。</string>
+    <string name="control_bar_latency_description">延遲：%1$s。點按測試延遲。</string>
+</resources>

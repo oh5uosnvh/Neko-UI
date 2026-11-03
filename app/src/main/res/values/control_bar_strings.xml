@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="control_bar_connected">Connected</string>
+    <string name="control_bar_disconnected">Disconnected</string>
+    <string name="control_bar_connected_compact">Online</string>
+    <string name="control_bar_disconnected_compact">Offline</string>
+    <string name="control_bar_testing">Testing…</string>
+    <string name="control_bar_connect_action">Connect proxy</string>
+    <string name="control_bar_disconnect_action">Disconnect proxy</string>
+    <string name="control_bar_speed_description">Download and upload speeds: %1$s, %2$s. Test latency.</string>
+    <string name="control_bar_latency_description">Latency: %1$s. Test latency.</string>
+    <string name="control_bar_speed_unknown" translatable="false">-- kB/s</string>
+    <string name="control_bar_speed_down" translatable="false">▼ %1$s</string>
+    <string name="control_bar_speed_up" translatable="false">▲ %1$s</string>
+    <string name="control_bar_speed_down_unknown" translatable="false">▼ -- kB/s</string>
+    <string name="control_bar_speed_up_unknown" translatable="false">▲ -- kB/s</string>
+    <string name="control_bar_latency_unknown" translatable="false">-- ms</string>
+    <string name="control_bar_latency_value" translatable="false">%1$s ms</string>
+</resources>

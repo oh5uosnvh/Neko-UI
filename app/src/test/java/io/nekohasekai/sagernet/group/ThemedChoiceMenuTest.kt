@@ -130,7 +130,7 @@ class ThemedChoiceMenuTest {
     }
 
     private fun assertBackground(context: Context, background: GradientDrawable): Rect {
-        assertEquals(color(context, android.R.attr.colorBackground), background.color!!.defaultColor)
+        assertEquals(color(context, R.attr.colorLayerHigh), background.color!!.defaultColor)
         assertCorners(background, context.resources.getDimension(R.dimen.popup_corner_radius))
         // XML inflation does not call ShadowGradientDrawable.setStroke(int, int).
         val stroke = ReflectionHelpers.getField<Int>(background.constantState, "mStrokeWidth")

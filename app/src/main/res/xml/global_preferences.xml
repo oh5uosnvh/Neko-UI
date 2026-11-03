@@ -314,9 +314,6 @@
             app:key="appTLSVersion"
             app:title="@string/app_tls_version"
             app:useSimpleSummaryProvider="true" />
-        <SwitchPreference
-            app:key="showBottomBar"
-            app:title="@string/show_bottom_bar" />
         <Preference
             app:icon="@drawable/baseline_undo_24"
             app:key="resetSettings"

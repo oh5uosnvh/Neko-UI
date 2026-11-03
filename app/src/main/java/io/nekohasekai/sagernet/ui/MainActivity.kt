@@ -21,6 +21,16 @@ import androidx.drawerlayout.widget.DrawerLayout
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentManager
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updateLayoutParams
+import androidx.coordinatorlayout.widget.CoordinatorLayout
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.preference.PreferenceDataStore
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.navigation.NavigationView
@@ -67,6 +77,8 @@ class MainActivity : ThemedActivity(),
     lateinit var binding: LayoutMainBinding
     lateinit var navigation: NavigationView
     private var currentMainFragment: ToolbarFragment? = null
+    private val controlLatencyGate = ControlLatencyGate()
+    private var controlLatencyJob: Job? = null
 
     // ---- 侧边栏切换优化 ----
     // 官方实现每次点击都是 new Fragment + replace()，事务恰好在抽屉关闭动画
@@ -104,7 +116,6 @@ class MainActivity : ThemedActivity(),
         DataStore.serviceState = BaseService.State.Idle
 
         binding = LayoutMainBinding.inflate(layoutInflater)
-        binding.fab.initProgress(binding.fabProgress)
         if (themeResId !in intArrayOf(
                 R.style.Theme_SagerNet_Black
             )
@@ -134,20 +145,22 @@ class MainActivity : ThemedActivity(),
             }
         }
 
-        binding.fab.setOnClickListener {
-            if (DataStore.serviceState.canStop) SagerNet.stopService() else connect.launch(
-                null
-            )
+        binding.controlBar.onToggle = {
+            val state = DataStore.serviceState
+            if (state != BaseService.State.Connecting && state != BaseService.State.Stopping) {
+                if (state.canStop) SagerNet.stopService() else connect.launch(null)
+            }
         }
-        binding.stats.setOnClickListener { if (DataStore.serviceState.connected) binding.stats.testConnection() }
+        binding.controlBar.onTest = { testControlLatency() }
 
         setContentView(binding.root)
+        installControlBarInsets()
         if (currentMainFragment == null) {
             currentMainFragment =
                 supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
         }
-        syncMainControls(showWhenConnected = false, animate = false)
-        changeState(BaseService.State.Idle, animate = false, animateControls = false)
+        syncMainControls()
+        changeState(BaseService.State.Idle)
         connection.connect(this, this)
         DataStore.configurationStore.registerChangeListener(this)
         GroupManager.userInterface = GroupInterfaceAdapter(this)
@@ -209,13 +222,8 @@ class MainActivity : ThemedActivity(),
         val restoredFragment = currentMainFragment
             ?: supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
         if (restoredFragment != null) {
-            val fragmentChanged = restoredFragment !== currentMainFragment
             currentMainFragment = restoredFragment
-            syncMainControls(
-                fragment = restoredFragment,
-                showWhenConnected = fragmentChanged && DataStore.serviceState == BaseService.State.Connected,
-                animate = false,
-            )
+            syncMainControls()
         }
     }
 
@@ -480,7 +488,7 @@ class MainActivity : ThemedActivity(),
             transaction.commitAllowingStateLoss()
 
             currentMainFragment = fragment
-            syncMainControls(fragment, showWhenConnected = false, animate = false)
+            syncMainControls()
         }
 
         binding.drawerLayout.closeDrawers()
@@ -684,31 +692,59 @@ class MainActivity : ThemedActivity(),
         }, WARM_FRAME_MS)
     }
 
-    private fun syncMainControls(
-        fragment: Any? = currentMainFragment
-            ?: supportFragmentManager.findFragmentById(R.id.fragment_holder),
-        showWhenConnected: Boolean,
-        animate: Boolean,
-    ) {
-        val showControls = fragment is ConfigurationFragment || DataStore.showBottomBar
-        binding.stats.useExternalScrollDriver = fragment is ConfigurationFragment
-        binding.stats.syncMainControls(
-            showControls,
-            DataStore.serviceState,
-            showWhenConnected,
-            animate,
-        )
-        binding.fab.animate().cancel()
-        if (showControls) {
-            binding.fab.show()
-        } else {
-            binding.fab.hideProgress()
-            binding.fabProgress.hide()
-            binding.fabProgress.visibility = View.INVISIBLE
-            if (animate && binding.fab.isLaidOut) {
-                binding.fab.hide()
-            } else {
-                binding.fab.visibility = View.INVISIBLE
+    private fun syncMainControls() {
+        binding.controlBar.visibility = View.VISIBLE
+        binding.controlBar.changeState(DataStore.serviceState)
+    }
+
+    private fun installControlBarInsets() {
+        fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+        ViewCompat.setOnApplyWindowInsetsListener(binding.coordinator) { _, insets ->
+            val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            val bottom = maxOf(safe.bottom, keyboard)
+            binding.controlBar.updateLayoutParams<CoordinatorLayout.LayoutParams> {
+                leftMargin = dp(14) + safe.left
+                rightMargin = dp(14) + safe.right
+                bottomMargin = dp(14) + bottom
+            }
+            // Reserve the bar's real footprint; lists never render their last row underneath it.
+            binding.fragmentHolder.updateLayoutParams<CoordinatorLayout.LayoutParams> {
+                bottomMargin = dp(104) + bottom
+            }
+            insets
+        }
+        ViewCompat.requestApplyInsets(binding.coordinator)
+    }
+
+    private fun invalidateControlLatency() {
+        controlLatencyGate.invalidate()
+        controlLatencyJob?.cancel()
+        controlLatencyJob = null
+        if (::binding.isInitialized) binding.controlBar.reset()
+    }
+
+    private fun testControlLatency() {
+        if (!DataStore.serviceState.connected || connection.service == null) {
+            binding.controlBar.showLatency(-1)
+            return
+        }
+        val request = controlLatencyGate.begin(DataStore.selectedProxy, DataStore.currentProfile) ?: return
+        binding.controlBar.showTesting()
+        controlLatencyJob = lifecycleScope.launch {
+            try {
+                val elapsed = withContext(Dispatchers.IO) { urlTest() }
+                if (controlLatencyGate.finish(request, DataStore.serviceState.connected,
+                        DataStore.selectedProxy, DataStore.currentProfile)) {
+                    binding.controlBar.showLatency(elapsed)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (controlLatencyGate.finish(request, DataStore.serviceState.connected,
+                        DataStore.selectedProxy, DataStore.currentProfile)) {
+                    binding.controlBar.showLatency(-1)
+                }
             }
         }
     }
@@ -717,10 +753,6 @@ class MainActivity : ThemedActivity(),
         val fragment = currentMainFragment
             ?: supportFragmentManager.findFragmentById(R.id.fragment_holder)
         (fragment as? ConfigurationFragment)?.refreshProfileState()
-    }
-
-    fun driveBottomBar(scrollDy: Int) {
-        binding.stats.onListScrolled(scrollDy)
     }
 
     fun displayFragmentWithId(@IdRes id: Int): Boolean {
@@ -743,32 +775,22 @@ class MainActivity : ThemedActivity(),
     private fun changeState(
         state: BaseService.State,
         msg: String? = null,
-        animate: Boolean = false,
-        animateControls: Boolean = animate,
     ) {
         DataStore.serviceState = state
+        if (!state.connected) invalidateControlLatency()
         refreshConfigurationProfileState()
-
-        binding.fab.changeState(state, DataStore.serviceState, animate)
-        binding.stats.changeState(state)
-        syncMainControls(
-            showWhenConnected = state == BaseService.State.Connected,
-            animate = animateControls,
-        )
+        syncMainControls()
         if (msg != null) snackbar(getString(R.string.vpn_error, msg)).show()
     }
 
     override fun snackbarInternal(text: CharSequence): Snackbar {
         return Snackbar.make(binding.coordinator, text, Snackbar.LENGTH_LONG).apply {
-            if (binding.fab.isShown) {
-                anchorView = binding.fab
-            }
-            // TODO
+            if (binding.controlBar.isShown) anchorView = binding.controlBar
         }
     }
 
     override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) {
-        changeState(state, msg, true)
+        changeState(state, msg)
     }
 
     val connection = SagerConnection(SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND, true)
@@ -787,14 +809,18 @@ class MainActivity : ThemedActivity(),
         connection.connect(this, this)
     }
 
-    private val connect = registerForActivityResult(VpnRequestActivity.StartService()) {
-        if (it) snackbar(R.string.vpn_permission_denied).show()
+    private val connect = registerForActivityResult(VpnRequestActivity.StartService()) { denied ->
+        if (denied) {
+            syncMainControls() // An authoritative permission-cancel response re-arms the capsule.
+            snackbar(R.string.vpn_permission_denied).show()
+        }
+        // Successful requests stay locked until the real service reports Connecting/Connected.
     }
 
     // may NOT called when app is in background
     // ONLY do UI update here, write DB in bg process
     override fun cbSpeedUpdate(stats: SpeedDisplayData) {
-        binding.stats.updateSpeed(stats.txRateProxy, stats.rxRateProxy)
+        binding.controlBar.updateSpeed(stats.txRateProxy, stats.rxRateProxy)
     }
 
     override suspend fun cbTrafficUpdate(data: TrafficDataBatch) {
@@ -815,10 +841,7 @@ class MainActivity : ThemedActivity(),
     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
         when (key) {
             Key.SERVICE_MODE -> onBinderDied()
-            Key.SHOW_BOTTOM_BAR -> syncMainControls(
-                showWhenConnected = DataStore.showBottomBar,
-                animate = true,
-            )
+            Key.PROFILE_ID, Key.PROFILE_CURRENT -> invalidateControlLatency()
             Key.PROXY_APPS, Key.BYPASS_MODE, Key.INDIVIDUAL -> {
                 if (DataStore.serviceState.canStop) {
                     snackbar(getString(R.string.need_reload)).setAction(R.string.apply) {
@@ -835,11 +858,17 @@ class MainActivity : ThemedActivity(),
     }
 
     override fun onStop() {
+        invalidateControlLatency()
         connection.updateConnectionId(SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_BACKGROUND)
         super.onStop()
     }
 
     override fun onDestroy() {
+        invalidateControlLatency()
+        if (::binding.isInitialized) {
+            binding.controlBar.onToggle = null
+            binding.controlBar.onTest = null
+        }
         super.onDestroy()
         binding.root.removeCallbacks(prewarmRunnable)
         binding.drawerLayout.removeDrawerListener(drawerListener)

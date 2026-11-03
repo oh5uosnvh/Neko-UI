@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 顶部标签栏：官方上游 master 原文。唯一偏离：tabRippleColor 设为透明
-     （需求指定：点按/长按分组名不出现按压底色），其余逐行与官方一致。 -->
+<!-- LayerLow chrome; the pager below is bounded by a weighted LayerHigh container. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
@@ -18,7 +17,7 @@
         android:id="@+id/group_tab"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="?colorPrimary"
+        android:background="?attr/colorLayerLow"
         android:elevation="4dp"
         android:visibility="gone"
         app:tabIndicatorColor="?tabIndicatorColor"
@@ -30,9 +29,19 @@
         app:tabTextColor="?tabTextColor"
         app:tabUnboundedRipple="false" />
 
-    <androidx.viewpager2.widget.ViewPager2
-        android:id="@+id/group_pager"
+    <io.nekohasekai.sagernet.widget.LayeredContentFrameLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="10dp"
+        android:background="@drawable/bg_layer_high"
+        android:clipToOutline="false">
+
+        <androidx.viewpager2.widget.ViewPager2
+            android:id="@+id/group_pager"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+    </io.nekohasekai.sagernet.widget.LayeredContentFrameLayout>
 
 </LinearLayout>

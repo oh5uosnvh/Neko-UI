@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="fab_color_progress">@color/material_light_white</color>
-    <color name="preference_simple_menu_background">#303030</color>
+    <!-- MD night palette; brand and latency colors inherit the day values. -->
+    <color name="layer_low">#121315</color>
+    <color name="layer_high">#252628</color>
+    <color name="layer_stroke">#80FFFFFF</color>
+    <color name="preference_simple_menu_background">@color/layer_high</color>
     <!-- 卡片默认细边框：约 12% 白 -->
     <color name="card_stroke">#29FFFFFF</color>
 

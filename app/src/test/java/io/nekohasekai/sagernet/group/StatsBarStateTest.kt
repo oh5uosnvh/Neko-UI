@@ -19,6 +19,7 @@ import java.time.Duration
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk=[28],application=Application::class)
+/** Main-layout migration coverage: no old tray/FAB/progress may reappear after re-layout. */
 class StatsBarStateTest {
     private fun withLayout(block:(LayoutMainBinding)->Unit) {
         val controller=Robolectric.buildActivity(AppCompatActivity::class.java)
@@ -28,7 +29,6 @@ class StatsBarStateTest {
             val binding=LayoutMainBinding.inflate(activity.layoutInflater)
             // Match MainActivity's theme selection: only one LEFT drawer may remain attached.
             binding.drawerLayout.removeView(binding.navViewBlack)
-            binding.fab.initProgress(binding.fabProgress)
             activity.setContentView(binding.root)
             binding.root.measure(View.MeasureSpec.makeMeasureSpec(1080,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(1920,View.MeasureSpec.EXACTLY))
             binding.root.layout(0,0,1080,1920)
@@ -36,54 +36,66 @@ class StatsBarStateTest {
             block(binding)
         } finally {controller.pause().stop().destroy()}
     }
-    private fun assertHidden(binding:LayoutMainBinding) {
-        assertEquals(0f,binding.stats.alpha,0f)
-        assertEquals(View.VISIBLE,binding.stats.visibility)
-        assertFalse(binding.stats.isClickable)
-        assertTrue(binding.stats.translationY>=binding.stats.height)
+    private fun assertControlVisible(binding:LayoutMainBinding) {
+        val bar=binding.controlBar
+        assertEquals(1f,bar.alpha,0f)
+        assertEquals(View.VISIBLE,bar.visibility)
+        assertEquals(0f,bar.translationY,0f)
+        assertFalse((bar.layoutParams as androidx.coordinatorlayout.widget.CoordinatorLayout.LayoutParams).behavior != null)
+        assertTrue(bar.bottom <= binding.coordinator.height)
     }
-    @Test fun coldIdleAndStoppedNeverFlashEvenWhenAnimatedRequested()=withLayout { b ->
+
+    @Test fun coldIdleAndStoppedHaveOnlyThePersistentControlBar()=withLayout { b ->
         for(state in listOf(BaseService.State.Idle,BaseService.State.Stopped,BaseService.State.Connecting,BaseService.State.Stopping)) {
-            b.stats.changeState(state)
-            b.stats.syncMainControls(true,state,true,true)
-            assertHidden(b)
+            b.controlBar.changeState(state)
+            assertControlVisible(b)
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(500))
             b.root.requestLayout();b.root.layout(0,0,1080,1920)
-            assertHidden(b)
+            assertControlVisible(b)
+            assertFalse(b.controlBar.findViewById<View>(R.id.capsule).isSelected)
         }
-        b.fab.changeState(BaseService.State.Stopped,BaseService.State.Idle,false)
-        b.fab.show()
-        var clicked=false;b.fab.setOnClickListener{clicked=true};b.fab.performClick()
-        assertTrue(clicked);assertTrue(b.fab.isEnabled);assertEquals(View.VISIBLE,b.fab.visibility)
     }
-    @Test fun staleShowAndBothBehaviorEntrypointsCannotReopenStoppedTray()=withLayout { b ->
-        b.stats.syncMainControls(true,BaseService.State.Connected,true,true)
-        b.stats.changeState(BaseService.State.Stopped)
-        b.stats.syncMainControls(true,BaseService.State.Stopped,false,true)
-        b.stats.performShow()
-        b.stats.getBehavior().slideUp(b.stats)
-        b.stats.getBehavior().slideUp(b.stats,false)
+
+    @Test fun disconnectedTransitionsDoNotHideOrSlideTheNewControlBar()=withLayout { b ->
+        b.controlBar.changeState(BaseService.State.Connected)
+        b.controlBar.changeState(BaseService.State.Stopped)
+        b.controlBar.animate().cancel()
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
-        assertHidden(b)
+        assertControlVisible(b)
+        val views=ArrayList<View>()
+        fun collect(view:View) {
+            views+=view
+            if(view is android.view.ViewGroup) for(i in 0 until view.childCount) collect(view.getChildAt(i))
+        }
+        collect(b.coordinator)
+        assertFalse(views.any { it is com.google.android.material.floatingactionbutton.FloatingActionButton })
+        assertFalse(views.any { it is com.google.android.material.bottomappbar.BottomAppBar })
+        assertFalse(views.any { it is com.google.android.material.progressindicator.CircularProgressIndicator })
     }
-    @Test fun restoreAndRelayoutKeepDisconnectedTrayHidden()=withLayout { b ->
-        b.stats.syncMainControls(true,BaseService.State.Connected,true,false)
-        val state=SparseArray<android.os.Parcelable>();b.stats.saveHierarchyState(state)
-        b.stats.changeState(BaseService.State.Idle)
-        b.stats.restoreHierarchyState(state)
+
+    @Test fun restoreAndRelayoutDoNotReviveAnOldConnectedPresentation()=withLayout { b ->
+        b.controlBar.changeState(BaseService.State.Connected)
+        b.controlBar.showTesting()
+        val saved=SparseArray<android.os.Parcelable>();b.controlBar.saveHierarchyState(saved)
+        b.controlBar.changeState(BaseService.State.Idle)
+        b.controlBar.restoreHierarchyState(saved)
         b.root.requestLayout();b.root.layout(0,0,1080,1920)
-        assertHidden(b)
+        assertControlVisible(b)
+        assertFalse(b.controlBar.findViewById<View>(R.id.capsule).isSelected)
+        assertEquals("-- ms",b.controlBar.findViewById<android.widget.TextView>(R.id.latency).text.toString())
     }
-    @Test fun connectedStatisticsCanStillShowAndScroll()=withLayout { b ->
-        b.stats.useExternalScrollDriver=true
-        b.stats.changeState(BaseService.State.Connected)
-        b.stats.syncMainControls(true,BaseService.State.Connected,true,false)
-        assertEquals(1f,b.stats.alpha,0f);assertEquals(0f,b.stats.translationY,0f)
-        b.stats.onListScrolled(200);shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(500))
-        assertTrue(b.stats.translationY>0f)
-        b.stats.onListScrolled(-200);shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(500))
-        assertEquals(0f,b.stats.translationY,0.5f)
-        b.stats.syncMainControls(false,BaseService.State.Connected,false,true)
-        assertHidden(b)
+
+    @Test fun connectedControlRemainsClickableAndListsReserveItsFootprint()=withLayout { b ->
+        b.controlBar.changeState(BaseService.State.Connected)
+        var clicked=false
+        b.controlBar.onToggle={clicked=true}
+        val capsule=b.controlBar.findViewById<View>(R.id.capsule)
+        assertTrue(capsule.isEnabled)
+        capsule.performClick()
+        assertTrue(clicked)
+        assertControlVisible(b)
+        val space=(b.fragmentHolder.layoutParams as androidx.coordinatorlayout.widget.CoordinatorLayout.LayoutParams).bottomMargin
+        assertTrue(space >= b.controlBar.height)
+        assertTrue(b.fragmentHolder.bottom <= b.controlBar.top)
     }
 }

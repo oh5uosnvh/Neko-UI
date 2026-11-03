@@ -1,19 +1,27 @@
 <resources>
-    <!-- Base application theme. -->
-    <style name="Theme.SagerNet" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <!-- Shared bag: API-qualified Theme.SagerNet must also inherit this base. -->
+    <style name="Theme.SagerNet" parent="Theme.SagerNet.Base" />
+
+    <style name="Theme.SagerNet.Base" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="actionBarStyle">@style/Widget.MaterialComponents.ActionBar.Solid</item>
         <item name="actionModeCloseDrawable">@drawable/ic_navigation_close</item>
         <item name="colorButtonNormal">?colorAccent</item>
-        <item name="android:navigationBarColor">?colorPrimaryDark</item>
-        <item name="colorPrimary">@color/material_pink_500</item>
-        <item name="colorPrimaryDark">@color/material_pink_700</item>
-        <item name="colorAccent">@color/material_pink_accent_200</item>
+        <item name="android:navigationBarColor">?attr/colorLayerLow</item>
+        <item name="colorLayerLow">@color/layer_low</item>
+        <item name="colorLayerHigh">@color/layer_high</item>
+        <item name="colorLayerStroke">@color/layer_stroke</item>
+        <item name="android:windowBackground">?attr/colorLayerLow</item>
+        <item name="android:colorBackground">?attr/colorLayerLow</item>
+        <item name="colorSurface">?attr/colorLayerHigh</item>
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorPrimaryDark">@color/material_blue_grey_700</item>
+        <item name="colorAccent">@color/brand_primary</item>
 
-        <item name="colorMaterial100">@color/material_pink_100</item>
-        <item name="colorMaterial300">@color/material_pink_300</item>
+        <item name="colorMaterial100">@color/material_blue_grey_100</item>
+        <item name="colorMaterial300">@color/brand_primary_light</item>
 
-        <!-- 立体卡片提升表面色，默认 = Pink；各配色变体在下方各自覆盖 -->
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_pink</item>
+        <!-- Preserve tonal/elevated cards; the enclosing screen surface is LayerHigh. -->
+        <item name="cardElevatedSurfaceColor">@color/card_elevated_blue_grey</item>
 
         <item name="accentOrTextSecondary">?colorAccent</item>
         <item name="accentOrTextPrimary">?colorAccent</item>
@@ -22,12 +30,13 @@
 
         <item name="fabColorBackground">?colorPrimary</item>
         <item name="selectedColorPrimary">?colorPrimary</item>
-        <item name="actionBarTheme">@style/ThemeOverlay.AppCompat.Dark.ActionBar</item>
-        <item name="tabTextColor">#99FFFFFF</item>
-        <item name="tabSelectedTextColor">@color/white</item>
-        <item name="tabIndicatorColor">@color/white</item>
-        <item name="tabRippleColor">@color/white</item>
-        <item name="whiteOrTextPrimary">@color/white</item>
+        <item name="actionBarTheme">@style/ThemeOverlay.SagerNet.LayeredToolbar</item>
+        <!-- White unselected tabs disappear on the MD light chrome; use DayNight foreground. -->
+        <item name="tabTextColor">?android:attr/textColorSecondary</item>
+        <item name="tabSelectedTextColor">?attr/colorPrimary</item>
+        <item name="tabIndicatorColor">?attr/colorPrimary</item>
+        <item name="tabRippleColor">?attr/colorPrimary</item>
+        <item name="whiteOrTextPrimary">?android:attr/textColorPrimary</item>
 
         <item name="windowActionModeOverlay">true</item>
 
@@ -62,16 +71,22 @@
         <item name="actionBarStyle">@style/Widget.MaterialComponents.ActionBar.Solid</item>
         <item name="actionModeCloseDrawable">@drawable/ic_navigation_close</item>
         <item name="colorButtonNormal">?colorAccent</item>
-        <item name="android:navigationBarColor">?colorPrimaryDark</item>
-        <item name="colorPrimary">@color/material_pink_500</item>
-        <item name="colorPrimaryDark">@color/material_pink_700</item>
-        <item name="colorAccent">@color/material_pink_accent_200</item>
+        <item name="android:navigationBarColor">?attr/colorLayerLow</item>
+        <item name="colorLayerLow">@color/layer_low</item>
+        <item name="colorLayerHigh">@color/layer_high</item>
+        <item name="colorLayerStroke">@color/layer_stroke</item>
+        <item name="android:windowBackground">?attr/colorLayerLow</item>
+        <item name="android:colorBackground">?attr/colorLayerLow</item>
+        <item name="colorSurface">?attr/colorLayerHigh</item>
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorPrimaryDark">@color/material_blue_grey_700</item>
+        <item name="colorAccent">@color/brand_primary</item>
 
-        <item name="colorMaterial100">@color/material_pink_100</item>
-        <item name="colorMaterial300">@color/material_pink_300</item>
+        <item name="colorMaterial100">@color/material_blue_grey_100</item>
+        <item name="colorMaterial300">@color/brand_primary_light</item>
 
-        <!-- 立体卡片提升表面色，默认 = Pink；各配色变体在下方各自覆盖 -->
-        <item name="cardElevatedSurfaceColor">@color/card_elevated_pink</item>
+        <!-- Preserve tonal/elevated cards; the enclosing screen surface is LayerHigh. -->
+        <item name="cardElevatedSurfaceColor">@color/card_elevated_blue_grey</item>
 
         <item name="accentOrTextSecondary">?colorAccent</item>
         <item name="accentOrTextPrimary">?colorAccent</item>
@@ -80,12 +95,13 @@
 
         <item name="fabColorBackground">?colorPrimary</item>
         <item name="selectedColorPrimary">?colorPrimary</item>
-        <item name="actionBarTheme">@style/ThemeOverlay.AppCompat.Dark.ActionBar</item>
-        <item name="tabTextColor">#99FFFFFF</item>
-        <item name="tabSelectedTextColor">@color/white</item>
-        <item name="tabIndicatorColor">@color/white</item>
-        <item name="tabRippleColor">@color/white</item>
-        <item name="whiteOrTextPrimary">@color/white</item>
+        <item name="actionBarTheme">@style/ThemeOverlay.SagerNet.LayeredToolbar</item>
+        <!-- White unselected tabs disappear on the MD light chrome; use DayNight foreground. -->
+        <item name="tabTextColor">?android:attr/textColorSecondary</item>
+        <item name="tabSelectedTextColor">?attr/colorPrimary</item>
+        <item name="tabIndicatorColor">?attr/colorPrimary</item>
+        <item name="tabRippleColor">?attr/colorPrimary</item>
+        <item name="whiteOrTextPrimary">?android:attr/textColorPrimary</item>
 
         <item name="windowActionModeOverlay">true</item>
 
@@ -120,12 +136,31 @@
 
     </style>
 
+    <!-- Inherit the activity's DayNight foreground, never force a dark-actionbar white. -->
+    <style name="ThemeOverlay.SagerNet.LayeredToolbar" parent="">
+        <item name="colorControlNormal">?android:attr/textColorPrimary</item>
+        <item name="android:colorControlNormal">?android:attr/textColorPrimary</item>
+        <item name="titleTextColor">?android:attr/textColorPrimary</item>
+        <item name="subtitleTextColor">?android:attr/textColorSecondary</item>
+    </style>
+
+    <!-- A popup is raised content, not the application's lower window background. -->
+    <style name="ThemeOverlay.SagerNet.LayeredPopup" parent="ThemeOverlay.AppCompat.DayNight">
+        <item name="android:colorBackground">?attr/colorLayerHigh</item>
+        <item name="colorSurface">?attr/colorLayerHigh</item>
+    </style>
+
     <style name="AppearanceFoundation.Title" parent="TextAppearance.AppCompat.Title">
         <item name="android:textColor">?attr/colorOnSurface</item>
         <item name="android:textStyle">bold</item>
     </style>
 
     <style name="ThemeOverlay.MaterialComponents.MaterialAlertDialog.SagerNet">
+        <item name="colorLayerLow">@color/layer_low</item>
+        <item name="colorLayerHigh">@color/layer_high</item>
+        <item name="colorLayerStroke">@color/layer_stroke</item>
+        <item name="colorSurface">?attr/colorLayerHigh</item>
+        <item name="android:colorBackground">?attr/colorLayerHigh</item>
         <item name="shapeAppearanceOverlay">@style/ShapeAppearanceOverlay.SagerNet.Dialog</item>
         <item name="buttonBarPositiveButtonStyle">
             @style/Widget.MaterialComponents.Button.TextButton.Dialog.Primary
@@ -209,6 +244,7 @@
         <item name="cornerSizeBottomRight">0dp</item>
     </style>
     <style name="Widget.SagerNet.BottomSheet" parent="Widget.MaterialComponents.BottomSheet.Modal">
+        <item name="backgroundTint">?attr/colorLayerHigh</item>
         <item name="shapeAppearanceOverlay">@style/ShapeAppearanceOverlay.SagerNet.BottomSheet</item>
     </style>
     <style name="ThemeOverlay.SagerNet.BottomSheetDialog" parent="ThemeOverlay.MaterialComponents.BottomSheetDialog">
@@ -260,7 +296,7 @@
     </style>
 
     <style name="Theme.SagerNet.BlueGrey" parent="Theme.SagerNet">
-        <item name="colorPrimary">@color/material_blue_grey_500</item>
+        <item name="colorPrimary">@color/brand_primary</item>
         <item name="colorPrimaryDark">@color/material_blue_grey_700</item>
         <item name="colorAccent">@color/material_blue_grey_200</item>
         <item name="colorMaterial100">@color/material_blue_grey_100</item>
@@ -423,7 +459,7 @@
     </style>
 
     <style name="Theme.SagerNet.Dialog.BlueGrey" parent="Theme.SagerNet.Dialog">
-        <item name="colorPrimary">@color/material_blue_grey_500</item>
+        <item name="colorPrimary">@color/brand_primary</item>
         <item name="colorPrimaryDark">@color/material_blue_grey_700</item>
         <item name="colorAccent">@color/material_blue_grey_200</item>
         <item name="colorMaterial100">@color/material_blue_grey_100</item>

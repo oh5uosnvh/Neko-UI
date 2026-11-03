@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 
 <resources>
+    <!-- Window/chrome and raised content stay independent of selectable primary colors. -->
+    <attr name="colorLayerLow" format="color" />
+    <attr name="colorLayerHigh" format="color" />
+    <attr name="colorLayerStroke" format="color" />
     <attr name="colorMaterial100" format="color" />
     <attr name="colorMaterial300" format="color" />
     <attr name="accentOrTextSecondary" format="color" />

@@ -118,6 +118,7 @@
                     android:layout_marginTop="4dp"
                     android:layout_marginBottom="12dp"
                     android:id="@+id/route_outbound"
+                    android:background="?attr/selectableItemBackgroundBorderless"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textAppearance="?android:attr/textAppearanceSmall"

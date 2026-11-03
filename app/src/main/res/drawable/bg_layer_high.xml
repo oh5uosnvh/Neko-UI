@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="?attr/colorLayerHigh" />
+    <stroke
+        android:width="1dp"
+        android:color="?attr/colorLayerStroke" />
+    <!-- The MD specifies only rounded top corners; the dedicated content host clips on API21+. -->
+    <corners android:topLeftRadius="24dp" android:topRightRadius="24dp" />
+    <!-- Keep opaque children inside the one-dp outline. -->
+    <padding
+        android:left="1dp"
+        android:top="1dp"
+        android:right="1dp"
+        android:bottom="1dp" />
+</shape>
