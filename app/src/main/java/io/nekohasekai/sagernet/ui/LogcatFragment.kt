@@ -75,7 +75,7 @@ class LogcatFragment : ToolbarFragment(R.layout.layout_logcat),
         owner.lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             val bytes = SendLog.getNekoLog(50 * 1024)
             val hash = bytes.contentHashCode()
-            if (hash == lastLogHash) return@runOnDefaultDispatcher
+            if (hash == lastLogHash) return@launch
             val span = SpannableString(String(bytes))
             var offset = 0
             for (line in span.lines()) {
