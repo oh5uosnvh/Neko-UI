@@ -14,6 +14,11 @@ import java.util.ArrayDeque
 import kotlin.coroutines.CoroutineContext
 
 class GroupOrderPagerStressTest {
+    private fun appFile(relative: String): File {
+        val app = sequenceOf(File("."), File("app")).first { File(it, "src/main/java").isDirectory }
+        return File(app, relative.removePrefix("app/"))
+    }
+
     private class Queue : CoroutineDispatcher() {
         private val tasks = ArrayDeque<Runnable>()
         override fun dispatch(context: CoroutineContext, block: Runnable) { tasks.add(block) }
@@ -105,7 +110,7 @@ class GroupOrderPagerStressTest {
     }
 
     @Test fun sourceHotpathsKeepOrderEchoAndResumeFreeOfNodeReloadAndFocusSteal() {
-        val source = File("app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt").readText()
+        val source = appFile("app/src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt").readText()
         val page = source.substringAfter("class GroupFragment : Fragment()")
         val resume = page.substringAfter("override fun onResume() {").substringBefore("fun checkOrderMenu()")
         assertFalse(resume.contains("configurationListView.size"))
@@ -120,15 +125,15 @@ class GroupOrderPagerStressTest {
         assertEquals(1, Regex("notifyDataSetChanged\\(\\)").findAll(pagerBatch).count())
         assertFalse(pagerBatch.contains("notifyItemMoved("))
         assertTrue(source.contains("pageRequests.applyWhenIdle(groupPager"))
-        assertTrue(File("app/src/main/java/io/nekohasekai/sagernet/ui/GroupPageRequests.kt").readText().contains("pager.setCurrentItem(position, true)"))
-        val popup = File("app/src/main/java/io/nekohasekai/sagernet/ui/TopBarController.kt").readText()
+        assertTrue(appFile("app/src/main/java/io/nekohasekai/sagernet/ui/GroupPageRequests.kt").readText().contains("pager.setCurrentItem(position, true)"))
+        val popup = appFile("app/src/main/java/io/nekohasekai/sagernet/ui/TopBarController.kt").readText()
         val popupBatch = popup.substringAfter("override suspend fun groupsReordered").substringBefore("override suspend fun groupAdd")
         assertFalse(popupBatch.contains("requestRefresh()"))
         assertFalse(popupBatch.contains("loadCounts()"))
         val accept = popup.substringAfter("private fun accept(").substringBefore("private fun onSettled()")
         assertFalse(accept.contains("loadCounts()"))
         assertFalse(popup.contains("ids.associateWith { PendingProfileDeletes.count(it) }"))
-        assertTrue(File("app/src/main/java/io/nekohasekai/sagernet/ui/PendingProfileDeletes.kt").readText().contains("GROUP BY groupId"))
-        assertTrue(File("app/src/main/java/io/nekohasekai/sagernet/database/ProxyGroup.kt").readText().contains("UPDATE proxy_groups SET userOrder = :order WHERE id = :groupId"))
+        assertTrue(appFile("app/src/main/java/io/nekohasekai/sagernet/ui/PendingProfileDeletes.kt").readText().contains("GROUP BY groupId"))
+        assertTrue(appFile("app/src/main/java/io/nekohasekai/sagernet/database/ProxyGroup.kt").readText().contains("UPDATE proxy_groups SET userOrder = :order WHERE id = :groupId"))
     }
 }
