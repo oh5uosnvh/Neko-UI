@@ -4,6 +4,7 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
+import android.os.Looper
 import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
@@ -310,21 +311,26 @@ class ControlBar @JvmOverloads constructor(
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
     }
 
-    fun updateSpeed(txRate: Long, rxRate: Long) {
-        if (!canReceiveMeasurements()) return
+    /** Preference/probe callbacks can fire on Default workers; views and animators are main-only. */
+    private fun onControlThread(block: () -> Unit) {
+        if (Looper.myLooper() === Looper.getMainLooper()) block() else post(block)
+    }
+
+    fun updateSpeed(txRate: Long, rxRate: Long) = onControlThread {
+        if (!canReceiveMeasurements()) return@onControlThread
         speedDown.text = context.getString(R.string.control_bar_speed_down, fmt(rxRate))
         speedUp.text = context.getString(R.string.control_bar_speed_up, fmt(txRate))
         updateSpeedDescription()
     }
 
     /** Idempotent; a test acquires its lock synchronously before invoking the host. */
-    fun showTesting() {
-        if (!canReceiveMeasurements() || testing) return
+    fun showTesting() = onControlThread {
+        if (!canReceiveMeasurements() || testing) return@onControlThread
         beginLatencyTesting()
     }
 
-    fun showConnectionTesting() {
-        if (!canShowReadouts() || currentState != BaseService.State.Connecting || testing) return
+    fun showConnectionTesting() = onControlThread {
+        if (!canShowReadouts() || currentState != BaseService.State.Connecting || testing) return@onControlThread
         beginLatencyTesting()
     }
 
@@ -355,13 +361,9 @@ class ControlBar @JvmOverloads constructor(
         updateEnabledState()
     }
 
-    fun showLatency(ms: Int) {
-        finishLatency(ms, null)
-    }
+    fun showLatency(ms: Int) = onControlThread { finishLatency(ms, null) }
 
-    fun showFailure(summary: String) {
-        finishLatency(-1, summary)
-    }
+    fun showFailure(summary: String) = onControlThread { finishLatency(-1, summary) }
 
     private fun finishLatency(ms: Int, error: String?) {
         val wait = if (testing) (150L - (SystemClock.uptimeMillis() - testingStarted)).coerceAtLeast(0) else 0L
@@ -445,15 +447,16 @@ class ControlBar @JvmOverloads constructor(
      * Use for profile/background/page invalidation after the host cancels its test generation.
      * In particular, leaving for the VPN permission activity must not re-arm a pending start.
      */
-    fun clearMeasurements() {
+    fun clearMeasurements() = onControlThread {
         resetMeasurements()
         updateEnabledState()
     }
 
     /** Clears measurements and all request locks, without inventing a new service state. */
-    fun reset() {
+    fun reset() = onControlThread {
         togglePending = false
-        clearMeasurements()
+        resetMeasurements()
+        updateEnabledState()
     }
 
     private fun requestTest() {

@@ -104,6 +104,9 @@
     <string name="show_system_apps">显示系统应用</string>
     <string name="auto_connect">自动连接</string>
     <string name="auto_connect_summary">手机启动或更新后代理会自动重新连接</string>
+    <string name="drag_scroll_speed">卡片拖动速度</string>
+    <string name="drag_scroll_speed_summary">当前 %1$d / 10（0.1×–1.0×）</string>
+    <string name="drag_scroll_speed_range_toast">拖动速度范围 %1$d~%2$d，已调整到最近边界</string>
     <string name="direct_boot_aware">允许在解锁前启动</string>
     <string name="direct_boot_aware_summary">您正在使用的服务器可能会受到更少的保护</string>
     <!-- notification category -->
@@ -338,6 +341,7 @@
     <string name="update_when_connected_only">仅在连接时更新</string>
     <string name="update_when_connected_only_sum">防止 IP 地址泄漏</string>
     <string name="subscription_user_agent">用户代理</string>
+    <string name="user_agent_builtin_summary">内置 userAgent</string>
     <string name="confirm">确认</string>
     <string name="missing_plugin">缺少插件</string>
     <string name="profile_requiring_plugin">配置 %s 需要插件 %s, 但找不到.</string>

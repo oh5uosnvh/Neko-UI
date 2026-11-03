@@ -133,6 +133,10 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var speedInterval by configurationStore.stringToInt(Key.SPEED_INTERVAL)
     var showGroupInNotification by configurationStore.boolean("showGroupInNotification")
 
+    // —— 卡片拖动速度（REQ-04，独立小区域）：范围 1..10，默认 5；
+    // 实际滚动系数 = V / 10.0f（默认 0.5×，与分组页现值一致）——
+    var dragScrollSpeed by configurationStore.int(Key.DRAG_SCROLL_SPEED) { 5 }
+
     var globalCustomConfig by configurationStore.string(Key.GLOBAL_CUSTOM_CONFIG) { "" }
 
     var remoteDns by configurationStore.string(Key.REMOTE_DNS) { "https://dns.google/dns-query" }
@@ -324,6 +328,13 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var subscriptionImportedDns by profileCacheStore.string("subscriptionImportedDns") { "" }
     var subscriptionDnsSource by profileCacheStore.string("subscriptionDnsSource") { "" }
     var subscriptionApplyHosts by profileCacheStore.boolean("subscriptionApplyHosts") { true }
+
+    // REQ-07 multi-UA: built-in subscription User-Agent candidate switches
+    // (independent section). All disabled -> RawUpdater falls back to the
+    // Nets.kt default UA. Persisted in profileCacheStore (Room), survives restart.
+    var userAgentMihomo by profileCacheStore.boolean(Key.USER_AGENT_MIHOMO) { false }
+    var userAgentClashVerge by profileCacheStore.boolean(Key.USER_AGENT_CLASH_VERGE) { false }
+    var userAgentNeko by profileCacheStore.boolean(Key.USER_AGENT_NEKO) { false }
 
     var rulesFirstCreate by profileCacheStore.boolean("rulesFirstCreate")
 

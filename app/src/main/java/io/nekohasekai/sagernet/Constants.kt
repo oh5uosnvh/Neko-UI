@@ -48,6 +48,10 @@ object Key {
     const val SPEED_INTERVAL = "speedInterval"
     const val SHOW_DIRECT_SPEED = "showDirectSpeed"
 
+    // —— 卡片拖动速度偏好（REQ-04，独立小区域）——
+    /** 列表卡片拖动边缘自动滚动速度档位：1..10，默认 5（系数 0.5×，分组页历史手感） */
+    const val DRAG_SCROLL_SPEED = "dragScrollSpeed"
+
     const val APPEND_HTTP_PROXY = "appendHttpProxy"
     const val HTTP_PROXY_BYPASS = "httpProxyBypass"
     const val DNS_HOSTS = "dnsHosts"
@@ -178,6 +182,13 @@ object Key {
     const val SUBSCRIPTION_DIRECT_DNS = "subscriptionDirectDns"
     const val SUBSCRIPTION_PRIVATE_DNS = "subscriptionPrivateDns"
     const val SUBSCRIPTION_HOSTS = "subscriptionHosts"
+
+    // REQ-07 multi-UA: persisted switch states for the built-in subscription
+    // User-Agent candidates (independent section; consumed by RawUpdater via
+    // UserAgentPreference.buildUserAgent).
+    const val USER_AGENT_MIHOMO = "userAgentMihomo"
+    const val USER_AGENT_CLASH_VERGE = "userAgentClashVerge"
+    const val USER_AGENT_NEKO = "userAgentNeko"
 
     //
 

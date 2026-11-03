@@ -2283,11 +2283,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                     totalSize: Int,
                     msSinceStartScroll: Long,
                 ): Int {
-                    val maxScroll = recyclerView.resources.getDimensionPixelSize(
-                        R.dimen.item_touch_helper_max_drag_scroll_per_frame
-                    )
-                    val speed = (maxScroll * 0.4f).toInt().coerceAtLeast(1)
-                    return if (viewSizeOutOfBounds > 0) speed else -speed
+                    // 与分组页/路由页统一：由偏好 dragScrollSpeed 驱动的恒速
+                    // 边缘滚动（原为恒定 0.4×，语义见 GroupDragScroll 注释）。
+                    return GroupDragScroll.pixels(recyclerView, viewSizeOutOfBounds)
                 }
 
             })

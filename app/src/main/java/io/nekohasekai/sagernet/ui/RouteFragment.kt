@@ -176,6 +176,18 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 super.clearView(recyclerView, viewHolder)
                 ruleAdapter.commitMove()
             }
+
+            // REQ-04：与配置页/分组页统一——拖到列表边缘匀速自动滚动（不随停留
+            // 渐进加速），速度由偏好 dragScrollSpeed 驱动，替换默认的加速滚动。
+            override fun interpolateOutOfBoundsScroll(
+                recyclerView: RecyclerView,
+                viewSize: Int,
+                viewSizeOutOfBounds: Int,
+                totalSize: Int,
+                msSinceStartScroll: Long,
+            ): Int {
+                return GroupDragScroll.pixels(recyclerView, viewSizeOutOfBounds)
+            }
         }).attachToRecyclerView(ruleListView)
     }
 

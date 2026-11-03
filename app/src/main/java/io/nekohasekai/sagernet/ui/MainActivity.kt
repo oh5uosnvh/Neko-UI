@@ -13,6 +13,7 @@ import android.os.RemoteException
 import android.view.KeyEvent
 import android.view.MenuItem
 import android.view.View
+import android.view.animation.DecelerateInterpolator
 import androidx.activity.addCallback
 import androidx.annotation.IdRes
 import androidx.core.app.ActivityCompat
@@ -95,6 +96,9 @@ class MainActivity : ThemedActivity(),
 
 
     companion object {
+        /** REQ-08：抽屉切页淡入时长（ms），日夜间一致 */
+        private const val PAGE_FADE_IN_DURATION_MS = 160L
+
         /** 参与实例缓存（重建时按 tag 找回）的页面 */
         private val CACHED_NAV_IDS = intArrayOf(
             R.id.nav_configuration, R.id.nav_group, R.id.nav_route,
@@ -485,7 +489,10 @@ class MainActivity : ThemedActivity(),
                 transaction.add(R.id.fragment_holder, fragment, tagOf(fragment))
             }
             transaction.setMaxLifecycle(fragment, Lifecycle.State.RESUMED)
-            transaction.runOnCommit { syncMainControls() }
+            transaction.runOnCommit {
+                syncMainControls()
+                fadeInDisplayedPage(fragment)
+            }
             transaction.commitAllowingStateLoss()
 
             currentMainFragment = fragment
@@ -494,13 +501,35 @@ class MainActivity : ThemedActivity(),
 
         val drawerWasOpen = binding.drawerLayout.isOpen
         binding.drawerLayout.closeDrawers()
-        if (!drawerWasOpen) {
+        // 缓存命中（实例已创建过，含视图被 detach 释放的缓存页）：立即提交，
+        // show/hide 与抽屉收回动画并行——顿挫根因是首次创建页面的 inflation
+        // 抢主线程，缓存页复用没有 inflation。首次创建的页面（inflation 会卡
+        // 抽屉动画）保留延迟提交，到 onDrawerClosed 后再执行。
+        val cached = fragment.isAdded || fragment.isDetached
+        if (!drawerWasOpen || cached) {
             pendingCommit = null
             commit()
         } else {
-            // Even a cached configuration page may lay out hundreds of cards. Run its
-            // show/lifecycle work only after the drawer animation, never in the same frame.
             pendingCommit = commit
+        }
+    }
+
+    /**
+     * REQ-08：事务执行完对新显示页面的视图做约 160ms 的 alpha 0→1 淡入。
+     * 只淡入、禁止淡出；必须等 view attach 后再起 ViewPropertyAnimator
+     * （动画依赖 ViewRootImpl），view.post 在未 attach 时会把动作排队到
+     * attach 之后执行，天然保证不白屏、不空转。alpha 先置 0 再淡入，
+     * 期间露出的是 windowBackground（layer_low 层色），日夜间均非白屏。
+     */
+    private fun fadeInDisplayedPage(fragment: Fragment) {
+        val view = fragment.view ?: return
+        view.alpha = 0f
+        view.post {
+            view.animate()
+                .alpha(1f)
+                .setDuration(PAGE_FADE_IN_DURATION_MS)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
         }
     }
 

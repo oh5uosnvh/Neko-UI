@@ -225,6 +225,9 @@
     <string name="show_system_apps">Show system apps</string>
     <string name="auto_connect">Auto Connect</string>
     <string name="auto_connect_summary">Enable proxy on startup/app update if it was running before</string>
+    <string name="drag_scroll_speed">Card Drag Scroll Speed</string>
+    <string name="drag_scroll_speed_summary">Current %1$d / 10 (0.1×–1.0×)</string>
+    <string name="drag_scroll_speed_range_toast">Speed range is %1$d–%2$d, adjusted to the nearest bound</string>
     <string name="direct_boot_aware">Allow Toggling in Lock Screen</string>
     <string name="direct_boot_aware_summary">Your selected profile information will be less
         protected</string>
@@ -417,6 +420,7 @@
     <string name="update_when_connected_only">Update only when connected</string>
     <string name="update_when_connected_only_sum">Prevent IP address leakage</string>
     <string name="subscription_user_agent">UserAgent</string>
+    <string name="user_agent_builtin_summary">Built-in userAgent</string>
     <string name="confirm">Confirm</string>
     <string name="missing_plugin">Missing Plugin</string>
     <string name="profile_requiring_plugin">Profile %s requires the %s plugin to be installed, but

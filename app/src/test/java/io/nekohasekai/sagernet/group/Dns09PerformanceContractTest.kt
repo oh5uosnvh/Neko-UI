@@ -27,7 +27,8 @@ class Dns09PerformanceContractTest {
         val selected=config.substringAfter("override fun onPageSelected(position: Int)").substringBefore("override fun onQueryTextChange")
         assertFalse(selected.contains("DataStore.selectedGroup"));assertTrue(selected.contains("groupSelectionWriter.submit(newId)"))
         val transition=source("GroupPageTransition")
-        assertTrue(transition.contains("pager.setCurrentItem(target, false)"));assertTrue(transition.contains("pager.alpha = fraction"))
+        assertTrue(transition.contains("pager.setCurrentItem(target, false)"));assertTrue(transition.contains("pager.setCurrentItem(target, true)"))
+        assertTrue(transition.contains("pager.alpha = 0f"));assertTrue(transition.contains("pager.alpha = fraction"))
         assertTrue(transition.contains("updateProgress(1f - offset, true)"))
         assertTrue(transition.contains("updateProgress(offset, false)"))
     }

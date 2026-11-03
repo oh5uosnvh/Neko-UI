@@ -9,8 +9,9 @@ import androidx.interpolator.view.animation.FastOutSlowInInterpolator
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.tabs.TabLayout
 import io.nekohasekai.sagernet.widget.GroupTabPill
+import kotlin.math.abs
 
-/** Click swaps only at alpha zero; hand swipes paint progress from actual pager distance. */
+/** Adjacent clicks really scroll one page; distant clicks hard-cut invisible, inject pills, fade in on ready. */
 internal class GroupPageTransition(
     private val pager: ViewPager2,
     private val tabs: TabLayout,
@@ -20,17 +21,20 @@ internal class GroupPageTransition(
 ) : ViewPager2.OnPageChangeCallback() {
     private var desired: Long? = null
     private var fade: ValueAnimator? = null
+    private var injection: ValueAnimator? = null
     private var centre: ObjectAnimator? = null
     private var oldPill: GroupTabPill? = null
     private var nextPill: GroupTabPill? = null
     private var lastSwipePosition = -1
     private var closed = false
     private var readyFrames = 0
+    var clicking = false
+        private set
     private val ready = object : Runnable {
         override fun run() {
             if (closed || !clicking) return
             if (isReady() || ++readyFrames >= 180) {
-                animate(0f, 1f, 140L) {
+                fadePager(0f, 1f, 140L) {
                     pager.alpha = 1f
                     clicking = false
                     settlePills(pager.currentItem)
@@ -40,24 +44,43 @@ internal class GroupPageTransition(
             } else pager.postOnAnimation(this)
         }
     }
-    var clicking = false
-        private set
     private fun pill(position: Int) = tabs.getTabAt(position)?.customView as? GroupTabPill
     private fun cancelFade() { fade?.removeAllListeners(); fade?.removeAllUpdateListeners(); fade?.cancel(); fade = null }
-    private fun animate(from: Float, to: Float, duration: Long, finish: () -> Unit) {
+    /** Drives only pager.alpha; pills are painted by the injection animator or by real scroll progress. */
+    private fun fadePager(from: Float, to: Float, duration: Long, finish: () -> Unit) {
         cancelFade()
-        oldPill?.updateProgress(pager.alpha, false, true)
         fade = ValueAnimator.ofFloat(from, to).apply {
             this.duration = duration
             interpolator = FastOutSlowInInterpolator()
             addUpdateListener {
                 val fraction = it.animatedValue as Float
                 pager.alpha = fraction
-                if (to == 0f) oldPill?.updateProgress(fraction, false, true)
-                else nextPill?.updateProgress(fraction, false, true)
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) { fade = null; finish() }
+            })
+            start()
+        }
+    }
+    /** Old pill contracts toward its trailing edge while the new pill grows from the leading edge, matching swipe geometry. */
+    private fun startInjection(start: Float, toRight: Boolean) {
+        injection?.cancel(); injection = null
+        val old = oldPill ?: return
+        val next = nextPill ?: return
+        injection = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 220L
+            interpolator = FastOutSlowInInterpolator()
+            addUpdateListener {
+                val fraction = it.animatedValue as Float
+                old.updateProgress((1f - fraction) * start, toRight, false)
+                next.updateProgress(fraction, !toRight, false)
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    injection = null
+                    old.settleSelected(false)
+                    next.settleSelected(true)
+                }
             })
             start()
         }
@@ -68,24 +91,33 @@ internal class GroupPageTransition(
     }
     private fun beginClick() {
         val groupId = desired ?: return
-        val position = ids().indexOf(groupId)
-        if (position < 0) { desired = null; return }
-        centreTab(position)
-        if (position == pager.currentItem) { desired = null; settlePills(position); return }
-        clicking = true
-        oldPill = pill(pager.currentItem)
-        animate(pager.alpha, 0f, 100L) {
-            val target = ids().indexOf(desired ?: groupId)
+        val target = ids().indexOf(groupId)
+        if (target < 0) { desired = null; return }
+        centreTab(target)
+        if (target == pager.currentItem) { desired = null; settlePills(target); return }
+        val current = pager.currentItem
+        if (abs(target - current) == 1) {
+            // Neighbour: real settling scroll carries the cards; pills follow the actual pager distance, never a fade.
             desired = null
-            if (target >= 0) {
-                nextPill = pill(target)
-                pager.setCurrentItem(target, false) // Invisible swap, never scroll through intermediate groups.
-                centreTab(target)
-                nextPill?.updateProgress(0f, false, true)
-                readyFrames = 0
-                pager.postOnAnimation(ready)
-            } else { clicking = false; pager.alpha = 1f; settlePills(pager.currentItem) }
+            lastSwipePosition = -1
+            pager.setCurrentItem(target, true)
+            return
         }
+        // Distant: same-frame hard cut, never fade out; inject pills while the page readies, then fade in.
+        clicking = true
+        desired = null
+        oldPill = pill(current)
+        nextPill = pill(target)
+        val toRight = target > current
+        val start = oldPill?.selectionProgress?.takeIf { it > 0f } ?: 1f
+        oldPill?.updateProgress(start, toRight, false)
+        nextPill?.updateProgress(0f, !toRight, false)
+        pager.alpha = 0f
+        pager.setCurrentItem(target, false) // Invisible swap, never scroll through intermediate groups.
+        centreTab(target)
+        startInjection(start, toRight)
+        readyFrames = 0
+        pager.postOnAnimation(ready)
     }
     private fun centreTab(position: Int) {
         (tabs as? io.nekohasekai.sagernet.widget.GroupPillTabLayout)?.manualCentering = true
@@ -102,6 +134,7 @@ internal class GroupPageTransition(
         }
     }
     private fun settlePills(position: Int) {
+        injection?.cancel(); injection = null
         for (index in 0 until tabs.tabCount) pill(index)?.settleSelected(index == position)
     }
     override fun onPageScrolled(position: Int, offset: Float, pixels: Int) {
@@ -120,7 +153,9 @@ internal class GroupPageTransition(
     override fun onPageScrollStateChanged(state: Int) {
         if (state == ViewPager2.SCROLL_STATE_DRAGGING) (tabs as? io.nekohasekai.sagernet.widget.GroupPillTabLayout)?.manualCentering = false
         if (state == ViewPager2.SCROLL_STATE_DRAGGING && clicking) {
+            injection?.cancel(); injection = null
             cancelFade(); clicking = false; desired = null; pager.alpha = 1f
+            settlePills(pager.currentItem)
         }
         if (state == ViewPager2.SCROLL_STATE_IDLE && !clicking) {
             settlePills(pager.currentItem)
@@ -132,6 +167,7 @@ internal class GroupPageTransition(
         closed = true
         pager.removeCallbacks(ready)
         desired = null; clicking = false
+        injection?.cancel(); injection = null
         cancelFade(); centre?.cancel(); centre = null
         pager.alpha = 1f
         (tabs as? io.nekohasekai.sagernet.widget.GroupPillTabLayout)?.manualCentering = false

@@ -35,6 +35,7 @@ import org.json.JSONTokener
 import org.yaml.snakeyaml.error.YAMLException
 import java.io.StringReader
 import androidx.core.net.toUri
+import io.nekohasekai.sagernet.widget.UserAgentPreference
 
 @Suppress("EXPERIMENTAL_API_USAGE")
 object RawUpdater : GroupUpdater() {
@@ -77,7 +78,20 @@ object RawUpdater : GroupUpdater() {
                     allowInsecure()
                 }
                 setURL(subscription.link)
-                setUserAgent(subscription.customUserAgent.takeIf { it.isNotBlank() } ?: USER_AGENT)
+                // REQ-07: 组合内置 UA 候选（开启项按序分号拼接；全关回退 Nets.kt
+                // 默认 UA）。逐订阅 customUserAgent 仍保持原优先级（GroupSettingsActivity
+                // 不在本次改动范围）。
+                setUserAgent(
+                    subscription.customUserAgent.takeIf { it.isNotBlank() }
+                        ?: UserAgentPreference.buildUserAgent(
+                            listOf(
+                                DataStore.userAgentMihomo,
+                                DataStore.userAgentClashVerge,
+                                DataStore.userAgentNeko,
+                            ),
+                            UserAgentPreference.userAgentCandidates(),
+                        )
+                )
             }.execute()
             val content = Util.getStringBox(response.contentString)
             proxies = parseRaw(content)

@@ -22,6 +22,8 @@ class GroupTabPill(context: Context) : AppCompatTextView(context) {
     var selectionProgress: Float
         get() = surface.progress
         set(value) { surface.progress = value.coerceIn(0f, 1f); invalidate() }
+    /** Test hook: which edge the distance fill grows from (true = right edge). */
+    internal val fillFromRight: Boolean get() = surface.fromRight
     init {
         val night = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK ==
             android.content.res.Configuration.UI_MODE_NIGHT_YES
