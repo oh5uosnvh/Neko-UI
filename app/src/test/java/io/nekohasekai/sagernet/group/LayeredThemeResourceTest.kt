@@ -252,7 +252,11 @@ class LayeredThemeResourceTest {
                     assertEquals(high,card.cardBackgroundColor.defaultColor)
                     card.cardElevation=12f
                     assertEquals(high,card.cardBackgroundColor.defaultColor)
-                    val shape=card.background as com.google.android.material.shape.MaterialShapeDrawable
+                    var background=card.background
+                    while (background is android.graphics.drawable.InsetDrawable) {
+                        background=background.drawable
+                    }
+                    val shape=background as com.google.android.material.shape.MaterialShapeDrawable
                     assertFalse("Elevation must not tint the specified card fill",shape.isElevationOverlayEnabled)
                     assertEquals(high,shape.fillColor!!.defaultColor)
                 }
