@@ -12,8 +12,8 @@ class Dns08HostContractTest {
         val failure=main.substringAfter("private fun showControlErrorSnackbar").substringBefore("private fun refreshConfigurationProfileState")
         assertTrue(failure.contains("snackbar(getString(R.string.connection_test_error, detail)).show()"))
         assertFalse(failure.contains("MaterialAlertDialogBuilder"))
-        assertFalse(main.substringAfter("private val prewarmRunnable").substringBefore("private fun warmUpHiddenFragment").contains("executePendingTransactions()"))
-        assertTrue(main.contains("val drawerWasOpen = binding.drawerLayout.isOpen"))
+        assertFalse(main.substringAfter("private val drawerWarmup").substringBefore("companion object").contains("executePendingTransactions()"))
+        assertTrue(main.contains("transaction.setMaxLifecycle(cached, Lifecycle.State.STARTED)"))
     }
     @Test fun viewRebuildRemovesOldPagerAndNodeListenersAndHotReturnDoesNotRebindAllCards() {
         val app=sequenceOf(File("."),File("app")).first{File(it,"src/main/java").isDirectory}

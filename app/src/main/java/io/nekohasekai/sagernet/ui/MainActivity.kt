@@ -84,15 +84,12 @@ class MainActivity : ThemedActivity(),
     private var lastErrorDialog = ""
 
     // ---- 侧边栏切换优化 ----
-    // 官方实现每次点击都是 new Fragment + replace()，事务恰好在抽屉关闭动画
-    // 进行时执行：销毁旧页整棵视图树 + 新页 inflation/初始化，主线程被冻结，
-    // 于是「换页必卡、重点当前页不卡（走 isChecked 提前返回）」。现在：
-    // 页面实例缓存复用（hide/show），从未创建过的页面推迟到抽屉关闭后再提交。
+    // 官方实现每次点击都是 new Fragment + replace()：销毁旧页整棵视图树 + 新页
+    // inflation/初始化，主线程被冻结，动画与点击反馈必卡。现在：页面实例缓存复用，
+    // 配合启动分帧预热保持全部侧栏页面常热，切换只做 show/hide。
     /** nav id -> 已创建的 Fragment 实例（同一页面只 inflate 一次） */
     private val fragmentCache = HashMap<Int, ToolbarFragment>()
 
-    /** 尚未创建过的页面：延迟到抽屉关闭动画结束后再执行的切换 */
-    private var pendingCommit: (() -> Unit)? = null
     private var warmIndex = 0
     private val drawerWarmup = object : Runnable {
         override fun run() {
