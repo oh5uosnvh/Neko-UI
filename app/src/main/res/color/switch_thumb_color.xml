@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 开关 thumb 的 tint：恒为纯白（见 Widget.SagerNet.Switch 的说明） -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:color="@color/switch_thumb_white" />
+</selector>

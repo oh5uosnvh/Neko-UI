@@ -66,6 +66,17 @@
         <item name="bottomSheetDialogTheme">@style/ThemeOverlay.SagerNet.BottomSheetDialog</item>
         <item name="materialButtonStyle">@style/Widget.SagerNet.Button</item>
 
+        <!-- 按压涟漪/高亮全部透明：设置行、编辑入口、列表菜单项的点击反馈
+             就是随之打开的弹窗 / 列表菜单本身，不需要底色变化。
+             本主题 parent 为 DayNight，此声明日/夜间同时生效。 -->
+        <item name="android:colorControlHighlight">@android:color/transparent</item>
+
+        <!-- 全局开关样式：绿色胶囊 track + 白色圆 thumb（滑动动画是 Switch 自带的）。
+             switchStyle 覆盖 SwitchMaterial / SwitchCompat / SwitchPreference(Compat)，
+             materialSwitchStyle 覆盖 Material 1.7+ 的 MaterialSwitch。 -->
+        <item name="switchStyle">@style/Widget.SagerNet.Switch</item>
+        <item name="materialSwitchStyle">@style/Widget.SagerNet.Switch</item>
+
     </style>
 
     <style name="Theme.SagerNet.Dialog" parent="Theme.MaterialComponents.DayNight.Dialog.Alert">
@@ -132,6 +143,11 @@
         <item name="bottomSheetDialogTheme">@style/ThemeOverlay.SagerNet.BottomSheetDialog</item>
         <item name="materialButtonStyle">@style/Widget.SagerNet.Button</item>
 
+        <!-- 与 Theme.SagerNet.Base 保持一致（此主题不继承 Base）：无按压底色 + 全局开关样式 -->
+        <item name="android:colorControlHighlight">@android:color/transparent</item>
+        <item name="switchStyle">@style/Widget.SagerNet.Switch</item>
+        <item name="materialSwitchStyle">@style/Widget.SagerNet.Switch</item>
+
         <item name="android:dialogCornerRadius">@dimen/dialog_corner_radius</item>
 
         <item name="windowFixedHeightMajor" type="dimen">95%</item>
@@ -158,6 +174,11 @@
     </style>
 
     <style name="ThemeOverlay.MaterialComponents.MaterialAlertDialog.SagerNet">
+        <!-- 弹窗浮层自带圆角底色（windowBackground = @drawable/bg_dialog），
+             页面底色与弹窗底色本就不同，背后不要再压暗 scrim。 -->
+        <item name="android:backgroundDimEnabled">false</item>
+        <!-- 弹窗动态展开/收起，与列表菜单一致。 -->
+        <item name="android:windowAnimationStyle">@style/DialogWindowAnimation</item>
         <item name="colorLayerLow">@color/layer_low</item>
         <item name="colorLayerHigh">@color/layer_high</item>
         <item name="colorLayerStroke">@color/layer_stroke</item>
@@ -229,6 +250,12 @@
         <item name="android:windowExitAnimation">@anim/popup_exit</item>
     </style>
 
+    <!-- 弹窗窗口动画（windowAnimationStyle）：进入 scale(0.85→1)+fade 180ms 减速，退出 fade 120ms -->
+    <style name="DialogWindowAnimation">
+        <item name="android:windowEnterAnimation">@anim/dialog_enter</item>
+        <item name="android:windowExitAnimation">@anim/dialog_exit</item>
+    </style>
+
     <style name="Widget.SagerNet.PopupMenu" parent="Widget.MaterialComponents.PopupMenu">
         <item name="android:popupBackground">@drawable/bg_popup_menu</item>
         <item name="android:popupAnimationStyle">@style/PopupMenuAnimation</item>
@@ -259,6 +286,19 @@
     </style>
     <style name="Widget.SagerNet.Button" parent="Widget.MaterialComponents.Button">
         <item name="shapeAppearanceOverlay">@style/ShapeAppearanceOverlay.SagerNet.Button</item>
+    </style>
+
+    <!-- 全局开关：绿色胶囊 track + 白色圆 thumb。
+         SwitchMaterial 的自动着色仅在 thumbTint 与 trackTint 均为空时生效，
+         这里显式给出非空 tint（与 drawable 同一组颜色），既锁定配色又杜绝
+         父样式（Widget.MaterialComponents.CompoundButton.Switch）继承下来的着色；
+         thumb 的滑动过渡是 SwitchCompat/SwitchMaterial 自带的位置动画，不受影响。 -->
+    <style name="Widget.SagerNet.Switch" parent="Widget.MaterialComponents.CompoundButton.Switch">
+        <item name="android:thumb">@drawable/switch_thumb_sagernet</item>
+        <item name="android:track">@drawable/switch_track_sagernet</item>
+        <item name="android:thumbTint">@color/switch_thumb_color</item>
+        <item name="android:trackTint">@color/switch_track_color</item>
+        <item name="useMaterialThemeColors">false</item>
     </style>
 
     <style name="ShapeAppearance.SagerNet.NavItem" parent="ShapeAppearance.MaterialComponents.SmallComponent">

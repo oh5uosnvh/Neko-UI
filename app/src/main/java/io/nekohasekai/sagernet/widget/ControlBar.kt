@@ -6,15 +6,7 @@ import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.os.Looper
 import android.content.res.ColorStateList
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.ColorFilter
-import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.PixelFormat
-import android.graphics.Rect
-import android.graphics.RectF
-import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.content.Context
@@ -92,12 +84,18 @@ class ControlBar @JvmOverloads constructor(
     private var fadeAnimator: ValueAnimator? = null
     private var colorAnimator: ValueAnimator? = null
     private var connectingAnimator: ObjectAnimator? = null
-    private val sideMask = CapsuleExclusionMask(resources.displayMetrics.density)
-    private val sideRipple = RippleDrawable(
-        ColorStateList.valueOf(themeColor(android.R.attr.colorControlHighlight, R.color.control_bar_border)),
-        null, sideMask,
-    )
-    private var sidePressed = false
+    /** Local rounded ripple for the side boxes; never paints outside its own box. */
+    private fun newSideBoxRipple(): RippleDrawable {
+        val mask = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 16f * resources.displayMetrics.density
+            setColor(Color.WHITE)
+        }
+        return RippleDrawable(
+            ColorStateList.valueOf(themeColor(android.R.attr.colorControlHighlight, R.color.control_bar_border)),
+            null, mask,
+        )
+    }
     private enum class Presentation { DISCONNECTED, CONNECTING, CONNECTED }
     private fun presentation(state: BaseService.State = currentState) = when (state) {
         BaseService.State.Connected -> Presentation.CONNECTED
@@ -133,10 +131,8 @@ class ControlBar @JvmOverloads constructor(
         capsule.setOnClickListener { requestToggle() }
         capsule.contentDescription = context.getString(R.string.control_bar_connect_action)
         capsule.background = capsuleBackground
-        // A SINGLE outer-frame ripple, with a rounded capsule hole; never two box rectangles.
-        foreground = sideRipple
-        speedBox.background = null
-        latencyBox.background = null
+        speedBox.background = newSideBoxRipple()
+        latencyBox.background = newSideBoxRipple()
         ready = true
         resetMeasurements()
         settlePresentation()
@@ -536,9 +532,6 @@ class ControlBar @JvmOverloads constructor(
         detached = true
         cancelPresentationAnimations()
         findViewById<View>(R.id.capsule_pair).alpha = 1f
-        sidePressed = false
-        sideRipple.state = intArrayOf()
-        sideRipple.jumpToCurrentState()
         reset() // No animation/test state survives removal/destruction.
         super.onDetachedFromWindow()
     }
@@ -560,9 +553,6 @@ class ControlBar @JvmOverloads constructor(
             findViewById<View>(R.id.capsule_pair).alpha = 1f
             updateCapsuleIcon()
             updateCapsuleColor(false)
-            sidePressed = false
-            sideRipple.state = intArrayOf()
-            sideRipple.jumpToCurrentState()
             clearMeasurements() // Preserve permission togglePending; discard old test presentation.
         } else if (fadeAnimator == null) {
             updateCapsuleIcon()
@@ -572,80 +562,16 @@ class ControlBar @JvmOverloads constructor(
         updateEnabledState() // Becoming visible re-enables testing without a fake state report.
     }
 
-    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
-        super.onLayout(changed, left, top, right, bottom)
-        if (!ready) return
-        val rect = Rect()
-        capsule.getDrawingRect(rect)
-        offsetDescendantRectToMyCoords(capsule, rect)
-        sideMask.setCapsuleBounds(rect)
-        sideRipple.invalidateSelf()
-    }
-
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (ready) {
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                val rect = Rect()
-                sidePressed = listOf(speedBox, latencyBox).any { box ->
-                    box.getDrawingRect(rect)
-                    offsetDescendantRectToMyCoords(box, rect)
-                    box.isEnabled && rect.contains(event.x.toInt(), event.y.toInt())
-                }
-            }
-            if (sidePressed) sideRipple.setHotspot(event.x, event.y)
-            updateSideRippleState()
-        }
         val handled = super.dispatchTouchEvent(event)
         if (ready && (event.actionMasked == MotionEvent.ACTION_UP ||
                 event.actionMasked == MotionEvent.ACTION_CANCEL)) {
-            sidePressed = false
             speedBox.isPressed = false
             latencyBox.isPressed = false
             speedBox.cancelLongPress()
             latencyBox.cancelLongPress()
-            updateSideRippleState()
         }
         return handled
-    }
-
-    override fun dispatchDraw(canvas: Canvas) {
-        if (ready) updateSideRippleState()
-        super.dispatchDraw(canvas)
-    }
-
-    private fun updateSideRippleState() {
-        val visible = canShowReadouts()
-        val pressed = visible && (sidePressed || (speedBox.isEnabled && speedBox.isPressed) ||
-            (latencyBox.isEnabled && latencyBox.isPressed))
-        val focused = visible && !isInTouchMode && ((speedBox.isEnabled && speedBox.isFocused) ||
-            (latencyBox.isEnabled && latencyBox.isFocused))
-        sideRipple.state = when {
-            pressed -> intArrayOf(android.R.attr.state_enabled, android.R.attr.state_pressed)
-            focused -> intArrayOf(android.R.attr.state_enabled, android.R.attr.state_focused)
-            else -> intArrayOf(android.R.attr.state_enabled)
-        }
-    }
-
-    /** One rounded outer path minus the actual rounded capsule INCLUDING its antialiased edge. */
-    private class CapsuleExclusionMask(private val density: Float) : Drawable() {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
-        private val path = Path()
-        private val capsuleBounds = RectF()
-        fun setCapsuleBounds(rect: Rect) { capsuleBounds.set(rect); invalidateSelf() }
-        override fun draw(canvas: Canvas) {
-            path.rewind()
-            val inset = density // Keep feedback inside the existing 1dp border.
-            path.addRoundRect(RectF(bounds).apply { inset(inset, inset) }, 23f * density,
-                23f * density, Path.Direction.CW)
-            val hole = RectF(capsuleBounds).apply { inset(-density, -density) }
-            path.addRoundRect(hole, hole.height() / 2f, hole.height() / 2f, Path.Direction.CW)
-            path.fillType = Path.FillType.EVEN_ODD
-            canvas.drawPath(path, paint)
-        }
-        override fun setAlpha(alpha: Int) { paint.alpha = alpha; invalidateSelf() }
-        override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter; invalidateSelf() }
-        @Deprecated("Deprecated in Android")
-        override fun getOpacity() = PixelFormat.TRANSLUCENT
     }
 
     companion object {

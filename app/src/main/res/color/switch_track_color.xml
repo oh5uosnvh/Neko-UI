@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 开关 track 的 tint（选中绿 / 未选中灰）。显式非空 tint：
+     一是不依赖 SwitchMaterial 的 useMaterialThemeColors 自动着色，
+     二是覆盖父样式可能继承下来的 thumbTint/trackTint。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true" android:color="@color/switch_checked_green" />
+    <item android:color="@color/switch_track_off" />
+</selector>
