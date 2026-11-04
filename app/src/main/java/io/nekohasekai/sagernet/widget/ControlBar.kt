@@ -19,6 +19,7 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.content.Context
 import android.os.SystemClock
+import android.os.Looper
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.MotionEvent
@@ -145,6 +146,7 @@ class ControlBar @JvmOverloads constructor(
 
     /** Service state is authoritative; same-state permission cancellation still re-arms toggle. */
     fun changeState(state: BaseService.State) {
+        if (Looper.myLooper() != Looper.getMainLooper()) { post { changeState(state) }; return }
         val previous = currentState
         val changedPresentation = presentation(previous) != presentation(state)
         currentState = state
