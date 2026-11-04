@@ -3172,6 +3172,13 @@ class ConfigurationFragment @JvmOverloads constructor(
             private fun selectProfile(proxyEntity: ProxyEntity) {
                 val pf = parentFragment as? ConfigurationFragment ?: return
                 runOnDefaultDispatcher {
+                    // Re-tapping the already-selected card must be a pure no-op on
+                    // phones: even a same-value write fires the PROFILE_ID store
+                    // listener, whose invalidateControlLatency() wipes the control
+                    // bar's live speed/latency back to 0.00/-- ms.
+                    if (proxyEntity.id == DataStore.selectedProxy && !SagerNet.isTv) {
+                        return@runOnDefaultDispatcher
+                    }
                     var update: Boolean
                     var lastSelected: Long
                     profileAccess.withLock {

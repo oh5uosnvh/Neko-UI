@@ -18,19 +18,27 @@ class GroupProgressTransitionTest {
         assertTrue(adjacent in 0 until staged)
     }
 
-    @Test fun distantClickRunsInjectionAndCardSlideTogether() {
+    @Test fun distantClickRunsEdgeInjectionAndPureTranslationTogether() {
         assertTrue(source.contains("centreTab(target) { startSelection(target) }"))
-        assertTrue(source.contains("PILL_INJECTION_MS = 200L"))
-        assertTrue(source.contains("CARD_SLIDE_MS = 200L"))
-        assertTrue(source.contains("OLD_FADE_MS = 120f"))
-        assertTrue(source.contains("SLIDE_FRACTION = 0.35f"))
-        // Both timelines start from the same staged callback.
+        assertTrue(source.contains("PILL_INJECTION_MS = 400L"))
+        assertTrue(source.contains("CARD_SLIDE_MS = 400L"))
+        // The card timeline starts from the same staged callback as the pill injection.
         assertTrue(source.indexOf("beginCardSlide(target, toRight)") > source.indexOf("injection = ValueAnimator"))
     }
 
-    @Test fun cardsNeverGoBlankAndSlideDirectionFollowsTargetSide() {
+    @Test fun cardsArePureTranslationWithNoCrossFadeAnywhere() {
+        // Zero fade: no alpha timeline, no partial-width slide, no second interpolator.
+        assertFalse(source.contains("OLD_FADE_MS"))
+        assertFalse(source.contains("SLIDE_FRACTION"))
+        assertFalse(source.contains("DecelerateInterpolator"))
+        assertFalse(source.contains("content?.alpha = 0f"))
+        assertFalse(source.contains("content?.alpha = progress"))
+        assertFalse(source.contains("outgoing?.alpha ="))
+        // Full-width rigid strip: snapshot exits toward the target side, new page enters
+        // from the opposite edge, sharing one seam coordinate every frame.
+        assertTrue(source.contains("(if (toRight) -1f else 1f) * pager.width"))
+        assertTrue(source.contains("outgoing?.setBounds(drift, 0, width + drift, height)"))
         assertTrue(source.contains("pager.overlay.add"))
-        assertTrue(source.contains("(if (toRight) -1f else 1f) * pager.width * SLIDE_FRACTION"))
         assertTrue(source.contains("if (snapshot == null)"))
         assertFalse("the pager parent must never be hidden wholesale", source.contains("pager.alpha = 0f"))
         assertTrue(source.contains("resetCardLayer()"))

@@ -43,27 +43,14 @@ class GroupListEdgeLayout @JvmOverloads constructor(
     }
     private var renderer: LocalBlur? = null
     private val baseTop = WeakHashMap<RecyclerView, Int>()
+
+    // Inert in production: the lists scrolled back to the library FastScroller, so nothing
+    // calls bind()/draw()/touch()/detach() on it anymore. Kept (with this property) only
+    // because app/src/test scrollbar tests construct and exercise it directly.
     internal val fixedScrollbar = FixedGroupScrollbar(this)
-
-    override fun dispatchDraw(canvas: Canvas) {
-        super.dispatchDraw(canvas)
-        // Postdraw: NOT recorded in card RenderNode/fade, NOT translated with ViewPager.
-        fixedScrollbar.draw(canvas)
-    }
-
-    override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
-        if (fixedScrollbar.touch(event)) return true
-        return super.dispatchTouchEvent(event)
-    }
-
-    override fun onAttachedToWindow() {
-        super.onAttachedToWindow()
-        baseTop.keys.toList().filterIsInstance<ExactScrollRecyclerView>().forEach(fixedScrollbar::bind)
-    }
 
     /** Keep the existing 4dp gap and all CURRENT bottom/control-overlay insets. */
     fun bindList(list: RecyclerView) {
-        if (list is ExactScrollRecyclerView) fixedScrollbar.bind(list)
         if (!baseTop.containsKey(list)) {
             baseTop[list] = list.paddingTop
             val host = WeakReference(this)
@@ -133,7 +120,6 @@ class GroupListEdgeLayout @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         renderer?.takeIf { Build.VERSION.SDK_INT >= 31 }?.release()
         renderer = null
-        fixedScrollbar.detach()
         super.onDetachedFromWindow()
     }
 

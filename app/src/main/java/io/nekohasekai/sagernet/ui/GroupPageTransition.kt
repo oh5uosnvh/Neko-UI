@@ -8,20 +8,22 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.view.View
-import android.view.animation.DecelerateInterpolator
 import androidx.interpolator.view.animation.FastOutSlowInInterpolator
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.tabs.TabLayout
 import io.nekohasekai.sagernet.widget.GroupTabPill
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * Adjacent clicks use the official real page scroll — cards genuinely translate one page
  * and the pills follow the live pager distance. Distant clicks run two timelines at the
- * same time: the target pill centres, then injects its fill over 200 ms while the old
- * cards fade out and the new cards slide in from the trailing side, both finishing
- * together. A bitmap of the old page in pager.overlay keeps the content covered, so no
- * blank frame is ever exposed.
+ * same time: the target pill centres, then injects its fill from the edge over 400 ms
+ * while the cards perform one rigid pure translation with zero cross-fade — the old page
+ * (bitmap snapshot) slides out toward the target side and the new page slides in from the
+ * opposite edge, exactly one pager width apart so their seam never opens. Both finish
+ * together with the pill injection. The snapshot lives in pager.overlay and stays on top,
+ * so no blank frame is ever exposed.
  */
 internal class GroupPageTransition(
     private val pager: ViewPager2,
@@ -31,7 +33,7 @@ internal class GroupPageTransition(
     private val isReady: () -> Boolean = { true },
 ) : ViewPager2.OnPageChangeCallback() {
     private var desired: Long? = null
-    private var fade: ValueAnimator? = null
+    private var slide: ValueAnimator? = null
     private var injection: ValueAnimator? = null
     private var centre: ObjectAnimator? = null
     private var oldPill: GroupTabPill? = null
@@ -49,11 +51,10 @@ internal class GroupPageTransition(
     private fun resetCardLayer() {
         contentLayer()?.alpha = 1f
         contentLayer()?.translationX = 0f
-        pager.alpha = 1f
     }
 
-    private fun cancelFade() {
-        fade?.removeAllListeners(); fade?.removeAllUpdateListeners(); fade?.cancel(); fade = null
+    private fun cancelSlide() {
+        slide?.removeAllListeners(); slide?.removeAllUpdateListeners(); slide?.cancel(); slide = null
         outgoing?.let { pager.overlay.remove(it) }; outgoing = null
         resetCardLayer()
     }
@@ -61,7 +62,7 @@ internal class GroupPageTransition(
     private fun cancelMotion() {
         centre?.cancel(); centre = null
         injection?.cancel(); injection = null
-        cancelFade()
+        cancelSlide()
     }
 
     fun request(groupId: Long) {
@@ -92,7 +93,7 @@ internal class GroupPageTransition(
         centreTab(target) { startSelection(target) }
     }
 
-    /** Pill injection and the card slide start together and end together. */
+    /** Pill injection and the card translation start together and end together. */
     private fun startSelection(target: Int) {
         if (closed || !clicking) return
         val old = oldPill
@@ -129,34 +130,39 @@ internal class GroupPageTransition(
         }
         outgoing = snapshot.also { pager.overlay.add(it) }
         val content = contentLayer()
-        content?.alpha = 0f
-        // 1 → 3: the new cards enter from the left and travel right; reverse otherwise.
-        val slideFrom = (if (toRight) -1f else 1f) * pager.width * SLIDE_FRACTION
+        // 1 → 3: group 1's cards travel right while group 3's cards enter from the left
+        // edge moving right; mirror for the reverse. Full pager width, no alpha changes.
+        val slideFrom = (if (toRight) -1f else 1f) * pager.width
         content?.translationX = slideFrom
         pager.setCurrentItem(target, false)
         readyFrames = 0
-        waitForIncoming(target, content, slideFrom)
+        waitForIncoming(target, content, slideFrom, toRight)
     }
 
-    private fun waitForIncoming(target: Int, content: View?, slideFrom: Float) {
+    private fun waitForIncoming(target: Int, content: View?, slideFrom: Float, toRight: Boolean) {
         if (!clicking || closed) return
         if (!isReady() && ++readyFrames < 180) {
-            pager.postOnAnimation { waitForIncoming(target, content, slideFrom) }
+            pager.postOnAnimation { waitForIncoming(target, content, slideFrom, toRight) }
             return
         }
-        val motion = DecelerateInterpolator()
-        fade = ValueAnimator.ofFloat(0f, CARD_SLIDE_MS.toFloat()).apply {
+        val width = pager.width
+        val height = pager.height
+        val direction = if (toRight) 1 else -1
+        val motion = FastOutSlowInInterpolator()
+        slide = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = CARD_SLIDE_MS
+            interpolator = FastOutSlowInInterpolator()
             addUpdateListener {
-                val elapsed = it.animatedValue as Float
-                outgoing?.alpha = (255f * (1f - (elapsed / OLD_FADE_MS).coerceIn(0f, 1f))).toInt()
-                val progress = (elapsed / CARD_SLIDE_MS).coerceIn(0f, 1f)
-                content?.alpha = progress
+                val progress = it.animatedValue as Float
+                // Rigid strip: the snapshot's trailing edge and the incoming page's
+                // leading edge share the same seam coordinate at every frame.
+                val drift = (direction * width * motion.getInterpolation(progress)).roundToInt()
+                outgoing?.setBounds(drift, 0, width + drift, height)
                 content?.translationX = slideFrom * (1f - motion.getInterpolation(progress))
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
-                    fade = null
+                    slide = null
                     outgoing?.let { d -> pager.overlay.remove(d) }; outgoing = null
                     resetCardLayer()
                     finishSelection(target)
@@ -249,9 +255,7 @@ internal class GroupPageTransition(
 
     private companion object {
         const val TAB_CENTRE_MS = 180L
-        const val PILL_INJECTION_MS = 200L
-        const val OLD_FADE_MS = 120f
-        const val CARD_SLIDE_MS = 200L
-        const val SLIDE_FRACTION = 0.35f
+        const val PILL_INJECTION_MS = 400L
+        const val CARD_SLIDE_MS = 400L
     }
 }

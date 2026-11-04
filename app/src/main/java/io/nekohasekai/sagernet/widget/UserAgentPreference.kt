@@ -14,7 +14,6 @@ import com.google.android.material.switchmaterial.SwitchMaterial
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.USER_AGENT
-import io.nekohasekai.sagernet.ktx.tryToShow
 
 /**
  * REQ-07 multi-UA subscription User-Agent selector.
@@ -58,6 +57,14 @@ class UserAgentPreference
     }
 
     private fun showDialog() {
+        // Preference.context is the preference's themed wrapper, never the host
+        // Activity: tryToShow()'s `context as Activity` cast throws and the catch
+        // swallows it, so the pencil appeared completely dead. Resolve the Activity
+        // from the wrapper chain and show through it, keeping the themed context
+        // for styling the dialog itself.
+        val activity = generateSequence<android.content.Context>(context) {
+            (it as? android.content.ContextWrapper)?.baseContext
+        }.filterIsInstance<android.app.Activity>().firstOrNull() ?: return
         val context = context
         val flags = booleanArrayOf(
             DataStore.userAgentMihomo,
@@ -110,7 +117,9 @@ class UserAgentPreference
             }
             .setNegativeButton(android.R.string.cancel, null)
             .create()
-            .tryToShow()
+            .let { dialog ->
+                if (!activity.isFinishing && !activity.isDestroyed) dialog.show()
+            }
     }
 
     companion object {
