@@ -102,7 +102,7 @@ class MainActivity : ThemedActivity(),
             if (!fragment.isAdded && currentMainFragment !== fragment) {
                 supportFragmentManager.beginTransaction().setReorderingAllowed(true)
                     .add(R.id.fragment_holder, fragment, tagOf(fragment))
-                    .hide(fragment).setMaxLifecycle(fragment, Lifecycle.State.CREATED)
+                    .hide(fragment).setMaxLifecycle(fragment, Lifecycle.State.STARTED)
                     .commitAllowingStateLoss()
             }
             binding.root.postDelayed(this, DRAWER_WARM_INTERVAL_MS)

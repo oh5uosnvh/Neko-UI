@@ -83,10 +83,12 @@ func TestRealTCPPolicyFallbackAndAlias(t *testing.T) {
 	}
 }
 func TestRealSilentTCPServerTimesOutAndTriesNextPrivateServer(t *testing.T) {
-	// Accept the TCP connection and read the request, then send no response.
-	silentPort := localTCPDNS(t, func(_ dns.ResponseWriter, _ *dns.Msg) {})
+	// Accept the TCP connection and keep it open without replying until the test ends.
+	blocked := make(chan struct{})
+	silentPort := localTCPDNS(t, func(_ dns.ResponseWriter, _ *dns.Msg) { <-blocked })
+	t.Cleanup(func() { close(blocked) })
 	goodPort := localTCPDNS(t, func(w dns.ResponseWriter, q *dns.Msg) { _ = w.WriteMsg(addressReply(q, "192.0.2.73")) })
-	raw, err := New(context.Background(), nil, "scope", Options{Fallback: []string{"public"}, Timeout: badoption.Duration(60 * time.Millisecond),
+	raw, err := New(context.Background(), nil, "scope", Options{Fallback: []string{"public"}, Timeout: badoption.Duration(80 * time.Millisecond),
 		Rules: []Rule{{"+.private.test", []string{"silent", "good"}}},
 	})
 	if err != nil {
@@ -102,14 +104,18 @@ func TestRealSilentTCPServerTimesOutAndTriesNextPrivateServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertAddressRecords(t, response.Answer, "node.private.test", "192.0.2.73")
-	if elapsed := time.Since(begin); elapsed < 40*time.Millisecond || elapsed > time.Second {
+	if elapsed := time.Since(begin); elapsed < 50*time.Millisecond || elapsed > time.Second {
 		t.Fatalf("unbounded timeout: %s", elapsed)
 	}
 }
 func TestRealTCPCancellationClosesBlockedConnection(t *testing.T) {
-	port := localTCPDNS(t, func(_ dns.ResponseWriter, _ *dns.Msg) {})
+	// Keep the DNS handler alive: returning from a dns.Server handler closes the
+	// connection immediately and would test EOF rather than cancellation.
+	blocked := make(chan struct{})
+	port := localTCPDNS(t, func(_ dns.ResponseWriter, _ *dns.Msg) { <-blocked })
+	t.Cleanup(func() { close(blocked) })
 	upstream := tcpUpstream(t, "silent", port)
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
 	defer cancel()
 	begin := time.Now()
 	_, err := upstream.Exchange(ctx, testQuery("node.private.test", dns.TypeA))

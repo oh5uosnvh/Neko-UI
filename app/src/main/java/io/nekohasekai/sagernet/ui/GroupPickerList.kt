@@ -247,8 +247,6 @@ internal class GroupPickerDragCallback(
     private var before: List<Long>? = null
     private var activeHolder: RecyclerView.ViewHolder? = null
     private var selectedHolder: RecyclerView.ViewHolder? = null
-    private var savedAnimator: RecyclerView.ItemAnimator? = null
-    private var dragRecycler: RecyclerView? = null
     private var cancelledGesture = false
     private var closed = false
     val isDragging: Boolean get() = before != null
@@ -271,14 +269,6 @@ internal class GroupPickerDragCallback(
             activeHolder = viewHolder
             selectedHolder = viewHolder
             adapter.prepareDrag(viewHolder)
-            // ItemTouchHelper already owns translations while dragging. Running a second
-            // notifyItemMoved animator causes the upward path to write competing Y values.
-            dragRecycler = viewHolder.itemView.parent as? RecyclerView
-            savedAnimator = dragRecycler?.itemAnimator
-            dragRecycler?.let { list ->
-                list.itemAnimator?.endAnimations()
-                list.itemAnimator = null
-            }
             adapter.updateDraggingState(true)
         } else if (actionState == ItemTouchHelper.ACTION_STATE_IDLE) {
             selectedHolder = null
@@ -287,10 +277,16 @@ internal class GroupPickerDragCallback(
     }
 
     override fun onMove(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder,
-                        target: RecyclerView.ViewHolder): Boolean =
-        !closed && before != null && adapter.move(
+                        target: RecyclerView.ViewHolder): Boolean {
+        if (closed || before == null) return false
+        // Settle any previous step before starting the next move; this prevents upward
+        // multi-row drags from stacking unfinished neighbour translations, while keeping
+        // the ItemAnimator alive for the current step.
+        recyclerView.itemAnimator?.endAnimations()
+        return adapter.move(
             viewHolder.bindingAdapterPosition, target.bindingAdapterPosition,
         )
+    }
 
     override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) = Unit
 
@@ -314,9 +310,6 @@ internal class GroupPickerDragCallback(
         activeHolder = null
         selectedHolder = null
         adapter.updateDraggingState(false)
-        dragRecycler?.itemAnimator = savedAnimator
-        dragRecycler = null
-        savedAnimator = null
         val finalIds = adapter.ids
         if (cancelledGesture) {
             adapter.restore(original)
