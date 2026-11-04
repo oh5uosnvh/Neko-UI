@@ -100,6 +100,13 @@ class UserAgentPreference
             }
             val switch = SwitchMaterial(context).apply {
                 isChecked = flags[index]
+                // The NekoBox default UA is the ever-present fallback: shown ON and
+                // fixed, because appending it to a clash header flips airports to
+                // sing-box JSON. It applies whenever both clash candidates are off.
+                if (index == userAgentCandidates().lastIndex) {
+                    isChecked = true
+                    isEnabled = false
+                }
             }
             val row = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -117,7 +124,7 @@ class UserAgentPreference
                         ViewGroup.LayoutParams.WRAP_CONTENT
                     )
                 )
-                setOnClickListener { switch.toggle() }
+                setOnClickListener { if (switch.isEnabled) switch.toggle() }
             }
             container.addView(row)
             switches.add(switch)
@@ -200,15 +207,19 @@ class UserAgentPreference
         private const val SUMMARY_MAX_LENGTH = 64
 
         /**
-         * Pure helper (unit-testable): joins every enabled candidate in list
-         * order with ";". When all are disabled, falls back to the default
-         * User-Agent ([USER_AGENT], the Nets.kt default string).
+         * Pure helper (unit-testable): joins the enabled clash-family candidates
+         * (clash-verge, then mihomo) with ";". The NekoBox default UA ([USER_AGENT])
+         * is NEVER appended to a joined header — servers sniff the UA and the
+         * "NekoBox/Android" token makes them serve sing-box JSON (verified against a
+         * real airport: pure clash UAs -> text/yaml, any UA containing NekoBox ->
+         * application/json). It is only the fallback when no clash candidate is on.
          */
         fun buildUserAgent(
             enabledFlags: List<Boolean>,
             defaults: List<String> = userAgentCandidates(),
         ): String {
             val enabled = enabledFlags.withIndex()
+                .take(defaults.size - 1) // the NekoBox entry is fallback-only
                 .filter { it.value }
                 .mapNotNull { defaults.getOrNull(it.index)?.takeIf(String::isNotBlank) }
             if (enabled.isNotEmpty()) {

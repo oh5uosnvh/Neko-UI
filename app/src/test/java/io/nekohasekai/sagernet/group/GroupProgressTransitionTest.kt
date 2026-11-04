@@ -9,18 +9,15 @@ class GroupProgressTransitionTest {
     private val app = sequenceOf(File("."), File("app")).first { File(it, "src/main/java").isDirectory }
     private val source get() = File(app, "src/main/java/io/nekohasekai/sagernet/ui/GroupPageTransition.kt").readText()
 
-    @Test fun adjacentClickReallyTranslatesInsteadOfFading() {
-        assertTrue(source.contains("pager.setCurrentItem(target, true)"))
-        assertTrue(source.contains("official behaviour, no fades"))
-        // Adjacency must short-circuit before the staged click path starts.
-        val adjacent = source.indexOf("abs(target - pager.currentItem) == 1")
+    @Test fun everyPillClickSharesOneStagedTimeline() {
+        // Adjacent and distant clicks run the SAME centre+inject+translate timeline;
+        // the former real-pager special case stalled mid-range taps (two visible
+        // pages relaying out every settle frame) while distant jumps were smooth.
+        assertFalse(source.contains("setCurrentItem(target, true)"))
+        assertFalse(source.contains("abs(target - pager.currentItem) == 1"))
+        assertTrue(source.contains("centreTab(target) { startSelection(target) }"))
         val staged = source.indexOf("clicking = true")
-        assertTrue(adjacent in 0 until staged)
-        // The adjacent block must not run a second scroll animator: the TabLayout
-        // mediator already centres from the same per-frame pager progress, and the
-        // two drivers shook the pill strip in the middle of the tab range.
-        val block = source.substring(adjacent, staged)
-        assertFalse(block.contains("centreTab"))
+        assertTrue(staged > 0)
     }
 
     @Test fun rapidClicksRetargetTheLiveSettleInsteadOfQueueing() {

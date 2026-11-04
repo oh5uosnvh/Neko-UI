@@ -2445,6 +2445,11 @@ class ConfigurationFragment @JvmOverloads constructor(
             if (!::proxyGroup.isInitialized) return
 
             configurationListView = view.findViewById(R.id.configuration_list)
+            // Default cross-fade change animations detach & rebuild the clicked view
+            // between selection/status rebinds; rapid taps then land on a recycled
+            // holder and the click is silently swallowed ("点了却选不中"). Text-only
+            // rebinds (status/traffic/selection) need no animation.
+            configurationListView.itemAnimator = null
             (parentFragment as? ConfigurationFragment)?.view
                 ?.findViewById<io.nekohasekai.sagernet.widget.GroupListEdgeLayout>(
                     R.id.group_list_foreground,

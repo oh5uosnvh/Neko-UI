@@ -340,9 +340,10 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     // REQ-07 multi-UA: built-in subscription User-Agent candidate switches
     // (independent section). All disabled -> RawUpdater falls back to the
     // Nets.kt default UA. Persisted in profileCacheStore (Room), survives restart.
-    var userAgentMihomo by profileCacheStore.boolean(Key.USER_AGENT_MIHOMO) { false }
-    var userAgentClashVerge by profileCacheStore.boolean(Key.USER_AGENT_CLASH_VERGE) { false }
-    var userAgentNeko by profileCacheStore.boolean(Key.USER_AGENT_NEKO) { false }
+    // Defaults: all three ON (the NekoBox entry is the fallback, never joined).
+    var userAgentMihomo by profileCacheStore.boolean(Key.USER_AGENT_MIHOMO) { true }
+    var userAgentClashVerge by profileCacheStore.boolean(Key.USER_AGENT_CLASH_VERGE) { true }
+    var userAgentNeko by profileCacheStore.boolean(Key.USER_AGENT_NEKO) { true }
 
     // REQ-08: global free-form custom subscription User-Agent (independent of
     // the per-group subscriptionUserAgent / customUserAgent fields). Non-blank

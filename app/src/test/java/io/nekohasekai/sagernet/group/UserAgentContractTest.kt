@@ -50,12 +50,20 @@ class UserAgentContractTest {
         assertEquals("mihomo.party/v2.0.0 (clash.meta)", ua)
     }
 
-    // (c) clash-verge + neko 开 -> 按序分号拼接，且不含 mihomo
+    // (c) clash-verge + neko 开 -> NekoBox UA 是兜底，绝不拼进请求头
+    // （实测机场：UA 含 "NekoBox/Android" 即返回 sing-box JSON）
     @Test
-    fun clashVergeAndNekoJoinedInOrderWithoutMihomo() {
+    fun nekoEntryIsFallbackOnlyAndNeverAppended() {
         val ua = UserAgentPreference.buildUserAgent(listOf(true, false, true), candidates)
-        assertEquals("clash-verge/v2.4.2;$USER_AGENT", ua)
-        assertFalse(ua.contains("mihomo"))
+        assertEquals("clash-verge/v2.4.2", ua)
+        val all = UserAgentPreference.buildUserAgent(listOf(true, true, true), candidates)
+        assertEquals("clash-verge/v2.4.2;mihomo.party/v2.0.0 (clash.meta)", all)
+        assertFalse(all.contains(USER_AGENT))
+        // 仅 neko 开（其余全关）-> 兜底默认 UA
+        assertEquals(
+            USER_AGENT,
+            UserAgentPreference.buildUserAgent(listOf(false, false, true), candidates),
+        )
     }
 
     // (d) 拼接结果整体作为请求构建函数的 User-Agent header 入参

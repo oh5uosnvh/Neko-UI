@@ -12,18 +12,16 @@ import androidx.interpolator.view.animation.FastOutSlowInInterpolator
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.tabs.TabLayout
 import io.nekohasekai.sagernet.widget.GroupTabPill
-import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * Adjacent clicks use the official real page scroll — cards genuinely translate one page
- * and the pills follow the live pager distance. Distant clicks run two timelines at the
- * same time: the target pill centres, then injects its fill from the edge over 400 ms
- * while the cards perform one rigid pure translation with zero cross-fade — the old page
- * (bitmap snapshot) slides out toward the target side and the new page slides in from the
- * opposite edge, exactly one pager width apart so their seam never opens. Both finish
- * together with the pill injection. The snapshot lives in pager.overlay and stays on top,
- * so no blank frame is ever exposed.
+ * Every pill click — adjacent or distant — runs one staged timeline: the target pill
+ * centres, then injects its fill from the edge over 400 ms while the cards perform one
+ * rigid pure translation with zero cross-fade — the old page (bitmap snapshot) slides
+ * out toward the target side and the new page slides in from the opposite edge, exactly
+ * one pager width apart so their seam never opens. Both finish together with the pill
+ * injection. The snapshot lives in pager.overlay and stays on top, so no blank frame is
+ * ever exposed. Manual swipes still use the real pager scroll with live pill progress.
  */
 internal class GroupPageTransition(
     private val pager: ViewPager2,
@@ -81,19 +79,12 @@ internal class GroupPageTransition(
         val target = ids().indexOf(groupId)
         if (target < 0) { desired = null; return }
         if (target == pager.currentItem) { desired = null; settlePills(target); return }
-        if (abs(target - pager.currentItem) == 1) {
-            // Adjacent: official behaviour, no fades — the real settling scroll carries
-            // the cards while the pills track the live pager distance. The TabLayout
-            // mediator performs the pill-row centring from the same per-frame pager
-            // progress; a second scroll animator here would fight it and shake the
-            // strip in the middle of the tab range (head/tail never moved, hence never
-            // shook).
-            desired = null
-            lastSwipePosition = -1
-            (tabs as? io.nekohasekai.sagernet.widget.GroupPillTabLayout)?.manualCentering = false
-            pager.setCurrentItem(target, true)
-            return
-        }
+        // Every pill click — adjacent or distant — runs the SAME staged timeline:
+        // centre + 400 ms edge injection + one rigid pure translation, all ending
+        // together. The former adjacent special case scrolled the real pager, whose
+        // two visible pages relaid out every frame and stalled mid-range taps while
+        // distant jumps looked perfectly smooth. Instant-switch + snapshot keeps the
+        // motion cost identical everywhere.
         clicking = true
         desired = null
         oldPill = pill(pager.currentItem)
