@@ -13,7 +13,7 @@ class ConfigPageLibraryScrollbarTest {
     private val app = sequenceOf(File("."), File("app")).first { File(it, "src/main/java").isDirectory }
     private val res = sequenceOf(File("."), File("app")).first { File(it, "src/main/res").isDirectory }
 
-    private fun source(rel: String) = File(app, rel).readText()
+    private fun source(rel: String) = File(app, "src/main/java/$rel").readText()
 
     @Test
     fun edgeLayoutNoLongerWiresTheFixedScrollbar() {
@@ -33,8 +33,8 @@ class ConfigPageLibraryScrollbarTest {
 
     @Test
     fun configListUsesTheSameLibraryFastScrollerAsGroupsPage() {
-        val profileList = File(res, "layout/layout_profile_list.xml").readText()
-        val groupList = File(res, "layout/layout_group.xml").readText()
+        val profileList = File(res, "src/main/res/layout/layout_profile_list.xml").readText()
+        val groupList = File(res, "src/main/res/layout/layout_group.xml").readText()
         for (attr in listOf(
             "android:scrollbarSize=\"0dp\"",
             "app:fastScrollAutoHide=\"true\"",
@@ -54,8 +54,8 @@ class ConfigPageLibraryScrollbarTest {
         val scrollbar = source("io/nekohasekai/sagernet/widget/FixedGroupScrollbar.kt")
         assertTrue(scrollbar.contains("internal class FixedGroupScrollbar"))
         // 生产代码（widget 包外）不得再引用它
-        File(app, "").walkTopDown()
-            .filter { it.isFile && it.path.endsWith(".kt") && !it.path.contains("/widget/") && !it.path.contains("/test/") }
+        File(app, "src/main/java").walkTopDown()
+            .filter { it.isFile && it.path.endsWith(".kt") && !it.path.contains("/widget/") }
             .forEach { file ->
                 assertFalse("production reference in ${file.path}", file.readText().contains("FixedGroupScrollbar"))
             }
