@@ -229,13 +229,6 @@ class MainActivity : ThemedActivity(),
         if (DataStore.hideFromRecentApps) {
             applyHideFromRecentApps(DataStore.hideFromRecentApps)
         }
-
-        // 兜底：抽屉已关闭但延迟切换还没执行（动画被系统回收等意外打断）
-        if (!binding.drawerLayout.isOpen) {
-            val pending = pendingCommit
-            pendingCommit = null
-            pending?.invoke()
-        }
     }
 
     override fun onPostResume() {
@@ -496,11 +489,12 @@ class MainActivity : ThemedActivity(),
                 }
             }
             for (cached in fragmentCache.values) {
-                if (cached !== fragment && cached !== old && cached !is ConfigurationFragment && cached.isAdded && !cached.isDetached) {
-                    // Keep the configuration hot, plus the active/recent side page. Others retain
-                    // Fragment state but release their View trees and background listeners.
-                    transaction.setMaxLifecycle(cached, Lifecycle.State.CREATED)
-                    transaction.detach(cached)
+                if (cached !== fragment && cached !== old && cached.isAdded && !cached.isHidden) {
+                    // Deep sidebar optimisation: cached pages stay hidden but keep their View
+                    // trees (STARTED). Switching is a pure show/hide — no re-inflation can
+                    // ever land on the drawer-close frames again.
+                    transaction.setMaxLifecycle(cached, Lifecycle.State.STARTED)
+                    transaction.hide(cached)
                 }
             }
             if (fragment.isDetached) {
@@ -522,17 +516,10 @@ class MainActivity : ThemedActivity(),
             syncMainControls()
         }
 
-        val drawerWasOpen = binding.drawerLayout.isOpen
         binding.drawerLayout.closeDrawers()
-        // Only an attached page with a live View is hot. A detached Fragment must inflate
-        // again, so delay it until the drawer has closed instead of competing with that animation.
-        val hot = fragment.isAdded && !fragment.isDetached && fragment.view != null
-        if (!drawerWasOpen || hot) {
-            pendingCommit = null
-            commit()
-        } else {
-            pendingCommit = commit
-        }
+        // Every cached page is hot (startup staggered warmup + no detach); commit at once
+        // so the target page is already in place while the drawer retracts.
+        commit()
     }
 
     /**
@@ -555,11 +542,7 @@ class MainActivity : ThemedActivity(),
     }
 
     private val drawerListener = object : DrawerLayout.SimpleDrawerListener() {
-        override fun onDrawerClosed(drawerView: View) {
-            val pending = pendingCommit
-            pendingCommit = null
-            pending?.invoke()
-        }
+        // Navigation commits immediately; nothing is deferred to drawer close any more.
     }
 
     /** 页面视图创建时补齐顶栏的状态栏内边距（多页面共存场景） */
@@ -904,7 +887,6 @@ class MainActivity : ThemedActivity(),
         super.onDestroy()
         binding.drawerLayout.removeDrawerListener(drawerListener)
         supportFragmentManager.unregisterFragmentLifecycleCallbacks(navInsetCallbacks)
-        pendingCommit = null
         GroupManager.userInterface = null
         DataStore.configurationStore.unregisterChangeListener(this)
         connection.disconnect(this)

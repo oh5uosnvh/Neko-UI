@@ -3185,9 +3185,29 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                     if (update) {
                         ProfileManager.postUpdate(lastSelected, noTraffic = true)
-                        if (DataStore.serviceState.canStop && reloadAccess.tryLock()) {
-                            SagerNet.reloadService()
-                            reloadAccess.unlock()
+                        if (DataStore.serviceState.started) {
+                            // Rapid taps land while the tunnel is still Connecting
+                            // (canStop == false); the old tryLock-or-skip path silently
+                            // dropped the rebuild and left the VPN on the old node. Wait
+                            // for a stable state, then reload only if this click is still
+                            // the newest selection.
+                            repeat(80) {
+                                val state = DataStore.serviceState
+                                when {
+                                    !state.started -> return@runOnDefaultDispatcher
+                                    state.canStop -> {
+                                        reloadAccess.withLock {
+                                            if (DataStore.serviceState.canStop &&
+                                                DataStore.selectedProxy == proxyEntity.id
+                                            ) {
+                                                SagerNet.reloadService()
+                                            }
+                                        }
+                                        return@runOnDefaultDispatcher
+                                    }
+                                    else -> delay(100)
+                                }
+                            }
                         }
                     } else if (SagerNet.isTv) {
                         if (DataStore.serviceState.started) {
