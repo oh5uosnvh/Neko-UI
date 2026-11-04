@@ -58,6 +58,8 @@ class LatencyPresentationTest {
         val x=(parent.left+side.left+side.width/2).toFloat();val y=(parent.top+side.top+side.height/2).toFloat()
         val down=MotionEvent.obtain(0,0,MotionEvent.ACTION_DOWN,x,y,0);bar.dispatchTouchEvent(down);down.recycle();advance(700)
         val up=MotionEvent.obtain(0,710,MotionEvent.ACTION_UP,x,y,0);bar.dispatchTouchEvent(up);up.recycle();advance(300)
-        assertFalse(side.isPressed);assertFalse(bar.foreground.state.contains(android.R.attr.state_pressed))
+        assertFalse(side.isPressed)
+        // Bar-level ring was removed; nothing outside the side box may stay pressed.
+        assertNull(bar.foreground)
     }
 }
