@@ -247,6 +247,8 @@ internal class GroupPickerDragCallback(
     private var before: List<Long>? = null
     private var activeHolder: RecyclerView.ViewHolder? = null
     private var selectedHolder: RecyclerView.ViewHolder? = null
+    private var savedAnimator: RecyclerView.ItemAnimator? = null
+    private var dragRecycler: RecyclerView? = null
     private var cancelledGesture = false
     private var closed = false
     val isDragging: Boolean get() = before != null
@@ -269,6 +271,14 @@ internal class GroupPickerDragCallback(
             activeHolder = viewHolder
             selectedHolder = viewHolder
             adapter.prepareDrag(viewHolder)
+            // ItemTouchHelper already owns translations while dragging. Running a second
+            // notifyItemMoved animator causes the upward path to write competing Y values.
+            dragRecycler = viewHolder.itemView.parent as? RecyclerView
+            savedAnimator = dragRecycler?.itemAnimator
+            dragRecycler?.let { list ->
+                list.itemAnimator?.endAnimations()
+                list.itemAnimator = null
+            }
             adapter.updateDraggingState(true)
         } else if (actionState == ItemTouchHelper.ACTION_STATE_IDLE) {
             selectedHolder = null
@@ -304,6 +314,9 @@ internal class GroupPickerDragCallback(
         activeHolder = null
         selectedHolder = null
         adapter.updateDraggingState(false)
+        dragRecycler?.itemAnimator = savedAnimator
+        dragRecycler = null
+        savedAnimator = null
         val finalIds = adapter.ids
         if (cancelledGesture) {
             adapter.restore(original)

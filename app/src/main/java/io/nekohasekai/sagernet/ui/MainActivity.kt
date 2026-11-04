@@ -93,7 +93,21 @@ class MainActivity : ThemedActivity(),
 
     /** 尚未创建过的页面：延迟到抽屉关闭动画结束后再执行的切换 */
     private var pendingCommit: (() -> Unit)? = null
-
+    private var warmIndex = 0
+    private val drawerWarmup = object : Runnable {
+        override fun run() {
+            if (isFinishing || isDestroyed || supportFragmentManager.isStateSaved || warmIndex >= DRAWER_WARM_IDS.size) return
+            val id = DRAWER_WARM_IDS[warmIndex++]
+            val fragment = obtainFragment(id)
+            if (!fragment.isAdded && currentMainFragment !== fragment) {
+                supportFragmentManager.beginTransaction().setReorderingAllowed(true)
+                    .add(R.id.fragment_holder, fragment, tagOf(fragment))
+                    .hide(fragment).setMaxLifecycle(fragment, Lifecycle.State.CREATED)
+                    .commitAllowingStateLoss()
+            }
+            binding.root.postDelayed(this, DRAWER_WARM_INTERVAL_MS)
+        }
+    }
 
     companion object {
         /** REQ-08：抽屉切页淡入时长（ms），日夜间一致 */
@@ -106,6 +120,14 @@ class MainActivity : ThemedActivity(),
         )
         private const val NAV_TAG_PREFIX = "main_nav:"
         private const val STATE_NAV_ID = "main_nav_id"
+        // Six light side pages are added one-by-one from 240–1490 ms after startup.
+        // WebView/traffic stays cold; configuration is already the active page.
+        private val DRAWER_WARM_IDS = intArrayOf(
+            R.id.nav_group, R.id.nav_route, R.id.nav_settings,
+            R.id.nav_tools, R.id.nav_logcat, R.id.nav_about,
+        )
+        private const val DRAWER_WARM_START_MS = 240L
+        private const val DRAWER_WARM_INTERVAL_MS = 250L
 
     }
 
@@ -173,8 +195,9 @@ class MainActivity : ThemedActivity(),
 
         refreshNavMenu(DataStore.enableClashAPI)
 
-        // Navigation pages are created on demand, never all mounted behind the active page.
-        // Eager hidden prewarm retained >2500 Views and triggered background page work on every gesture.
+        // Cold-start only: stagger six lightweight side pages across < 2 seconds. This warms
+        // their first inflation without the old synchronous measure/layout or WebView prewarm.
+        if (savedInstanceState == null) binding.root.postDelayed(drawerWarmup, DRAWER_WARM_START_MS)
 
         // sdk 33 notification
         if (Build.VERSION.SDK_INT >= 33) {
@@ -501,12 +524,10 @@ class MainActivity : ThemedActivity(),
 
         val drawerWasOpen = binding.drawerLayout.isOpen
         binding.drawerLayout.closeDrawers()
-        // 缓存命中（实例已创建过，含视图被 detach 释放的缓存页）：立即提交，
-        // show/hide 与抽屉收回动画并行——顿挫根因是首次创建页面的 inflation
-        // 抢主线程，缓存页复用没有 inflation。首次创建的页面（inflation 会卡
-        // 抽屉动画）保留延迟提交，到 onDrawerClosed 后再执行。
-        val cached = fragment.isAdded || fragment.isDetached
-        if (!drawerWasOpen || cached) {
+        // Only an attached page with a live View is hot. A detached Fragment must inflate
+        // again, so delay it until the drawer has closed instead of competing with that animation.
+        val hot = fragment.isAdded && !fragment.isDetached && fragment.view != null
+        if (!drawerWasOpen || hot) {
             pendingCommit = null
             commit()
         } else {
@@ -874,6 +895,7 @@ class MainActivity : ThemedActivity(),
 
     override fun onDestroy() {
         invalidateControlLatency()
+        if (::binding.isInitialized) binding.root.removeCallbacks(drawerWarmup)
         if (::binding.isInitialized) {
             binding.controlBar.onToggle = null
             binding.controlBar.onTest = null

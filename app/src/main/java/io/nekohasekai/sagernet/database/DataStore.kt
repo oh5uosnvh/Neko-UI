@@ -133,9 +133,17 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var speedInterval by configurationStore.stringToInt(Key.SPEED_INTERVAL)
     var showGroupInNotification by configurationStore.boolean("showGroupInNotification")
 
-    // —— 卡片拖动速度（REQ-04，独立小区域）：范围 1..10，默认 5；
-    // 实际滚动系数 = V / 10.0f（默认 0.5×，与分组页现值一致）——
-    var dragScrollSpeed by configurationStore.int(Key.DRAG_SCROLL_SPEED) { 5 }
+    // Decimal card-drag speed. Old integer storage remains readable through the fallback.
+    var dragScrollSpeed: Float
+        get() = (
+            configurationStore.getString(Key.DRAG_SCROLL_SPEED, null)?.toFloatOrNull()
+                ?: configurationStore.getFloat(Key.DRAG_SCROLL_SPEED, Float.NaN).takeIf { it.isFinite() }
+                ?: configurationStore.getInt(Key.DRAG_SCROLL_SPEED, 5).toFloat()
+            ).coerceIn(1f, 10f)
+        set(value) = configurationStore.putString(
+            Key.DRAG_SCROLL_SPEED,
+            value.coerceIn(1f, 10f).toString(),
+        )
 
     var globalCustomConfig by configurationStore.string(Key.GLOBAL_CUSTOM_CONFIG) { "" }
 

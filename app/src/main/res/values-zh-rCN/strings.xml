@@ -105,8 +105,8 @@
     <string name="auto_connect">自动连接</string>
     <string name="auto_connect_summary">手机启动或更新后代理会自动重新连接</string>
     <string name="drag_scroll_speed">卡片拖动速度</string>
-    <string name="drag_scroll_speed_summary">当前 %1$d / 10（0.1×–1.0×）</string>
-    <string name="drag_scroll_speed_range_toast">拖动速度范围 %1$d~%2$d，已调整到最近边界</string>
+    <string name="drag_scroll_speed_summary">当前 %1$s / 10（0.1×–1.0×）</string>
+    <string name="drag_scroll_speed_range_toast">拖动速度范围 %1$s~%2$s，已调整到最近边界</string>
     <string name="direct_boot_aware">允许在解锁前启动</string>
     <string name="direct_boot_aware_summary">您正在使用的服务器可能会受到更少的保护</string>
     <!-- notification category -->

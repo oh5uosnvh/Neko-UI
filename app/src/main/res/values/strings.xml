@@ -226,8 +226,8 @@
     <string name="auto_connect">Auto Connect</string>
     <string name="auto_connect_summary">Enable proxy on startup/app update if it was running before</string>
     <string name="drag_scroll_speed">Card Drag Scroll Speed</string>
-    <string name="drag_scroll_speed_summary">Current %1$d / 10 (0.1×–1.0×)</string>
-    <string name="drag_scroll_speed_range_toast">Speed range is %1$d–%2$d, adjusted to the nearest bound</string>
+    <string name="drag_scroll_speed_summary">Current %1$s / 10 (0.1×–1.0×)</string>
+    <string name="drag_scroll_speed_range_toast">Speed range is %1$s–%2$s, adjusted to the nearest bound</string>
     <string name="direct_boot_aware">Allow Toggling in Lock Screen</string>
     <string name="direct_boot_aware_summary">Your selected profile information will be less
         protected</string>

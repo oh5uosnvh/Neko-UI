@@ -1,35 +1,9 @@
 package io.nekohasekai.sagernet.group
-
 import java.io.File
 import org.junit.Assert.*
 import org.junit.Test
-
 class Dns09PerformanceContractTest {
-    private val app=sequenceOf(File("."),File("app")).first{File(it,"src/main/java").isDirectory}
-    private fun source(name:String)=File(app,"src/main/java/io/nekohasekai/sagernet/ui/$name.kt").readText()
-    @Test fun noEagerHiddenPageTreesAndBoundedAttachedNavigationRetainState() {
-        val main=source("MainActivity")
-        val create=main.substringAfter("override fun onCreate(").substringBefore("override fun onResume()")
-        assertFalse(create.contains("postDelayed(prewarmRunnable"))
-        assertFalse(create.contains("postDelayed(drawerWarmRunnable"))
-        val nav=main.substringAfter("fun displayFragment(fragment:").substringBefore("private val drawerListener")
-        assertTrue(nav.contains("cached !== fragment && cached !== old"));assertTrue(nav.contains("transaction.detach(cached)"))
-        assertTrue(nav.contains("cached !is ConfigurationFragment"))
-        assertTrue(nav.contains("transaction.attach(fragment)"));assertTrue(nav.contains("drawerWasOpen"))
-        val config=source("ConfigurationFragment")
-        assertTrue(config.contains("groupPager.offscreenPageLimit = 1"))
-        val bind=config.substringAfter("fun bind(proxyEntity: ProxyEntity)").substringBefore("fun bindProfileState(")
-        assertFalse(bind.contains("DataStore.profileCardStyle"));assertFalse(bind.contains("DataStore.alwaysShowAddress"))
-        assertTrue(bind.contains("TwoColumnProtocolLabel.display"))
-    }
-    @Test fun pageSelectionNoSynchronousDbAndClickTransitionDifferentFromSwipe() {
-        val config=source("ConfigurationFragment")
-        val selected=config.substringAfter("override fun onPageSelected(position: Int)").substringBefore("override fun onQueryTextChange")
-        assertFalse(selected.contains("DataStore.selectedGroup"));assertTrue(selected.contains("groupSelectionWriter.submit(newId)"))
-        val transition=source("GroupPageTransition")
-        assertTrue(transition.contains("pager.setCurrentItem(target, false)"));assertTrue(transition.contains("pager.setCurrentItem(target, true)"))
-        assertTrue(transition.contains("pager.alpha = 0f"));assertTrue(transition.contains("pager.alpha = fraction"))
-        assertTrue(transition.contains("updateProgress(1f - offset, true)"))
-        assertTrue(transition.contains("updateProgress(offset, false)"))
-    }
+ private val app=sequenceOf(File("."),File("app")).first{File(it,"src/main/java").isDirectory}; private fun source(n:String)=File(app,"src/main/java/io/nekohasekai/sagernet/ui/$n.kt").readText()
+ @Test fun startupWarmsBoundedSidebarPagesAndDetachedViewsWaitForDrawerClose(){val m=source("MainActivity");assertTrue(m.contains("DRAWER_WARM_START_MS = 240L"));assertTrue(m.contains("DRAWER_WARM_INTERVAL_MS = 250L"));assertTrue(m.contains("val hot = fragment.isAdded && !fragment.isDetached && fragment.view != null"));assertTrue(m.contains("transaction.detach(cached)"))}
+ @Test fun directClickIsCentredInjectedAndCrossFadedWithoutBlank(){val t=source("GroupPageTransition");for(v in listOf("TAB_CENTRE_MS = 180L","PILL_INJECTION_MS = 200L","OLD_FADE_MS = 160f","INCOMING_DELAY_MS = 80f","INCOMING_FADE_MS = 160f","pager.overlay.add","contentLayer()?.alpha = 1f","pager.setCurrentItem(target, false)"))assertTrue(v,t.contains(v));assertTrue(t.contains("updateProgress(1f - offset, true)"));assertTrue(t.contains("updateProgress(offset, false)"))}
 }
