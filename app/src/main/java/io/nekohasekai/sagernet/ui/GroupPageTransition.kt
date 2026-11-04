@@ -67,7 +67,13 @@ internal class GroupPageTransition(
 
     fun request(groupId: Long) {
         desired = groupId
-        if (pager.scrollState == ViewPager2.SCROLL_STATE_IDLE && !clicking) beginClick()
+        // Rapid adjacent clicking must retarget the LIVE settle scroll instead of
+        // queueing until IDLE — queueing made every tap land one beat late and kept
+        // the pager churning without ever feeling selected. ViewPager2 redirects a
+        // settle smoothly when setCurrentItem is called mid-animation. An active
+        // user DRAG cannot be redirected (ViewPager2 forbids it) — those taps stay
+        // queued via desired and fire from the IDLE callback.
+        if (!clicking && pager.scrollState != ViewPager2.SCROLL_STATE_DRAGGING) beginClick()
     }
 
     private fun beginClick() {
@@ -77,12 +83,15 @@ internal class GroupPageTransition(
         if (target == pager.currentItem) { desired = null; settlePills(target); return }
         if (abs(target - pager.currentItem) == 1) {
             // Adjacent: official behaviour, no fades — the real settling scroll carries
-            // the cards while the pills track the live pager distance.
+            // the cards while the pills track the live pager distance. The TabLayout
+            // mediator performs the pill-row centring from the same per-frame pager
+            // progress; a second scroll animator here would fight it and shake the
+            // strip in the middle of the tab range (head/tail never moved, hence never
+            // shook).
             desired = null
             lastSwipePosition = -1
             (tabs as? io.nekohasekai.sagernet.widget.GroupPillTabLayout)?.manualCentering = false
             pager.setCurrentItem(target, true)
-            centreTab(target)
             return
         }
         clicking = true

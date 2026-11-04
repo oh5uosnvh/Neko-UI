@@ -16,6 +16,20 @@ class GroupProgressTransitionTest {
         val adjacent = source.indexOf("abs(target - pager.currentItem) == 1")
         val staged = source.indexOf("clicking = true")
         assertTrue(adjacent in 0 until staged)
+        // The adjacent block must not run a second scroll animator: the TabLayout
+        // mediator already centres from the same per-frame pager progress, and the
+        // two drivers shook the pill strip in the middle of the tab range.
+        val block = source.substring(adjacent, staged)
+        assertFalse(block.contains("centreTab"))
+    }
+
+    @Test fun rapidClicksRetargetTheLiveSettleInsteadOfQueueing() {
+        // request() must begin immediately during a settle (never during a user drag,
+        // which ViewPager2 forbids redirecting) instead of queueing until IDLE.
+        assertTrue(source.contains("pager.scrollState != ViewPager2.SCROLL_STATE_DRAGGING) beginClick()"))
+        assertFalse(source.contains("SCROLL_STATE_IDLE && !clicking) beginClick()"))
+        // ViewPager2 redirects a settle when setCurrentItem is called mid-animation.
+        assertTrue(source.contains("setCurrentItem is called mid-animation"))
     }
 
     @Test fun distantClickRunsEdgeInjectionAndPureTranslationTogether() {

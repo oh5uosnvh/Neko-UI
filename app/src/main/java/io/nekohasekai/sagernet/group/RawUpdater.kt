@@ -78,15 +78,23 @@ object RawUpdater : GroupUpdater() {
                     allowInsecure()
                 }
                 setURL(subscription.link)
-                // REQ-07: 组合内置 UA 候选（开启项按序分号拼接；全关回退 Nets.kt
-                // 默认 UA）。逐订阅 customUserAgent 仍保持原优先级（GroupSettingsActivity
-                // 不在本次改动范围）。
+                // REQ-07/REQ-08: User-Agent 生效链路（三条路径——首次导入、手动更新、
+                // SubscriptionUpdater 自动更新——都经由 GroupUpdater.executeUpdate 走到
+                // 本处唯一的 newRequest()，UA 一定会被 setUserAgent 设置到请求头，
+                // libcore httpRequest.SetUserAgent 内部 Header.Set("User-Agent", ...)）：
+                //  1. 逐订阅 customUserAgent（GroupSettingsActivity 读写，非空优先）；
+                //  2. 全局自定义 UA（Key.CUSTOM_USER_AGENT，REQ-08，非空次之）；
+                //  3. 内置候选开关拼接（clash-verge 在前——很多机场按 UA 前缀/包含
+                //     关系决定返回格式，第一段最关键；全关回退 Nets.kt 默认 UA）。
+                // 注意：subscription.customUserAgent 为空串时不会被 set 成空 UA，
+                // 而是继续走后续兜底，避免空 User-Agent 头覆盖。
                 setUserAgent(
                     subscription.customUserAgent.takeIf { it.isNotBlank() }
+                        ?: DataStore.customUserAgent.takeIf { it.isNotBlank() }
                         ?: UserAgentPreference.buildUserAgent(
                             listOf(
-                                DataStore.userAgentMihomo,
                                 DataStore.userAgentClashVerge,
+                                DataStore.userAgentMihomo,
                                 DataStore.userAgentNeko,
                             ),
                             UserAgentPreference.userAgentCandidates(),
@@ -103,21 +111,35 @@ object RawUpdater : GroupUpdater() {
             }
             subscription.subscriptionUserinfo = userinfo
 
-            // 修改默认名字：无论从剪切板导入还是在分组界面手动新建/更新，只要是默认占位名或空白，均自动读取订阅标题
+            // 修改默认名字：无论从剪切板导入还是在分组界面手动新建/更新，只要是"未由
+            // 用户命名"的占位名，均自动读取订阅标题后命名/改名。
+            // 自动命名判定依据（REQ-08，不会覆盖用户已改名/创建时输入的名称）：
+            //  - 名称为空白；
+            //  - 导入时的占位名："Subscription #<时间戳>"（MainActivity 导入路径）、
+            //    "My group"（GroupSettingsActivity serialize 的兜底名）或默认字符串；
+            //  - 名称与订阅 URL 主机名相同（创建时 UI 用主机名预填、用户未改的情况）。
+            // 其余任何名称都视为用户命名，保持不动。
+            val urlHost = runCatching {
+                subscription.link?.toUri()?.host
+            }.getOrNull()
             val isDefaultName = proxyGroup.name.isNullOrBlank() ||
                     proxyGroup.name?.startsWith("Subscription #") == true ||
                     proxyGroup.name == "My group" ||
-                    proxyGroup.name == app.getString(R.string.group_default)
+                    proxyGroup.name == app.getString(R.string.group_default) ||
+                    (!urlHost.isNullOrBlank() &&
+                            proxyGroup.name.equals(urlHost, ignoreCase = true))
             if (isDefaultName) {
+                // 解析优先级：YAML/正文 # profile-title: → 响应头 profile-title
+                // （支持 "xxx" 与 "base64:xxx"，URL-safe 与 padding 均可）→
+                // Content-Disposition filename 兜底。
                 var remoteName = parseBodyProfileTitle(content)
                 if (remoteName.isBlank()) {
-                    remoteName = Util.decodeFilename(Util.getStringBox(response.getHeader("content-disposition")))
+                    remoteName = parseProfileTitleHeader(
+                        Util.getStringBox(response.getHeader("profile-title"))
+                    )
                 }
                 if (remoteName.isBlank()) {
-                    val pt = Util.getStringBox(response.getHeader("profile-title"))
-                    if (pt.isNotBlank()) {
-                        remoteName = Util.decodeFilename(pt)
-                    }
+                    remoteName = Util.decodeFilename(Util.getStringBox(response.getHeader("content-disposition")))
                 }
                 if (remoteName.isNotBlank()) {
                     proxyGroup.name = GroupDisplayName.withoutFileSuffix(remoteName)
@@ -305,6 +327,34 @@ object RawUpdater : GroupUpdater() {
             }.getOrDefault("").trim()
         }
         return title
+    }
+
+    /**
+     * REQ-08: 解析订阅响应头 `profile-title`（如 "profile-title: xxx" 或
+     * "profile-title: base64:xxx"）。base64 同时兼容标准字母表与 URL-safe
+     * 字母表（-/ _ 互换）且不要求 padding（补齐 '=' 后再解码）。纯函数、
+     * 使用 java.util.Base64，可在纯 JVM 单测中直接验证（无 Android 依赖）。
+     * 解码失败或结果为空白时返回空串，调用方继续走 Content-Disposition 兜底。
+     */
+    @android.annotation.SuppressLint("NewApi")
+    fun parseProfileTitleHeader(rawHeader: String): String {
+        var title = rawHeader.trim()
+        if (title.isBlank()) return ""
+        if (title.startsWith("base64:", ignoreCase = true)) {
+            var b64 = title.substring("base64:".length).trim()
+            if (b64.isEmpty()) return ""
+            b64 = b64.replace('-', '+').replace('_', '/')
+            val padding = (4 - b64.length % 4) % 4
+            b64 += "=".repeat(padding)
+            title = try {
+                String(java.util.Base64.getDecoder().decode(b64), Charsets.UTF_8)
+            } catch (_: Throwable) {
+                // IllegalArgumentException（非法 base64）或 NoSuchMethodError
+                // （理论上 API<26 无 java.util.Base64 时），一律按解析失败处理。
+                ""
+            }
+        }
+        return title.trim()
     }
 
     @Suppress("UNCHECKED_CAST")

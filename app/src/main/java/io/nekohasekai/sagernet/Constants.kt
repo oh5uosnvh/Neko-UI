@@ -190,6 +190,12 @@ object Key {
     const val USER_AGENT_CLASH_VERGE = "userAgentClashVerge"
     const val USER_AGENT_NEKO = "userAgentNeko"
 
+    // REQ-08: global free-form custom User-Agent for subscription requests.
+    // Takes effect for every subscription whose per-group customUserAgent is
+    // blank; when this is blank too, RawUpdater falls back to the built-in
+    // candidate switches (Key.USER_AGENT_*).
+    const val CUSTOM_USER_AGENT = "customUserAgent"
+
     //
 
     const val APP_TLS_VERSION = "appTLSVersion"

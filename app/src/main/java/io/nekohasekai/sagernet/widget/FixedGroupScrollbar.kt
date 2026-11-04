@@ -59,6 +59,10 @@ internal class FixedGroupScrollbar(host: GroupListEdgeLayout) {
     internal fun onScrollActivity() {
         host.get()?.let { root ->
             root.removeCallbacks(hide)
+            // Fresh thumb geometry every scroll frame, even when the reveal is
+            // already saturated — relying on the child's own invalidation left the
+            // thumb moving in visible steps while the cards scrolled smoothly.
+            root.postInvalidateOnAnimation()
             if (reveal < 1f) animateReveal(1f)
             if (!isDragging) root.postDelayed(hide, AUTO_HIDE_DELAY)
         }

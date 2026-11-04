@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.AttributeSet
 import android.view.Gravity
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.res.TypedArrayUtils
@@ -16,14 +17,19 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.USER_AGENT
 
 /**
- * REQ-07 multi-UA subscription User-Agent selector.
+ * REQ-07/REQ-08 multi-UA subscription User-Agent selector.
  *
- * The row shows a fixed summary (the free-form EditTextPreference input was
- * removed; the previously stored value is no longer used and not migrated).
- * Tapping the row or its trailing edit icon opens a dialog with the built-in
- * UA candidates; every enabled candidate is joined with ";" (in list order)
- * into the User-Agent sent with subscription requests. When all candidates
- * are disabled the default UA (ktx.USER_AGENT) is used.
+ * Two interaction areas on one row:
+ *  - Pencil icon (R.id.ua_edit, the edit area): opens the built-in UA
+ *    candidate switch dialog; every enabled candidate is joined with ";"
+ *    (in list order) into the User-Agent sent with subscription requests.
+ *    When all candidates are disabled the default UA (ktx.USER_AGENT) is used.
+ *  - Tapping the row itself (non-pencil area): opens a free-form custom UA
+ *    input dialog. The value is stored globally (Key.CUSTOM_USER_AGENT) and
+ *    wins over the built-in switches whenever it is non-blank.
+ *
+ * Summary: shows the (truncated) custom UA when set, otherwise the built-in
+ * summary string.
  */
 class UserAgentPreference
 @JvmOverloads constructor(
@@ -41,19 +47,29 @@ class UserAgentPreference
     }
 
     override fun getSummary(): CharSequence? {
+        // REQ-08: custom UA (non-blank) is what actually gets sent, so show it;
+        // otherwise describe the built-in switches behaviour.
+        val custom = DataStore.customUserAgent
+        if (!custom.isNullOrBlank()) {
+            return if (custom.length <= SUMMARY_MAX_LENGTH) custom
+            else custom.take(SUMMARY_MAX_LENGTH) + "…"
+        }
         return context.getString(R.string.user_agent_builtin_summary)
     }
 
     override fun onBindViewHolder(holder: PreferenceViewHolder) {
         super.onBindViewHolder(holder)
         val edit = holder.findViewById(R.id.ua_edit)
+        // Pencil (edit area) keeps the built-in UA candidate switch dialog.
         edit.setOnClickListener { showDialog() }
         edit.isEnabled = isEnabled
         edit.alpha = if (isEnabled) 1f else 0.38f
     }
 
     override fun onClick() {
-        showDialog()
+        // Tapping the row itself (outside the pencil) opens the free-form
+        // custom UA input dialog (REQ-08).
+        showCustomUserAgentDialog()
     }
 
     private fun showDialog() {
@@ -62,13 +78,12 @@ class UserAgentPreference
         // swallows it, so the pencil appeared completely dead. Resolve the Activity
         // from the wrapper chain and show through it, keeping the themed context
         // for styling the dialog itself.
-        val activity = generateSequence<android.content.Context>(context) {
-            (it as? android.content.ContextWrapper)?.baseContext
-        }.filterIsInstance<android.app.Activity>().firstOrNull() ?: return
+        val activity = resolveActivity() ?: return
         val context = context
+        // Flags follow userAgentCandidates() order: clash-verge, mihomo, neko.
         val flags = booleanArrayOf(
-            DataStore.userAgentMihomo,
             DataStore.userAgentClashVerge,
+            DataStore.userAgentMihomo,
             DataStore.userAgentNeko,
         )
         val density = context.resources.displayMetrics.density
@@ -111,8 +126,8 @@ class UserAgentPreference
             .setTitle(R.string.subscription_user_agent)
             .setView(container)
             .setPositiveButton(android.R.string.ok) { _, _ ->
-                DataStore.userAgentMihomo = switches[0].isChecked
-                DataStore.userAgentClashVerge = switches[1].isChecked
+                DataStore.userAgentClashVerge = switches[0].isChecked
+                DataStore.userAgentMihomo = switches[1].isChecked
                 DataStore.userAgentNeko = switches[2].isChecked
             }
             .setNegativeButton(android.R.string.cancel, null)
@@ -122,13 +137,67 @@ class UserAgentPreference
             }
     }
 
+    /**
+     * REQ-08: free-form custom UA dialog opened by tapping the row. Multi-line
+     * EditText prefilled with the current global custom UA; OK persists it.
+     * Empty input clears the custom UA so the built-in switches take over.
+     */
+    private fun showCustomUserAgentDialog() {
+        val activity = resolveActivity() ?: return
+        val context = context
+        val density = context.resources.displayMetrics.density
+        val container = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((20 * density).toInt(), (12 * density).toInt(), (20 * density).toInt(), 0)
+        }
+        val input = EditText(context).apply {
+            setText(DataStore.customUserAgent)
+            hint = context.getString(R.string.user_agent_custom_hint)
+            // Multi-line: UA strings can get long; newlines are never valid in
+            // a header value, so strip them on save.
+            minLines = 1
+            maxLines = 4
+            setSingleLine(false)
+        }
+        container.addView(
+            input, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+        MaterialAlertDialogBuilder(context)
+            .setTitle(R.string.subscription_user_agent)
+            .setView(container)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                // Header values must not contain line breaks; collapse them so a
+                // stray newline can never split the User-Agent header.
+                DataStore.customUserAgent =
+                    input.text.toString().lines().joinToString(" ").trim()
+                notifyChanged()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+            .let { dialog ->
+                if (!activity.isFinishing && !activity.isDestroyed) dialog.show()
+            }
+    }
+
+    private fun resolveActivity(): android.app.Activity? {
+        return generateSequence<android.content.Context>(context) {
+            (it as? android.content.ContextWrapper)?.baseContext
+        }.filterIsInstance<android.app.Activity>().firstOrNull()
+    }
+
     companion object {
 
-        // REQ-07: built-in UA candidates, in fixed order.
+        // REQ-07: built-in UA candidates, in fixed order. clash-verge first
+        // (many airports switch response format on a leading "clash" UA),
+        // mihomo (clash.meta) second, NekoBox default last as fallback.
         const val UA_MIHOMO = "mihomo.party/v2.0.0 (clash.meta)"
         const val UA_CLASH_VERGE = "clash-verge/v2.4.2"
 
-        fun userAgentCandidates(): List<String> = listOf(UA_MIHOMO, UA_CLASH_VERGE, USER_AGENT)
+        fun userAgentCandidates(): List<String> = listOf(UA_CLASH_VERGE, UA_MIHOMO, USER_AGENT)
+
+        private const val SUMMARY_MAX_LENGTH = 64
 
         /**
          * Pure helper (unit-testable): joins every enabled candidate in list

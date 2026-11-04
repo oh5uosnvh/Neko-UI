@@ -344,6 +344,11 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var userAgentClashVerge by profileCacheStore.boolean(Key.USER_AGENT_CLASH_VERGE) { false }
     var userAgentNeko by profileCacheStore.boolean(Key.USER_AGENT_NEKO) { false }
 
+    // REQ-08: global free-form custom subscription User-Agent (independent of
+    // the per-group subscriptionUserAgent / customUserAgent fields). Non-blank
+    // value wins over the built-in candidate switches in RawUpdater.
+    var customUserAgent by profileCacheStore.string(Key.CUSTOM_USER_AGENT)
+
     var rulesFirstCreate by profileCacheStore.boolean("rulesFirstCreate")
 
     // var enableTLSFragment by configurationStore.boolean(Key.ENABLE_TLS_FRAGMENT)
