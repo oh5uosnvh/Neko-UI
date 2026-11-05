@@ -13,7 +13,7 @@ class Dns09PerformanceContractTest {
         assertFalse(main.contains("DRAWER_WARM_START_MS"))
         assertFalse(main.contains("DRAWER_WARM_INTERVAL_MS"))
         assertFalse(main.contains("drawerWarmup"))
-        assertTrue(main.contains("setMaxLifecycle(fragment, Lifecycle.State.STARTED)"))
+        assertTrue(main.contains("transaction.setMaxLifecycle(fragment, Lifecycle.State.RESUMED)"))
     }
 
     @Test fun sidebarSwitchStaysHotAndCommitsImmediately() {
