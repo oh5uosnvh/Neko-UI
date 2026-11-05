@@ -88,8 +88,7 @@ class ControlBarStateTest {
         }
     }
     private fun color(bar: ControlBar) =
-        (((bar.box(R.id.capsule).background as RippleDrawable).getDrawable(0)) as GradientDrawable)
-            .color!!.defaultColor
+        (bar.box(R.id.capsule).background as GradientDrawable).color!!.defaultColor
     private fun attr(context: ContextThemeWrapper, id: Int): Int = TypedValue().let {
         assertTrue(context.theme.resolveAttribute(id, it, true))
         if (it.resourceId != 0) context.resources.getColor(it.resourceId, context.theme) else it.data
@@ -263,41 +262,45 @@ class ControlBarStateTest {
 
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
-    fun capsuleNeverGetsABarLevelRingAndSideBoxesRippleLocally() = withBar { bar, _, _ ->
+    fun oneRoundedFrameMaskExcludesCapsuleAndBothSidesDriveTheSameRipple() = withBar { bar, _, _ ->
         bar.changeState(BaseService.State.Connected); advance(180)
-        // The old bar-level foreground ripple painted a bright ring around the
-        // capsule whenever a side box was pressed - user-rejected, now removed.
-        assertNull(bar.foreground)
-        // Press feedback moved into each side box as a local rounded ripple.
-        assertNotNull(bar.box(R.id.speed_box).background as? RippleDrawable)
-        assertNotNull(bar.box(R.id.latency_box).background as? RippleDrawable)
+        assertTrue(bar.foreground is RippleDrawable)
+        assertNull(bar.box(R.id.speed_box).background)
+        assertNull(bar.box(R.id.latency_box).background)
         assertNotNull(bar.box(R.id.capsule).foreground)
         assertTrue(bar.clipToOutline)
+        val mask = field(bar, "sideMask") as Drawable
+        mask.setBounds(0, 0, bar.width, bar.height)
+        val bitmap = Bitmap.createBitmap(bar.width, bar.height, Bitmap.Config.ARGB_8888)
+        mask.draw(Canvas(bitmap))
+        assertEquals(Color.TRANSPARENT, bitmap.getPixel(0, 0))
         val capsule = bar.box(R.id.capsule)
         val parent = capsule.parent as View
         val cx = parent.left + capsule.left + capsule.width / 2
         val cy = parent.top + capsule.top + capsule.height / 2
+        assertEquals(Color.TRANSPARENT, bitmap.getPixel(cx, cy))
+        assertEquals(Color.WHITE, bitmap.getPixel(4, bar.height / 2)) // Includes padding, not just boxes.
+        assertEquals(Color.WHITE, bitmap.getPixel(bar.width - 5, bar.height / 2))
+        assertEquals(Color.WHITE, bitmap.getPixel(cx, 4)) // Full frame above/below capsule also participates.
+        val ripple = bar.foreground
         for (id in listOf(R.id.speed_box, R.id.latency_box)) {
             val side = bar.box(id)
             val x = parent.left + side.left + side.width / 2f
             val y = parent.top + side.top + side.height / 2f
-            val ripple = side.background as RippleDrawable
             val down = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, x, y, 0)
             bar.dispatchTouchEvent(down); down.recycle()
+            assertSame(ripple, bar.foreground)
             assertTrue(ripple.state.contains(android.R.attr.state_pressed))
             val cancel = MotionEvent.obtain(0, 10, MotionEvent.ACTION_CANCEL, x, y, 0)
             bar.dispatchTouchEvent(cancel); cancel.recycle()
             assertFalse(ripple.state.contains(android.R.attr.state_pressed))
         }
-        // Pressing the capsule itself never lights the side ripples.
-        for (id in listOf(R.id.speed_box, R.id.latency_box)) {
-            val ripple = bar.box(id).background as RippleDrawable
-            val down = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, cx.toFloat(), cy.toFloat(), 0)
-            bar.dispatchTouchEvent(down); down.recycle()
-            assertFalse(ripple.state.contains(android.R.attr.state_pressed))
-            val cancel = MotionEvent.obtain(0, 10, MotionEvent.ACTION_CANCEL, cx.toFloat(), cy.toFloat(), 0)
-            bar.dispatchTouchEvent(cancel); cancel.recycle()
-        }
+        val down = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, cx.toFloat(), cy.toFloat(), 0)
+        bar.dispatchTouchEvent(down); down.recycle()
+        assertFalse(ripple.state.contains(android.R.attr.state_pressed))
+        val cancel = MotionEvent.obtain(0, 10, MotionEvent.ACTION_CANCEL, cx.toFloat(), cy.toFloat(), 0)
+        bar.dispatchTouchEvent(cancel); cancel.recycle()
+        bitmap.recycle()
     }
 
     @Test fun startupTestingDoesNotCallManualTestAndNewConnectingClearsOldFailure() = withBar { bar, _, _ ->

@@ -74,6 +74,7 @@
              materialSwitchStyle 覆盖 Material 1.7+ 的 MaterialSwitch。 -->
         <item name="switchStyle">@style/Widget.SagerNet.Switch</item>
         <item name="materialSwitchStyle">@style/Widget.SagerNet.Switch</item>
+        <item name="android:switchStyle">@style/Widget.SagerNet.Switch</item>
 
     </style>
 
@@ -142,12 +143,12 @@
         <item name="materialButtonStyle">@style/Widget.SagerNet.Button</item>
 
         <!-- 与 Theme.SagerNet.Base 保持一致（此主题不继承 Base）：全局开关样式；
-             按压底色同样保持系统默认（见 Base 内注释）。 -->
+             按压底色同样保持系统默认（见 Base 内注释）。
+             android:switchStyle 供偏好页 widgetLayout 里的框架原生 Switch 使用——
+             它只读框架命名空间的 switchStyle，不读 appcompat 的。 -->
         <item name="switchStyle">@style/Widget.SagerNet.Switch</item>
         <item name="materialSwitchStyle">@style/Widget.SagerNet.Switch</item>
-
-        <item name="switchStyle">@style/Widget.SagerNet.Switch</item>
-        <item name="materialSwitchStyle">@style/Widget.SagerNet.Switch</item>
+        <item name="android:switchStyle">@style/Widget.SagerNet.Switch</item>
 
         <item name="android:dialogCornerRadius">@dimen/dialog_corner_radius</item>
 
@@ -185,6 +186,7 @@
              才会与全应用一致（用户代理弹窗、本地代理设置弹窗等）。 -->
         <item name="switchStyle">@style/Widget.SagerNet.Switch</item>
         <item name="materialSwitchStyle">@style/Widget.SagerNet.Switch</item>
+        <item name="android:switchStyle">@style/Widget.SagerNet.Switch</item>
         <item name="colorLayerLow">@color/layer_low</item>
         <item name="colorLayerHigh">@color/layer_high</item>
         <item name="colorLayerStroke">@color/layer_stroke</item>
@@ -287,6 +289,7 @@
         <!-- 底部弹层的内容视图同样吃不到 app 主题的 switchStyle，显式补上绿色开关。 -->
         <item name="switchStyle">@style/Widget.SagerNet.Switch</item>
         <item name="materialSwitchStyle">@style/Widget.SagerNet.Switch</item>
+        <item name="android:switchStyle">@style/Widget.SagerNet.Switch</item>
     </style>
 
     <style name="ShapeAppearanceOverlay.SagerNet.Button" parent="">

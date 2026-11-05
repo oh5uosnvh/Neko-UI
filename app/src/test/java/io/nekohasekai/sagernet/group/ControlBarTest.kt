@@ -6,7 +6,6 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.RippleDrawable
 import android.os.Looper
 import android.os.Parcelable
 import android.util.SparseArray
@@ -104,8 +103,7 @@ class ControlBarTest {
     }
 
     private fun capsuleColor(bar: ControlBar): Int {
-        return (((bar.box(R.id.capsule).background as RippleDrawable).getDrawable(0)) as GradientDrawable)
-            .color!!.defaultColor
+        return (bar.box(R.id.capsule).background as GradientDrawable).color!!.defaultColor
     }
 
     @Test fun mergeInflatesOnceAndColdStateHasNoInventedMeasurements() = withBar { bar, _ ->
