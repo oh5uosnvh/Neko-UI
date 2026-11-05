@@ -73,6 +73,10 @@ class SwitchThemeContractTest {
         assertEquals("@drawable/switch_track_sagernet", items["android:track"])
         assertEquals("@color/switch_thumb_color", items["android:thumbTint"])
         assertEquals("@color/switch_track_color", items["android:trackTint"])
+        // 框架原生 Switch 会把 textOn/textOff 画进轨道（「已开启/已关闭」芝麻小字），
+        // 必须置空 —— 样式里必须带这两个空 item。
+        assertTrue("switch style must blank textOn", "android:textOn" in items)
+        assertTrue("switch style must blank textOff", "android:textOff" in items)
 
         val green = colorNamed("switch_checked_green")
         val argb = green.removePrefix("#").toLong(16).let {
@@ -82,6 +86,18 @@ class SwitchThemeContractTest {
         val g = (argb shr 8) and 0xff
         val b = argb and 0xff
         assertTrue("checked track #$green must be green (r=$r g=$g b=$b)", g > r && g > b)
+    }
+
+    /** 开关尺寸必须按 Karing 实测复刻：轨道内层 62x24dp、thumb 22dp，不再是 36x16 的芝麻尺寸。 */
+    @Test fun switchDrawablesMatchKaringProportions() {
+        val track = File(app, "src/main/res/drawable/switch_track_sagernet.xml").readText()
+        assertTrue("track width 62dp", "android:width=\"62dp\"" in track)
+        assertTrue("track height 24dp", "android:height=\"24dp\"" in track)
+        val thumb = File(app, "src/main/res/drawable/switch_thumb_sagernet.xml").readText()
+        assertTrue("thumb 22dp", "android:width=\"22dp\"" in thumb)
+        // 夜间未选中 track 必须换暗灰，不能夜间还发白。
+        val night = File(app, "src/main/res/values-night/colors.xml").readText()
+        assertTrue("night switch_track_off override missing", "switch_track_off" in night)
     }
 
     /** 偏好页的 SwitchPreference 默认 widgetLayout 是框架原生 Switch（无 style 属性）。 */

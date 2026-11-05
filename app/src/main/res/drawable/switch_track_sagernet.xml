@@ -1,35 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 开关 track：绿色圆角胶囊（选中）/ 灰色胶囊（未选中）。
-     内层 36x16dp、圆角 8dp = 全胶囊；四周 inset 3dp 后与 22dp 的 thumb 同高。
-     颜色同时由 color/switch_track_color 以 tint 形式再声明一遍（见 Widget.SagerNet.Switch），
-     两处引用同一组颜色资源，保证 SwitchMaterial / SwitchCompat / Switch 三种实现观感一致。 -->
+     内层 62x24dp、圆角 12dp = 全胶囊；四周 inset 2dp 后与 22dp 的 thumb 同高。
+     尺寸按 Karing 的开关实测复刻（约 67x25dp 视觉、大 thumb），框架原生 Switch
+     也会应用本样式（经 android:switchStyle）。 -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_checked="true">
         <inset
-            android:insetLeft="3dp"
-            android:insetTop="3dp"
-            android:insetRight="3dp"
-            android:insetBottom="3dp">
+            android:insetLeft="2dp"
+            android:insetTop="2dp"
+            android:insetRight="2dp"
+            android:insetBottom="2dp">
             <shape android:shape="rectangle">
                 <size
-                    android:width="36dp"
-                    android:height="16dp" />
-                <corners android:radius="8dp" />
+                    android:width="62dp"
+                    android:height="24dp" />
+                <corners android:radius="12dp" />
                 <solid android:color="@color/switch_checked_green" />
             </shape>
         </inset>
     </item>
     <item>
         <inset
-            android:insetLeft="3dp"
-            android:insetTop="3dp"
-            android:insetRight="3dp"
-            android:insetBottom="3dp">
+            android:insetLeft="2dp"
+            android:insetTop="2dp"
+            android:insetRight="2dp"
+            android:insetBottom="2dp">
             <shape android:shape="rectangle">
                 <size
-                    android:width="36dp"
-                    android:height="16dp" />
-                <corners android:radius="8dp" />
+                    android:width="62dp"
+                    android:height="24dp" />
+                <corners android:radius="12dp" />
                 <solid android:color="@color/switch_track_off" />
             </shape>
         </inset>

@@ -311,6 +311,10 @@
         <item name="android:thumbTint">@color/switch_thumb_color</item>
         <item name="android:trackTint">@color/switch_track_color</item>
         <item name="useMaterialThemeColors">false</item>
+        <!-- 框架原生 Switch 会把 textOn/textOff（「已开启/已关闭」）画进轨道，
+             60dp 的胶囊里挤成芝麻小字。置空后只画胶囊本身。 -->
+        <item name="android:textOn"></item>
+        <item name="android:textOff"></item>
     </style>
 
     <!-- 设置/编辑参数选项行专用：只关按压底色（点击行为是直接弹弹窗/菜单，
