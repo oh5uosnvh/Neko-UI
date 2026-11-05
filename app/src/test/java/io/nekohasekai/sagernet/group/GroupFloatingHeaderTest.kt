@@ -13,6 +13,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.tabs.TabLayout
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.widget.GroupListEdgeLayout
+import io.nekohasekai.sagernet.widget.TitleBarLayout
 import io.nekohasekai.sagernet.widget.GroupTabPill
 import io.nekohasekai.sagernet.widget.ProfileNameTextView
 import io.nekohasekai.sagernet.widget.TwoColumnNameWrap
@@ -154,7 +155,7 @@ class GroupFloatingHeaderTest {
         assertEquals(tabs.height + 4, list.paddingTop)
         assertEquals(0, tabs.top)
         assertEquals(0, pager.top)
-        assertEquals(root.findViewById<View>(R.id.toolbar).bottom, edge.top)
+        assertEquals((root as TitleBarLayout).titleGlyphBottom.toInt(), edge.top)
         assertEquals(131, list.paddingBottom)
         tabs.visibility = View.GONE
         measure(root, 360)
