@@ -8,10 +8,11 @@ class Dns09PerformanceContractTest {
     private val app = sequenceOf(File("."), File("app")).first { File(it, "src/main/java").isDirectory }
     private fun source(name: String) = File(app, "src/main/java/io/nekohasekai/sagernet/ui/$name.kt").readText()
 
-    @Test fun startupWarmsBoundedSidebarPagesWithinTwoSeconds() {
+    @Test fun startupDoesNotPreinflateUnvisitedSidebarPages() {
         val main = source("MainActivity")
-        assertTrue(main.contains("DRAWER_WARM_START_MS = 240L"))
-        assertTrue(main.contains("DRAWER_WARM_INTERVAL_MS = 250L"))
+        assertFalse(main.contains("DRAWER_WARM_START_MS"))
+        assertFalse(main.contains("DRAWER_WARM_INTERVAL_MS"))
+        assertFalse(main.contains("drawerWarmup"))
         assertTrue(main.contains("setMaxLifecycle(fragment, Lifecycle.State.STARTED)"))
     }
 
