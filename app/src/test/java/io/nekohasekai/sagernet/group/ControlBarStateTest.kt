@@ -1,6 +1,5 @@
 package io.nekohasekai.sagernet.group
 
-import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.Application
 import android.content.res.Configuration
@@ -8,14 +7,16 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.drawable.Drawable
-import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Looper
-import android.util.TypedValue
+import android.provider.Settings
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.ContextThemeWrapper
 import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import io.nekohasekai.sagernet.R
@@ -87,86 +88,125 @@ class ControlBarStateTest {
             remaining -= step
         }
     }
-    private fun color(bar: ControlBar) =
-        (bar.box(R.id.capsule).background as GradientDrawable).color!!.defaultColor
-    private fun attr(context: ContextThemeWrapper, id: Int): Int = TypedValue().let {
-        assertTrue(context.theme.resolveAttribute(id, it, true))
-        if (it.resourceId != 0) context.resources.getColor(it.resourceId, context.theme) else it.data
+    private fun assertBareCapsule(bar: ControlBar) {
+        assertNull(bar.box(R.id.capsule).background)
+        assertNull(bar.box(R.id.capsule).foreground)
+    }
+    private fun assertNoTransform(bar: ControlBar) {
+        for (view in listOf(bar, bar.box(R.id.capsule), bar.box(R.id.capsule_pair),
+            bar.box(R.id.capsule_icon), bar.box(R.id.capsule_label))) {
+            assertNull(view.animation)
+            assertEquals(0f, view.rotation, 0f)
+            assertEquals(0f, view.rotationX, 0f)
+            assertEquals(0f, view.rotationY, 0f)
+            assertEquals(0f, view.translationX, 0f)
+            assertEquals(0f, view.translationY, 0f)
+            assertEquals(0f, view.translationZ, 0f)
+            assertEquals(1f, view.scaleX, 0f)
+            assertEquals(1f, view.scaleY, 0f)
+            if (view.id != R.id.capsule_pair) assertEquals(1f, view.alpha, 0f)
+        }
+    }
+    private fun assertVisual(bar: ControlBar, connected: Boolean) {
+        assertBareCapsule(bar)
+        assertNoTransform(bar)
+        assertEquals(bar.context.getString(if (connected) R.string.control_bar_connected
+            else R.string.control_bar_disconnected), bar.text(R.id.capsule_label).text.toString())
+        val icon = bar.findViewById<ImageView>(R.id.capsule_icon).drawable
+        assertNotNull(icon)
+        assertEquals(if (connected) R.drawable.ic_control_plane else R.drawable.ic_control_power,
+            shadowOf(requireNotNull(icon)).createdFromResId)
     }
     private fun assertNoAnimation(bar: ControlBar) {
-        for (name in listOf("fadeAnimator", "colorAnimator", "connectingAnimator")) assertNull(field(bar, name))
-        assertEquals(0f, bar.box(R.id.capsule_icon).rotation, 0f)
+        assertNull(field(bar, "fadeAnimator"))
+        assertBareCapsule(bar)
+        assertNoTransform(bar)
         assertEquals(1f, bar.box(R.id.capsule_pair).alpha, 0f)
     }
 
-    @Test fun connectingIsRealAndDuplicateStateKeepsItsAnimatorAndLock() = withBar { bar, _, _ ->
+    @Test fun connectingKeepsPowerVisualWithoutAnimationButRetainsAccessibilityAndServiceLock() = withBar { bar, _, _ ->
         var toggles = 0
         bar.onToggle = { toggles++ }
-        bar.changeState(BaseService.State.Connecting)
-        val fade = field(bar, "fadeAnimator")
-        bar.changeState(BaseService.State.Connecting)
-        assertSame(fade, field(bar, "fadeAnimator"))
-        bar.box(R.id.capsule).performClick()
-        assertEquals(0, toggles)
-        assertFalse(bar.box(R.id.capsule).isSelected)
-        assertFalse(bar.box(R.id.capsule).isEnabled)
-        advance(180)
-        assertEquals(bar.context.getString(R.string.control_bar_connecting), bar.text(R.id.capsule_label).text)
-        val spin = field(bar, "connectingAnimator") as ObjectAnimator
-        assertTrue(spin.isRunning)
-        spin.currentPlayTime = 225
-        assertTrue(bar.box(R.id.capsule_icon).rotation > 0f)
-        bar.changeState(BaseService.State.Connecting)
-        assertSame(spin, field(bar, "connectingAnimator"))
-        assertTrue(bar.box(R.id.capsule_icon).rotation > 0f)
+        repeat(3) {
+            bar.changeState(BaseService.State.Connecting)
+            assertVisual(bar, connected = false)
+            assertNoAnimation(bar)
+            assertEquals(bar.context.getString(R.string.control_bar_connecting),
+                bar.box(R.id.capsule).contentDescription)
+            bar.box(R.id.capsule).performClick()
+            assertEquals(0, toggles)
+            assertFalse(bar.box(R.id.capsule).isSelected)
+            assertFalse(bar.box(R.id.capsule).isEnabled)
+            advance(1000) // No startup spinner or optimistic plane, even after waiting.
+            assertVisual(bar, connected = false)
+            assertNoAnimation(bar)
+        }
         bar.changeState(BaseService.State.Stopping)
-        advance(180)
-        assertEquals(bar.context.getString(R.string.control_bar_disconnected), bar.text(R.id.capsule_label).text)
+        assertVisual(bar, connected = false)
         assertFalse(bar.box(R.id.capsule).isEnabled)
         assertNoAnimation(bar)
-    }
-
-    @Test fun fadeHasRealIntermediateFramesWhileAllStatesKeepTheLightThemeFill() = withBar { bar, _, context ->
-        val light=attr(context,R.attr.colorMaterial300)
-        assertEquals(light,color(bar))
-        bar.changeState(BaseService.State.Connected)
-        val fade=field(bar,"fadeAnimator") as ValueAnimator
-        fade.currentPlayTime=32
-        assertTrue(bar.box(R.id.capsule_pair).alpha>0f && bar.box(R.id.capsule_pair).alpha<1f)
-        assertEquals(light,color(bar))
-        bar.changeState(BaseService.State.Connected)
-        assertSame(fade,field(bar,"fadeAnimator"))
-        advance(180)
-        assertEquals(light,color(bar))
-        assertEquals(bar.context.getString(R.string.control_bar_connected),bar.text(R.id.capsule_label).text)
+        bar.changeState(BaseService.State.Stopped)
+        assertVisual(bar, connected = false)
+        assertTrue(bar.box(R.id.capsule).isEnabled)
         assertNoAnimation(bar)
     }
 
-    @Test fun bluePinkAmberUseTheirOwnLivePrimaryAnd300WithoutCrossThemeColorLeakage() {
-        // Resolve by name so this regression coexists with the host-owned new Pink palette.
+    @Test fun eachDirectionUsesOne150MsPairFadeWithoutFillOrTransformsAndDuplicatesDoNotRestart() = withBar { bar, _, _ ->
+        for (connected in listOf(true, false)) {
+            val state = if (connected) BaseService.State.Connected else BaseService.State.Stopped
+            bar.changeState(state)
+            val fade = field(bar, "fadeAnimator") as ValueAnimator
+            val pair = bar.box(R.id.capsule_pair)
+            assertEquals(150L, fade.duration)
+            assertEquals(0, fade.repeatCount)
+            assertVisual(bar, !connected)
+            fade.currentPlayTime = 37
+            assertEquals(1f - 74f / 150f, pair.alpha, .001f)
+            assertVisual(bar, !connected)
+            bar.changeState(state)
+            assertSame(fade, field(bar, "fadeAnimator"))
+            assertEquals(1f - 74f / 150f, pair.alpha, .001f)
+            fade.currentPlayTime = 75
+            assertEquals(0f, pair.alpha, .001f)
+            assertVisual(bar, connected)
+            fade.currentPlayTime = 112
+            assertEquals(224f / 150f - 1f, pair.alpha, .001f)
+            assertVisual(bar, connected)
+            bar.changeState(state)
+            assertSame(fade, field(bar, "fadeAnimator"))
+            advance(180)
+            assertFalse(fade.isRunning)
+            assertVisual(bar, connected)
+            assertNoAnimation(bar)
+            bar.changeState(state) // A settled duplicate must not start a second fade.
+            assertVisual(bar, connected)
+            assertNoAnimation(bar)
+        }
+    }
+
+    @Test fun bluePinkAmberStayBareInEveryStateAndAfterLiveThemeChanges() {
+        // Resolve by name so this regression coexists with the host-owned Pink palette.
         val pink = ApplicationProviderStyle.pink()
-        val seenPrimary = mutableSetOf<Int>()
-        val seenLight = mutableSetOf<Int>()
         for (theme in listOf(R.style.Theme_SagerNet_Blue, pink, R.style.Theme_SagerNet_Amber)) {
             for (night in listOf(false, true)) withBar(theme, night) { bar, _, context ->
-                val light = attr(context, R.attr.colorMaterial300)
-                val primary = attr(context, R.attr.colorPrimary)
-                seenPrimary += primary; seenLight += light
-                assertEquals(light, color(bar))
-                bar.changeState(BaseService.State.Connecting); advance(180)
-                assertEquals(light, color(bar))
-                bar.changeState(BaseService.State.Connected); advance(180)
-                assertEquals(light, color(bar))
-                bar.changeState(BaseService.State.Stopped); advance(180)
-                assertEquals(light, color(bar))
+                for (state in BaseService.State.values()) {
+                    bar.changeState(state)
+                    assertBareCapsule(bar)
+                    advance(180)
+                    assertVisual(bar, state == BaseService.State.Connected)
+                    assertNoAnimation(bar)
+                    val capsule = bar.box(R.id.capsule)
+                    capsule.isPressed = true
+                    assertBareCapsule(bar)
+                    capsule.isPressed = false
+                }
                 context.theme.applyStyle(R.style.Theme_SagerNet_Amber, true)
-                bar.changeState(BaseService.State.Stopped) // Same-state acknowledgement resolves a changed theme.
+                bar.changeState(BaseService.State.Stopped)
                 advance(180)
-                assertEquals(attr(context, R.attr.colorMaterial300), color(bar))
+                assertVisual(bar, connected = false)
+                assertNoAnimation(bar)
             }
         }
-        assertEquals(3, seenPrimary.size)
-        assertEquals(3, seenLight.size)
     }
 
     @Test fun failuresAreRedButConnectedReadoutsCanRetryWithoutDroppingVpn() {
@@ -209,20 +249,35 @@ class ControlBarStateTest {
         }
     }
 
-    @Test fun hiddenParentWindowAndDetachCancelSpinAndDiscardLateMeasurements() = withBar { bar, host, _ ->
-        bar.changeState(BaseService.State.Connecting); advance(180)
-        val spin = field(bar, "connectingAnimator") as ObjectAnimator
+    @Test fun hiddenParentWindowAndDetachCancelFadesAndDiscardLateMeasurements() = withBar { bar, host, _ ->
+        bar.changeState(BaseService.State.Connected)
+        val parentFade = field(bar, "fadeAnimator") as ValueAnimator
+        parentFade.currentPlayTime = 32
         host.visibility = View.INVISIBLE
-        assertFalse(spin.isRunning); assertNoAnimation(bar)
+        assertFalse(parentFade.isRunning)
+        assertNoAnimation(bar)
+        assertVisual(bar, connected = true)
         advance(1200)
         assertNoAnimation(bar)
         host.visibility = View.VISIBLE
-        assertNotNull(field(bar, "connectingAnimator"))
+        assertNoAnimation(bar) // Visibility must settle, not replay the interrupted fade.
+        assertVisual(bar, connected = true)
+
+        bar.changeState(BaseService.State.Stopping)
+        val windowFade = field(bar, "fadeAnimator") as ValueAnimator
+        windowFade.currentPlayTime = 100
         windowVisibility(bar, View.INVISIBLE)
+        assertFalse(windowFade.isRunning)
         assertNoAnimation(bar)
+        assertVisual(bar, connected = false)
+        bar.changeState(BaseService.State.Connected) // Hidden service acknowledgements settle immediately.
+        assertNoAnimation(bar)
+        assertVisual(bar, connected = true)
         windowVisibility(bar, View.VISIBLE)
-        bar.changeState(BaseService.State.Connected); advance(180)
+        assertNoAnimation(bar)
+
         bar.showTesting(); bar.updateSpeed(10_000, 20_000)
+        bar.showLatency(42) // Pending minimum-duration completion must also be discarded.
         bar.visibility = View.GONE
         assertNoAnimation(bar)
         bar.showLatency(999); bar.showFailure("late"); bar.updateSpeed(1_000_000, 2_000_000); advance(250)
@@ -231,23 +286,55 @@ class ControlBarStateTest {
         bar.visibility = View.VISIBLE
         assertTrue(bar.box(R.id.latency_box).isEnabled)
         assertEquals("-- ms", bar.text(R.id.latency).text.toString())
-        bar.changeState(BaseService.State.Connecting); advance(180)
-        host.removeView(bar)
+        assertVisual(bar, connected = true)
         assertNoAnimation(bar)
+
+        bar.changeState(BaseService.State.Stopped); advance(180)
+        bar.changeState(BaseService.State.Connected)
+        val detachFade = field(bar, "fadeAnimator") as ValueAnimator
+        detachFade.currentPlayTime = 32
+        bar.showTesting(); bar.showLatency(77)
+        host.removeView(bar)
+        assertFalse(detachFade.isRunning)
+        assertNoAnimation(bar)
+        bar.showFailure("late detached failure"); bar.updateSpeed(1_000_000, 2_000_000)
         advance(1200)
         assertNoAnimation(bar)
+        assertEquals("-- ms", bar.text(R.id.latency).text.toString())
+        host.addView(bar, FrameLayout.LayoutParams(584, 152))
+        advance(180)
+        assertVisual(bar, connected = true)
+        assertNoAnimation(bar)
+        assertTrue(bar.box(R.id.capsule).isEnabled)
+        assertTrue(bar.box(R.id.latency_box).isEnabled)
+        assertEquals("-- ms", bar.text(R.id.latency).text.toString())
+        assertEquals("▼ -- kB/s", bar.text(R.id.speed_down).text.toString())
+        assertEquals("▲ -- kB/s", bar.text(R.id.speed_up).text.toString())
+        assertEquals(View.GONE, bar.box(R.id.latency_progress).visibility)
     }
 
     @Test fun rapidReversalCancelsOldFadeAndClearPreservesPendingPermission() = withBar { bar, _, _ ->
-        bar.changeState(BaseService.State.Connecting)
-        val oldFade = field(bar, "fadeAnimator") as ValueAnimator
-        oldFade.currentPlayTime = 50
-        bar.changeState(BaseService.State.Connected)
-        assertFalse(oldFade.isRunning)
-        bar.changeState(BaseService.State.Idle)
-        advance(180)
-        assertNoAnimation(bar)
-        assertEquals(bar.context.getString(R.string.control_bar_disconnected), bar.text(R.id.capsule_label).text)
+        // Interrupt on both sides of the icon swap; no cancelled callback may restore an old state.
+        for (playTime in listOf(32L, 100L)) {
+            bar.changeState(BaseService.State.Connected)
+            val oldFade = field(bar, "fadeAnimator") as ValueAnimator
+            oldFade.currentPlayTime = playTime
+            bar.changeState(BaseService.State.Connecting)
+            val reverseFade = field(bar, "fadeAnimator") as ValueAnimator
+            assertFalse(oldFade.isRunning)
+            assertNotSame(oldFade, reverseFade)
+            reverseFade.currentPlayTime = 32
+            bar.changeState(BaseService.State.Stopping)
+            bar.changeState(BaseService.State.Stopped)
+            bar.changeState(BaseService.State.Idle)
+            assertSame(reverseFade, field(bar, "fadeAnimator")) // Same disconnected visual, no restart.
+            advance(250)
+            assertFalse(reverseFade.isRunning)
+            assertNoAnimation(bar)
+            assertVisual(bar, connected = false)
+            assertFalse(bar.box(R.id.capsule).isSelected)
+            assertTrue(bar.box(R.id.capsule).isEnabled)
+        }
         var toggles = 0; bar.onToggle = { toggles++ }
         bar.box(R.id.capsule).performClick()
         bar.clearMeasurements()
@@ -255,9 +342,68 @@ class ControlBarStateTest {
         bar.visibility = View.VISIBLE
         bar.box(R.id.capsule).performClick()
         assertEquals(1, toggles)
+        assertFalse(bar.box(R.id.capsule).isEnabled)
+        assertVisual(bar, connected = false)
+        assertNoAnimation(bar)
         bar.changeState(BaseService.State.Idle)
         bar.box(R.id.capsule).performClick()
         assertEquals(2, toggles)
+    }
+
+    @Test fun disabledSystemAnimationsSettleImmediatelyAndVisibleSyncNeverClearsReadouts() = withBar { bar, _, _ ->
+        val resolver = bar.context.contentResolver
+        val key = Settings.Global.ANIMATOR_DURATION_SCALE
+        val previousScale = Settings.Global.getFloat(resolver, key, 1f)
+        try {
+            // Robolectric 4.14.1 ShadowSettings forwards this to ShadowValueAnimator.setDurationScale.
+            // The latter is protected: do not call a nonexistent public shadow setter.
+            Settings.Global.putFloat(resolver, key, 0f)
+            assertFalse(ValueAnimator.areAnimatorsEnabled())
+            for (state in listOf(BaseService.State.Connecting, BaseService.State.Connected,
+                BaseService.State.Stopping, BaseService.State.Stopped, BaseService.State.Idle)) {
+                bar.changeState(state) // Deliberately no clock advance before these assertions.
+                assertVisual(bar, state == BaseService.State.Connected)
+                assertNoAnimation(bar)
+                assertEquals(state == BaseService.State.Connected, bar.box(R.id.capsule).isSelected)
+                assertEquals(state != BaseService.State.Connecting && state != BaseService.State.Stopping,
+                    bar.box(R.id.capsule).isEnabled)
+            }
+            bar.changeState(BaseService.State.Connected)
+            bar.updateSpeed(1_000_000, 2_000_000)
+            bar.showLatency(42)
+            var rateWrites = 0
+            val watcher = object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                override fun afterTextChanged(s: Editable?) { rateWrites++ }
+            }
+            bar.text(R.id.speed_down).addTextChangedListener(watcher)
+            bar.text(R.id.speed_up).addTextChangedListener(watcher)
+            try {
+                repeat(3) {
+                    // Exercises syncAnimationVisibility while actually visible: animation preference
+                    // alone is not a reason to invalidate rates, latency, or the readout controls.
+                    windowVisibility(bar, View.VISIBLE)
+                    bar.changeState(BaseService.State.Connected)
+                    assertVisual(bar, connected = true)
+                    assertNoAnimation(bar)
+                    assertEquals("▼ 2.00 MB/s", bar.text(R.id.speed_down).text.toString())
+                    assertEquals("▲ 1.00 MB/s", bar.text(R.id.speed_up).text.toString())
+                    assertEquals("42 ms", bar.text(R.id.latency).text.toString())
+                    assertTrue(bar.box(R.id.speed_box).isEnabled)
+                    assertTrue(bar.box(R.id.latency_box).isEnabled)
+                }
+                assertEquals("no transient reset of valid rates", 0, rateWrites)
+                advance(250)
+                assertNoAnimation(bar)
+                assertEquals(0, rateWrites)
+            } finally {
+                bar.text(R.id.speed_down).removeTextChangedListener(watcher)
+                bar.text(R.id.speed_up).removeTextChangedListener(watcher)
+            }
+        } finally {
+            Settings.Global.putFloat(resolver, key, previousScale)
+        }
     }
 
     @Test
@@ -267,7 +413,7 @@ class ControlBarStateTest {
         assertTrue(bar.foreground is RippleDrawable)
         assertNull(bar.box(R.id.speed_box).background)
         assertNull(bar.box(R.id.latency_box).background)
-        assertNotNull(bar.box(R.id.capsule).foreground)
+        assertBareCapsule(bar)
         assertTrue(bar.clipToOutline)
         val mask = field(bar, "sideMask") as Drawable
         mask.setBounds(0, 0, bar.width, bar.height)
@@ -297,9 +443,15 @@ class ControlBarStateTest {
         }
         val down = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, cx.toFloat(), cy.toFloat(), 0)
         bar.dispatchTouchEvent(down); down.recycle()
+        assertBareCapsule(bar)
+        advance(64) // A held press must not introduce a toggle fill or trigger the side ripple.
+        assertBareCapsule(bar)
+        assertNoTransform(bar)
         assertFalse(ripple.state.contains(android.R.attr.state_pressed))
-        val cancel = MotionEvent.obtain(0, 10, MotionEvent.ACTION_CANCEL, cx.toFloat(), cy.toFloat(), 0)
+        val cancel = MotionEvent.obtain(0, 80, MotionEvent.ACTION_CANCEL, cx.toFloat(), cy.toFloat(), 0)
         bar.dispatchTouchEvent(cancel); cancel.recycle()
+        assertBareCapsule(bar)
+        assertFalse(ripple.state.contains(android.R.attr.state_pressed))
         bitmap.recycle()
     }
 

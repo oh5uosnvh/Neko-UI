@@ -1,5 +1,6 @@
 package io.nekohasekai.sagernet.group
 
+import android.animation.ValueAnimator
 import android.app.Application
 import android.os.Looper
 import android.view.View
@@ -18,12 +19,14 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.LooperMode
 import org.robolectric.shadows.ShadowChoreographer
 import java.time.Duration
 
 /** Preference listeners fire on Default workers (dns09 crash); the bar must marshal to main. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class)
+@LooperMode(LooperMode.Mode.PAUSED)
 class ControlBarThreadSafetyTest {
     @Before fun pauseFrames() {
         ShadowChoreographer.setPaused(true)
@@ -58,6 +61,46 @@ class ControlBarThreadSafetyTest {
         worker.start(); worker.join(5000)
         assertFalse("worker threw ${failure[0]}", worker.isAlive)
         assertNull("worker threw: ${failure[0]?.javaClass} ${failure[0]?.message}", failure[0])
+    }
+
+    private fun fade(bar: ControlBar): ValueAnimator? =
+        ControlBar::class.java.getDeclaredField("fadeAnimator").apply { isAccessible = true }
+            .get(bar) as ValueAnimator?
+
+    @Test fun workerStateReportsApplyOnMainAndDuplicateConnectingDoesNotRestartFade() = withBar { bar ->
+        val capsule = bar.findViewById<View>(R.id.capsule)
+        onWorker(bar) { it.changeState(BaseService.State.Connecting) }
+        assertTrue("worker must not paint before the main queue runs", capsule.isSelected)
+        assertNull(fade(bar))
+        advance(16)
+        val stoppingFade = requireNotNull(fade(bar))
+        assertFalse(capsule.isSelected)
+        assertFalse(capsule.isEnabled)
+        assertEquals(bar.context.getString(R.string.control_bar_connecting), capsule.contentDescription)
+        onWorker(bar) { it.changeState(BaseService.State.Connecting) }
+        advance(16)
+        assertSame(stoppingFade, fade(bar))
+        advance(180)
+        assertFalse(stoppingFade.isRunning)
+        assertNull(fade(bar))
+        assertEquals(bar.context.getString(R.string.control_bar_disconnected),
+            bar.findViewById<TextView>(R.id.capsule_label).text.toString())
+        assertEquals(1f, bar.findViewById<View>(R.id.capsule_pair).alpha, 0f)
+        assertEquals(0f, bar.findViewById<View>(R.id.capsule_icon).rotation, 0f)
+        assertNull(capsule.background)
+        assertNull(capsule.foreground)
+        onWorker(bar) { it.changeState(BaseService.State.Connected) }
+        assertFalse(capsule.isSelected)
+        advance(200)
+        assertTrue(capsule.isSelected)
+        assertTrue(capsule.isEnabled)
+        assertNull(fade(bar))
+        assertEquals(bar.context.getString(R.string.control_bar_connected),
+            bar.findViewById<TextView>(R.id.capsule_label).text.toString())
+        assertEquals(1f, bar.findViewById<View>(R.id.capsule_pair).alpha, 0f)
+        assertEquals(0f, bar.findViewById<View>(R.id.capsule_icon).rotation, 0f)
+        assertNull(capsule.background)
+        assertNull(capsule.foreground)
     }
 
     @Test fun clearMeasurementsFromWorkerThreadDoesNotThrowAndAppliesOnMain() = withBar { bar ->

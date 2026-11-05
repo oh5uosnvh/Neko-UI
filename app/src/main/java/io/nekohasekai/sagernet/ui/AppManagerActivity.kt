@@ -84,7 +84,9 @@ class AppManagerActivity : ThemedActivity() {
             binding.itemicon.setImageDrawable(app.icon)
             binding.title.text = app.name
             binding.desc.text = "${app.packageName} (${app.uid})"
-            binding.itemcheck.isChecked = isProxiedApp(app)
+            binding.itemcheck.bind(app.packageName) {
+                binding.itemcheck.isChecked = isProxiedApp(app)
+            }
         }
 
         fun handlePayload(payloads: List<String>) {

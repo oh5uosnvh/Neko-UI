@@ -126,7 +126,7 @@
 
             </LinearLayout>
 
-            <androidx.appcompat.widget.SwitchCompat
+            <io.nekohasekai.sagernet.widget.ReferenceSwitch
                 android:layout_marginBottom="2dp"
                 android:id="@+id/enable"
                 android:layout_width="wrap_content"

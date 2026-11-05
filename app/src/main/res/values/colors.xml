@@ -362,10 +362,9 @@
     -->
     <color name="segment_stroke">#4D000000</color>
 
-    <!-- 全局开关（iOS #34C759 风格）：选中 track 绿、未选中 track 灰、thumb 纯白。
-         未选中灰的夜间值在 values-night/colors.xml 覆盖；绿与白两种模式通用。 -->
-    <color name="switch_checked_green">#34C759</color>
-    <color name="switch_track_off">#E9E9EA</color>
+    <!-- JS palette: green replaces accent blue; the white thumb is shared by both modes. -->
+    <color name="switch_checked_green">#34D399</color>
+    <color name="switch_track_off">#CBD5E1</color>
     <color name="switch_thumb_white">#FFFFFF</color>
 
 </resources>

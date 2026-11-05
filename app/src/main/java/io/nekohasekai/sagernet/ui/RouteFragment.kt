@@ -421,8 +421,10 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 itemView.setOnClickListener(null)
                 itemView.isClickable = false
                 itemView.isFocusable = false
-                enableSwitch.setOnCheckedChangeListener(null)
-                enableSwitch.isChecked = rule.enabled
+                enableSwitch.bind(rule.id) {
+                    enableSwitch.setOnCheckedChangeListener(null)
+                    enableSwitch.isChecked = rule.enabled
+                }
                 enableSwitch.setOnCheckedChangeListener { _, isChecked ->
                     val ruleId = rule.id
                     rule.enabled = isChecked

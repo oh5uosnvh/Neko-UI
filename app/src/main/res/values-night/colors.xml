@@ -43,7 +43,7 @@
     <!-- 连体按钮 / 左滑删除按钮的描边：**夜间白**（日间在 values/colors.xml 是黑） -->
     <color name="segment_stroke">#4DFFFFFF</color>
 
-    <!-- 开关：夜间未选中 track 换 iOS 暗灰；选中绿与 thumb 白不变 -->
-    <color name="switch_track_off">#39393D</color>
+    <!-- JS dark border2; checked green and white thumb remain unchanged. -->
+    <color name="switch_track_off">#3D5175</color>
 
 </resources>

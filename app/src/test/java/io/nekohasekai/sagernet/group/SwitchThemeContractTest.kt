@@ -10,13 +10,11 @@ import org.junit.Test
 
 /**
  * 用户核验契约（2026-11-05）：
- * 1. 全应用开关（含偏好页 widgetLayout 里的框架原生 Switch、弹窗、底部弹层）
- *    必须全部走 @style/Widget.SagerNet.Switch（绿色胶囊 track + 白 thumb）。
- *    关键点：androidx.preference 的 preference_widget_switch.xml 是不带 style 的
- *    框架 <Switch>，它只读 android:switchStyle（框架命名空间），不读 appcompat 的
- *    switchStyle —— 两条命名空间都要挂。
- * 2. 启动按钮框（控制条）源码 = 1.4.2-mg-pre3（构建 273）发布版源码：
- *    单一外框涟漪 + 胶囊镂空（CapsuleExclusionMask），无逐格涟漪、无胶囊涟漪。
+ * 1. 普通开关必须统一走 ReferenceSwitch：44x24dp、18dp thumb、300ms 双曲线。
+ *    默认框架 widgetLayout 本地覆盖，保留 android:id/switch_widget 与行点击；
+ *    三条主题命名空间是配色 fallback，不能替代真实 widget/绑定覆盖测试。
+ * 2. 控制条中央按钮仅保留图标＋文字的淡出淡入，无背景/按压底色；
+ *    两侧读数继续使用单一外框反馈与中央区域镂空，避免改动其他交互。
  */
 class SwitchThemeContractTest {
     private val app = sequenceOf(File("."), File("app")).first {
@@ -88,47 +86,64 @@ class SwitchThemeContractTest {
         assertTrue("checked track #$green must be green (r=$r g=$g b=$b)", g > r && g > b)
     }
 
-    /** 开关尺寸必须按 Karing 实测复刻：轨道内层 62x24dp、thumb 22dp，不再是 36x16 的芝麻尺寸。 */
-    @Test fun switchDrawablesMatchKaringProportions() {
+    /** JS geometry resources are fallback only; runtime geometry is tested separately. */
+    @Test fun switchDrawablesMatchReferenceProportions() {
         val track = File(app, "src/main/res/drawable/switch_track_sagernet.xml").readText()
-        assertTrue("track width 62dp", "android:width=\"62dp\"" in track)
+        assertTrue("track width 44dp", "android:width=\"44dp\"" in track)
         assertTrue("track height 24dp", "android:height=\"24dp\"" in track)
+        assertFalse("track must not add optical insets", "<inset" in track)
         val thumb = File(app, "src/main/res/drawable/switch_thumb_sagernet.xml").readText()
-        assertTrue("thumb 22dp", "android:width=\"22dp\"" in thumb)
-        // 夜间未选中 track 必须换暗灰，不能夜间还发白。
+        assertTrue("thumb 18dp", "android:width=\"18dp\"" in thumb)
+        assertEquals("#CBD5E1", colorNamed("switch_track_off"))
         val night = File(app, "src/main/res/values-night/colors.xml").readText()
-        assertTrue("night switch_track_off override missing", "switch_track_off" in night)
+        assertTrue("night JS border2", "#3D5175" in night)
     }
 
-    /** 偏好页的 SwitchPreference 默认 widgetLayout 是框架原生 Switch（无 style 属性）。 */
-    @Test fun preferenceSwitchWidgetIsBareFrameworkSwitch() {
-        val aar = File(
-            System.getProperty("user.home"), ".gradle/caches/modules-2/files-2.1"
-        )
-        assertTrue("gradle cache must exist for this contract", aar.isDirectory)
-        val layout = aar.walkTopDown()
-            .firstOrNull { it.name == "preference-1.2.0.aar" }
-        // AAR 解包不是必选项：找不到缓存时跳过（CI 上 缓存必然存在）。
-        if (layout == null) return
-        val xml = java.util.zip.ZipFile(layout).use { zip ->
-            zip.getInputStream(zip.getEntry("res/layout/preference_widget_switch.xml"))
-                .readBytes().decodeToString()
+    @Test fun preferenceWidgetOverrideKeepsNativeIdAndRowInteraction() {
+        val xml = File(app, "src/main/res/layout/preference_widget_switch.xml").readText()
+        assertTrue("shared widget must override library layout", "<io.nekohasekai.sagernet.widget.ReferenceSwitch" in xml)
+        assertTrue("native preference ID", "@android:id/switch_widget" in xml)
+        assertTrue("row-owned click", "android:clickable=\"false\"" in xml)
+        assertTrue("row-owned focus", "android:focusable=\"false\"" in xml)
+    }
+
+    @Test fun everyOrdinarySwitchEntryUsesSharedWidgetAndBindingScope() {
+        val resources = File(app, "src/main/res")
+        val oldTypes = Regex("<(?:Switch|SwitchPreference|androidx\\.appcompat\\.widget\\.SwitchCompat|com\\.google\\.android\\.material\\.(?:switchmaterial\\.SwitchMaterial|materialswitch\\.MaterialSwitch))(?=[\\s>])")
+        resources.walkTopDown().filter { it.extension == "xml" }.forEach {
+            assertFalse("legacy switch entry in ${it.name}", oldTypes.containsMatchIn(it.readText()))
         }
-        assertFalse("bare Switch must not pin a style attr", "style=".toRegex() in xml)
-        assertTrue("<Switch" in xml)
+        val xml = File(resources, "xml").walkTopDown().filter { it.extension == "xml" }
+            .joinToString("\n") { it.readText() }
+        assertEquals("all 54 ordinary preference switches remain covered", 54,
+            Regex("<io\\.nekohasekai\\.sagernet\\.widget\\.ReferenceSwitchPreference\\b").findAll(xml).count())
+        for (name in listOf("layout_route_item", "layout_apps_item", "layout_local_proxy_dialog")) {
+            assertTrue(name, "<io.nekohasekai.sagernet.widget.ReferenceSwitch" in
+                File(resources, "layout/$name.xml").readText())
+        }
+        val ua = File(app, "src/main/java/io/nekohasekai/sagernet/widget/UserAgentPreference.kt").readText()
+        assertTrue("UA dynamic switches", "ReferenceSwitch(context)" in ua)
+        assertFalse("no material switch fallback", "SwitchMaterial(" in ua)
+        val longClick = File(app, "src/main/java/moe/matsuri/nb4a/ui/LongClickSwitchPreference.kt").readText()
+        assertTrue("long-click preferences share binding scope", ": ReferenceSwitchPreference(" in longClick)
     }
 
-    /** 启动按钮框源码必须与 1.4.2-mg-pre3（构建 273）完全一致。 */
-    @Test fun controlBarSourceMatchesPre3Release() {
+    /** 最新需求：连接按钮无底色，只保留图标/文案的淡出淡入；两侧读数反馈不变。 */
+    @Test fun controlBarUsesOnlyBareIconLabelFade() {
         val bar = File(
             app, "src/main/java/io/nekohasekai/sagernet/widget/ControlBar.kt"
         ).readText()
-        // pre3 的实现特征：单一外框涟漪 + 胶囊镂空遮罩
-        assertTrue("pre3 外框涟漪缺失", "foreground = sideRipple" in bar)
-        assertTrue("pre3 胶囊镂空遮罩缺失", "class CapsuleExclusionMask" in bar)
-        assertTrue("pre3 胶囊背景挂载缺失", "capsule.background = capsuleBackground" in bar)
-        // 276/281 引入的逐格涟漪与胶囊涟漪必须不存在
-        assertFalse("逐格涟漪应已回退", "newSideBoxRipple" in bar)
-        assertFalse("胶囊涟漪应已回退", "newCapsuleRipple" in bar)
+        assertTrue("保留两侧读数的外框反馈", "foreground = sideRipple" in bar)
+        assertTrue("反馈不能盖住连接按钮", "class CapsuleExclusionMask" in bar)
+        assertTrue("连接按钮不得有胶囊底色", "capsule.background = null" in bar)
+        assertTrue("按压也不得产生底色", "capsule.foreground = null" in bar)
+        assertFalse("不得重新引入色彩动画", "capsuleBackground" in bar)
+        assertFalse("不得增加旋转中间态", "connectingAnimator" in bar)
+        assertFalse("两侧反馈范围不变", "newSideBoxRipple" in bar)
+        assertFalse("连接按钮不需要涟漪", "newCapsuleRipple" in bar)
+        val layout = File(app, "src/main/res/layout/layout_control_bar.xml").readText()
+            .substringAfter("android:id=\"@+id/capsule\"").substringBefore("<LinearLayout")
+        assertTrue("XML 首帧无底色", "android:background=\"@null\"" in layout)
+        assertTrue("XML 首帧无按压底色", "android:foreground=\"@null\"" in layout)
     }
 }

@@ -11,7 +11,6 @@ import androidx.core.content.res.TypedArrayUtils
 import androidx.preference.Preference
 import androidx.preference.PreferenceViewHolder
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.switchmaterial.SwitchMaterial
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.USER_AGENT
@@ -91,14 +90,14 @@ class UserAgentPreference
             orientation = LinearLayout.VERTICAL
             setPadding((20 * density).toInt(), (8 * density).toInt(), (20 * density).toInt(), 0)
         }
-        val switches = ArrayList<SwitchMaterial>(userAgentCandidates().size)
+        val switches = ArrayList<ReferenceSwitch>(userAgentCandidates().size)
         userAgentCandidates().forEachIndexed { index, ua ->
             val label = TextView(context).apply {
                 text = ua
                 maxLines = 2
                 textSize = 16f
             }
-            val switch = SwitchMaterial(context).apply {
+            val switch = ReferenceSwitch(context).apply {
                 isChecked = flags[index]
                 // The NekoBox default UA is the ever-present fallback: shown ON and
                 // fixed, because appending it to a clash header flips airports to

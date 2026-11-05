@@ -15,7 +15,6 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
-import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.content.Context
 import android.os.SystemClock
@@ -84,24 +83,16 @@ class ControlBar @JvmOverloads constructor(
     private var ready = false
     private var windowVisible = true
     private var failed = false
-    private val capsuleBackground = GradientDrawable().apply {
-        cornerRadius = 999f * resources.displayMetrics.density
-    }
-    private var capsuleColor = Color.TRANSPARENT
-    private var targetCapsuleColor = Color.TRANSPARENT
     private var fadeAnimator: ValueAnimator? = null
-    private var colorAnimator: ValueAnimator? = null
-    private var connectingAnimator: ObjectAnimator? = null
     private val sideMask = CapsuleExclusionMask(resources.displayMetrics.density)
     private val sideRipple = RippleDrawable(
         ColorStateList.valueOf(themeColor(android.R.attr.colorControlHighlight, R.color.control_bar_border)),
         null, sideMask,
     )
     private var sidePressed = false
-    private enum class Presentation { DISCONNECTED, CONNECTING, CONNECTED }
+    private enum class Presentation { DISCONNECTED, CONNECTED }
     private fun presentation(state: BaseService.State = currentState) = when (state) {
         BaseService.State.Connected -> Presentation.CONNECTED
-        BaseService.State.Connecting -> Presentation.CONNECTING
         else -> Presentation.DISCONNECTED
     }
 
@@ -132,8 +123,10 @@ class ControlBar @JvmOverloads constructor(
         latencyBox.setOnClickListener { requestReadoutAction() }
         capsule.setOnClickListener { requestToggle() }
         capsule.contentDescription = context.getString(R.string.control_bar_connect_action)
-        capsule.background = capsuleBackground
-        // A SINGLE outer-frame ripple, with a rounded capsule hole; never two box rectangles.
+        // Only the icon/label pair is visible; keep the 48dp click target transparent.
+        capsule.background = null
+        capsule.foreground = null
+        // Preserve the readouts' outer-frame feedback, but never paint the toggle target.
         foreground = sideRipple
         speedBox.background = null
         latencyBox.background = null
@@ -151,10 +144,10 @@ class ControlBar @JvmOverloads constructor(
         currentState = state
         togglePending = false
         capsule.isSelected = state == BaseService.State.Connected
-        capsule.contentDescription = context.getString(when (presentation()) {
-            Presentation.CONNECTED -> R.string.control_bar_disconnect_action
-            Presentation.CONNECTING -> R.string.control_bar_connecting
-            Presentation.DISCONNECTED -> R.string.control_bar_connect_action
+        capsule.contentDescription = context.getString(when {
+            state == BaseService.State.Connecting -> R.string.control_bar_connecting
+            state == BaseService.State.Connected -> R.string.control_bar_disconnect_action
+            else -> R.string.control_bar_connect_action
         })
         // Do not erase a measurement, release a test lock, or restart animations on duplicates.
         val completingStartup = previous == BaseService.State.Connecting && state == BaseService.State.Connected && testing
@@ -163,7 +156,6 @@ class ControlBar @JvmOverloads constructor(
         if (changedPresentation) {
             if (shouldAnimateCapsule()) animatePresentation() else settlePresentation()
         }
-        updateCapsuleColor(shouldAnimateCapsule()) // Resolve THIS view's current application theme each time.
         updateEnabledState()
     }
 
@@ -178,56 +170,30 @@ class ControlBar @JvmOverloads constructor(
         capsuleLabel.setText(when (presentation()) {
             Presentation.CONNECTED -> if (compactCapsule) R.string.control_bar_connected_compact
                 else R.string.control_bar_connected
-            Presentation.CONNECTING -> if (compactCapsule) R.string.control_bar_connecting_compact
-                else R.string.control_bar_connecting
             Presentation.DISCONNECTED -> if (compactCapsule) R.string.control_bar_disconnected_compact
                 else R.string.control_bar_disconnected
         })
         capsuleIcon.setColorFilter(resources.getColor(R.color.control_bar_text, context.theme))
         capsuleIcon.setImageDrawable(AppCompatResources.getDrawable(context, when (presentation()) {
             Presentation.CONNECTED -> R.drawable.ic_control_plane
-            Presentation.CONNECTING -> R.drawable.ic_control_connecting
             Presentation.DISCONNECTED -> R.drawable.ic_control_power
         }))
     }
 
-    private fun shouldAnimateCapsule() = ready && canShowReadouts()
-
-    private fun stopConnectingAnimation() {
-        connectingAnimator?.cancel()
-        connectingAnimator = null
-        capsuleIcon.rotation = 0f
-    }
-
-    private fun startConnectingAnimation() {
-        if (!shouldAnimateCapsule() || presentation() != Presentation.CONNECTING || connectingAnimator != null) return
-        val animator = ObjectAnimator.ofFloat(capsuleIcon, View.ROTATION, 0f, 360f).apply {
-            duration = 900L
-            repeatCount = ValueAnimator.INFINITE
-            interpolator = LinearInterpolator()
-        }
-        connectingAnimator = animator
-        animator.start()
-    }
+    private fun shouldAnimateCapsule() = ready && canShowReadouts() &&
+        (android.os.Build.VERSION.SDK_INT < 26 || ValueAnimator.areAnimatorsEnabled())
 
     private fun cancelPresentationAnimations() {
         fadeAnimator?.removeAllListeners()
         fadeAnimator?.removeAllUpdateListeners()
         fadeAnimator?.cancel()
         fadeAnimator = null
-        colorAnimator?.removeAllListeners()
-        colorAnimator?.removeAllUpdateListeners()
-        colorAnimator?.cancel()
-        colorAnimator = null
-        stopConnectingAnimation()
     }
 
     private fun settlePresentation() {
         cancelPresentationAnimations()
         findViewById<View>(R.id.capsule_pair).alpha = 1f
         updateCapsuleIcon()
-        updateCapsuleColor(false)
-        startConnectingAnimation()
     }
 
     private fun animatePresentation() {
@@ -243,7 +209,6 @@ class ControlBar @JvmOverloads constructor(
                 if (fraction >= .5f && !swapped) {
                     swapped = true
                     updateCapsuleIcon()
-                    startConnectingAnimation()
                 }
                 pair.alpha = if (fraction < .5f) initialAlpha * (1f - fraction * 2f)
                     else (fraction - .5f) * 2f
@@ -252,39 +217,11 @@ class ControlBar @JvmOverloads constructor(
                 override fun onAnimationEnd(animation: Animator) {
                     fadeAnimator = null
                     pair.alpha = 1f
-                    updateCapsuleIcon()
-                    startConnectingAnimation()
+                    if (!swapped) updateCapsuleIcon()
                 }
             })
         }
         fadeAnimator = animator
-        animator.start()
-    }
-
-    private fun updateCapsuleColor(animate: Boolean) {
-        val color = themeColor(R.attr.colorMaterial300, R.color.brand_primary_light)
-        if (animate && targetCapsuleColor == color && (colorAnimator != null || capsuleColor == color)) return
-        colorAnimator?.removeAllListeners()
-        colorAnimator?.removeAllUpdateListeners()
-        colorAnimator?.cancel()
-        colorAnimator = null
-        targetCapsuleColor = color
-        if (!animate || capsuleColor == Color.TRANSPARENT || capsuleColor == color) {
-            capsuleColor = color
-            capsuleBackground.setColor(color)
-            return
-        }
-        val animator = ValueAnimator.ofArgb(capsuleColor, color).apply {
-            duration = 150L
-            addUpdateListener {
-                capsuleColor = it.animatedValue as Int
-                capsuleBackground.setColor(capsuleColor)
-            }
-            addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) { colorAnimator = null }
-            })
-        }
-        colorAnimator = animator
         animator.start()
     }
 
@@ -555,19 +492,16 @@ class ControlBar @JvmOverloads constructor(
     }
 
     private fun syncAnimationVisibility() {
-        if (!shouldAnimateCapsule()) {
+        if (!canShowReadouts()) {
             cancelPresentationAnimations()
             findViewById<View>(R.id.capsule_pair).alpha = 1f
             updateCapsuleIcon()
-            updateCapsuleColor(false)
             sidePressed = false
             sideRipple.state = intArrayOf()
             sideRipple.jumpToCurrentState()
             clearMeasurements() // Preserve permission togglePending; discard old test presentation.
         } else if (fadeAnimator == null) {
             updateCapsuleIcon()
-            updateCapsuleColor(false)
-            startConnectingAnimation()
         }
         updateEnabledState() // Becoming visible re-enables testing without a fake state report.
     }

@@ -69,9 +69,8 @@
         <!-- 按压/触摸底色保持系统默认：启动胶囊、路由配置卡片、节点卡片等
              点击时要有按压底色。「设置/编辑参数选项行不要按压底色」只通过
              ThemeOverlay.SagerNet.SettingsHighlight 精确作用于偏好列表行。 -->
-        <!-- 全局开关样式：绿色胶囊 track + 白色圆 thumb（滑动动画是 Switch 自带的）。
-             switchStyle 覆盖 SwitchMaterial / SwitchCompat / SwitchPreference(Compat)，
-             materialSwitchStyle 覆盖 Material 1.7+ 的 MaterialSwitch。 -->
+        <!-- Ordinary switches use ReferenceSwitch for rendering and 300ms animation.
+             Keep all namespaces for theme-chain compatibility and fallback palette. -->
         <item name="switchStyle">@style/Widget.SagerNet.Switch</item>
         <item name="materialSwitchStyle">@style/Widget.SagerNet.Switch</item>
         <item name="android:switchStyle">@style/Widget.SagerNet.Switch</item>
@@ -300,19 +299,20 @@
         <item name="shapeAppearanceOverlay">@style/ShapeAppearanceOverlay.SagerNet.Button</item>
     </style>
 
-    <!-- 全局开关：绿色胶囊 track + 白色圆 thumb。
-         SwitchMaterial 的自动着色仅在 thumbTint 与 trackTint 均为空时生效，
-         这里显式给出非空 tint（与 drawable 同一组颜色），既锁定配色又杜绝
-         父样式（Widget.MaterialComponents.CompoundButton.Switch）继承下来的着色；
-         thumb 的滑动过渡是 SwitchCompat/SwitchMaterial 自带的位置动画，不受影响。 -->
+    <!-- Shared fallback palette. ReferenceSwitch supplies exact 44x24 geometry and both
+         300ms JS curves; theme-only drawables cannot replace the native widget. -->
     <style name="Widget.SagerNet.Switch" parent="Widget.MaterialComponents.CompoundButton.Switch">
         <item name="android:thumb">@drawable/switch_thumb_sagernet</item>
         <item name="android:track">@drawable/switch_track_sagernet</item>
         <item name="android:thumbTint">@color/switch_thumb_color</item>
         <item name="android:trackTint">@color/switch_track_color</item>
         <item name="useMaterialThemeColors">false</item>
-        <!-- 框架原生 Switch 会把 textOn/textOff（「已开启/已关闭」）画进轨道，
-             60dp 的胶囊里挤成芝麻小字。置空后只画胶囊本身。 -->
+        <item name="android:background">@null</item>
+        <item name="android:minWidth">44dp</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:switchMinWidth">44dp</item>
+        <item name="android:showText">false</item>
+        <item name="android:splitTrack">false</item>
         <item name="android:textOn"></item>
         <item name="android:textOff"></item>
     </style>

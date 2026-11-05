@@ -21,7 +21,7 @@ import moe.matsuri.nb4a.ui.*
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
-import androidx.appcompat.widget.SwitchCompat
+import io.nekohasekai.sagernet.widget.ReferenceSwitch
 import com.google.android.material.textfield.TextInputEditText
 import java.io.File
 
@@ -293,7 +293,7 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
     private fun showLocalProxySettingsDialog(preference: Preference) {
         val view = layoutInflater.inflate(R.layout.layout_local_proxy_dialog, null)
         val portField = view.findViewById<TextInputEditText>(R.id.proxyPort)
-        val allowAccessSwitch = view.findViewById<SwitchCompat>(R.id.allowAccessSwitch)
+        val allowAccessSwitch = view.findViewById<ReferenceSwitch>(R.id.allowAccessSwitch)
         val usernameField = view.findViewById<TextInputEditText>(R.id.proxyUsername)
         val passwordField = view.findViewById<TextInputEditText>(R.id.proxyPassword)
 

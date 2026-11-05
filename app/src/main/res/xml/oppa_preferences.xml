@@ -42,7 +42,7 @@
             app:key="certificatePinSHA256"
             app:title="@string/pinned_certchain_sha256"
             app:useSimpleSummaryProvider="true" />
-        <SwitchPreference
+        <io.nekohasekai.sagernet.widget.ReferenceSwitchPreference
             app:icon="@drawable/ic_notification_enhanced_encryption"
             app:key="allowInsecure"
             app:title="@string/allow_insecure" />

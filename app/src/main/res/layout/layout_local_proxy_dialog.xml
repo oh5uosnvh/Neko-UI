@@ -61,7 +61,7 @@
                     android:textColor="?android:attr/textColorSecondary" />
             </LinearLayout>
 
-            <androidx.appcompat.widget.SwitchCompat
+            <io.nekohasekai.sagernet.widget.ReferenceSwitch
                 android:id="@+id/allowAccessSwitch"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" />

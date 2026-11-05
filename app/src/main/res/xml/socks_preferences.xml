@@ -39,7 +39,7 @@
     </PreferenceCategory>
 
     <PreferenceCategory app:title="sing-box server">
-        <SwitchPreference
+        <io.nekohasekai.sagernet.widget.ReferenceSwitchPreference
             app:key="sUoT"
             app:title="UDP over TCP" />
     </PreferenceCategory>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AndroidX SwitchPreference's default resource, overridden locally. Keep its framework
+     ID and row-owned interaction; ReferenceSwitch IS android.widget.Switch for listeners. -->
+<io.nekohasekai.sagernet.widget.ReferenceSwitch
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/switch_widget"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:focusable="false"
+    android:clickable="false"
+    android:background="@null" />

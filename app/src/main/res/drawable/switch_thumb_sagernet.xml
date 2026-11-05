@@ -1,16 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 开关 thumb：纯白圆形，inset 1dp 后外框 24dp，在 24dp 高的胶囊 track 内
-     上下各留 1dp 边距。滑动过渡由 SwitchCompat/SwitchMaterial/Switch 自带的
-     thumb 位置动画完成，无需额外实现。 -->
-<inset xmlns:android="http://schemas.android.com/apk/res/android"
-    android:insetLeft="1dp"
-    android:insetTop="1dp"
-    android:insetRight="1dp"
-    android:insetBottom="1dp">
-    <shape android:shape="oval">
-        <size
-            android:width="22dp"
-            android:height="22dp" />
-        <solid android:color="@color/switch_thumb_white" />
-    </shape>
-</inset>
+<!-- Fallback resource; ReferenceSwitch draws the 18dp white thumb with an exact 3dp inset. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <size android:width="18dp" android:height="18dp" />
+    <solid android:color="@color/switch_thumb_white" />
+</shape>

@@ -1,37 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 开关 track：绿色圆角胶囊（选中）/ 灰色胶囊（未选中）。
-     内层 62x24dp、圆角 12dp = 全胶囊；四周 inset 2dp 后与 22dp 的 thumb 同高。
-     尺寸按 Karing 的开关实测复刻（约 67x25dp 视觉、大 thumb），框架原生 Switch
-     也会应用本样式（经 android:switchStyle）。 -->
+<!-- Fallback resource only; ReferenceSwitch owns exact measurement and 300ms transitions. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_checked="true">
-        <inset
-            android:insetLeft="2dp"
-            android:insetTop="2dp"
-            android:insetRight="2dp"
-            android:insetBottom="2dp">
-            <shape android:shape="rectangle">
-                <size
-                    android:width="62dp"
-                    android:height="24dp" />
-                <corners android:radius="12dp" />
-                <solid android:color="@color/switch_checked_green" />
-            </shape>
-        </inset>
+        <shape android:shape="rectangle">
+            <size android:width="44dp" android:height="24dp" />
+            <corners android:radius="12dp" />
+            <solid android:color="@color/switch_checked_green" />
+        </shape>
     </item>
     <item>
-        <inset
-            android:insetLeft="2dp"
-            android:insetTop="2dp"
-            android:insetRight="2dp"
-            android:insetBottom="2dp">
-            <shape android:shape="rectangle">
-                <size
-                    android:width="62dp"
-                    android:height="24dp" />
-                <corners android:radius="12dp" />
-                <solid android:color="@color/switch_track_off" />
-            </shape>
-        </inset>
+        <shape android:shape="rectangle">
+            <size android:width="44dp" android:height="24dp" />
+            <corners android:radius="12dp" />
+            <solid android:color="@color/switch_track_off" />
+        </shape>
     </item>
 </selector>

@@ -5,7 +5,6 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.os.Looper
 import android.os.Parcelable
 import android.util.SparseArray
@@ -102,8 +101,22 @@ class ControlBarTest {
         assertEquals("-- ms", bar.text(R.id.latency).text.toString())
     }
 
-    private fun capsuleColor(bar: ControlBar): Int {
-        return (bar.box(R.id.capsule).background as GradientDrawable).color!!.defaultColor
+    private fun assertBareCapsule(bar: ControlBar) {
+        val capsule = bar.box(R.id.capsule)
+        assertNull("the whole click target has no fill", capsule.background)
+        assertNull("the click target has no pressed/focused touch fill", capsule.foreground)
+        assertEquals(0f, bar.box(R.id.capsule_icon).rotation, 0f)
+    }
+
+    private fun assertCapsuleVisual(bar: ControlBar, connected: Boolean) {
+        assertBareCapsule(bar)
+        assertEquals(bar.context.getString(if (connected) R.string.control_bar_connected
+            else R.string.control_bar_disconnected), bar.text(R.id.capsule_label).text.toString())
+        val drawable = bar.findViewById<ImageView>(R.id.capsule_icon).drawable
+        assertNotNull(drawable)
+        assertEquals(if (connected) R.drawable.ic_control_plane else R.drawable.ic_control_power,
+            shadowOf(requireNotNull(drawable)).createdFromResId)
+        assertEquals(1f, bar.box(R.id.capsule_pair).alpha, 0f)
     }
 
     @Test fun mergeInflatesOnceAndColdStateHasNoInventedMeasurements() = withBar { bar, _ ->
@@ -118,28 +131,27 @@ class ControlBarTest {
         assertTrue(bar.box(R.id.capsule).isEnabled)
         assertFalse(bar.box(R.id.speed_box).isEnabled)
         assertFalse(bar.box(R.id.latency_box).isEnabled)
-        assertEquals(bar.resources.getColor(R.color.brand_primary_light, bar.context.theme), capsuleColor(bar))
-        assertNotNull(bar.findViewById<ImageView>(R.id.capsule_icon).drawable)
+        assertCapsuleVisual(bar, connected = false)
     }
 
-    @Test fun everyServiceStateUsesTheAuthoritativeThreeStateVisuals() = withBar { bar, _ ->
+    @Test fun everyServiceStateUsesOnlyTheAuthoritativeConnectedOrDisconnectedVisual() = withBar { bar, _ ->
         for (state in BaseService.State.values()) {
             bar.changeState(state)
+            assertBareCapsule(bar) // No fill/ripple may appear even during a fade or a locked state.
             advance(180)
             val connected = state == BaseService.State.Connected
             val capsule = bar.box(R.id.capsule)
             assertEquals("state=$state", connected, capsule.isSelected)
+            assertCapsuleVisual(bar, connected)
             assertEquals(bar.context.getString(when (state) {
-                BaseService.State.Connected -> R.string.control_bar_connected
                 BaseService.State.Connecting -> R.string.control_bar_connecting
-                else -> R.string.control_bar_disconnected
-            }), bar.text(R.id.capsule_label).text)
+                BaseService.State.Connected -> R.string.control_bar_disconnect_action
+                else -> R.string.control_bar_connect_action
+            }), capsule.contentDescription)
             assertEquals(!listOf(BaseService.State.Connecting, BaseService.State.Stopping).contains(state),
                 capsule.isEnabled)
             assertEquals(connected, bar.box(R.id.speed_box).isEnabled)
             assertEquals(connected, bar.box(R.id.latency_box).isEnabled)
-            assertEquals(bar.resources.getColor(R.color.brand_primary_light, bar.context.theme), capsuleColor(bar))
-            assertNotNull(bar.findViewById<ImageView>(R.id.capsule_icon).drawable)
             assertNull(bar.animation)
             assertNull(capsule.animation)
             assertUnknown(bar)
@@ -158,20 +170,30 @@ class ControlBarTest {
         assertFalse(capsule.isSelected)
         assertFalse(capsule.isEnabled)
         assertUnknown(bar)
+        assertCapsuleVisual(bar, connected = false)
+        advance(1000) // Waiting for permission/service startup cannot paint an optimistic connection.
+        assertCapsuleVisual(bar, connected = false)
         // Permission cancelled: an authoritative same-state report explicitly re-arms.
         bar.changeState(BaseService.State.Idle)
         capsule.performClick()
         assertEquals(2, toggles)
         bar.changeState(BaseService.State.Connecting)
+        advance(1000)
+        assertCapsuleVisual(bar, connected = false)
         capsule.performClick()
         bar.changeState(BaseService.State.Stopping)
+        advance(180)
+        assertCapsuleVisual(bar, connected = false)
         capsule.performClick()
         assertEquals(2, toggles)
         bar.changeState(BaseService.State.Connected)
+        advance(180)
+        assertCapsuleVisual(bar, connected = true)
         capsule.performClick()
         capsule.performClick()
         assertEquals(3, toggles) // Connected can stop, but only once per state acknowledgement.
         assertTrue(capsule.isSelected) // The click did not fake a disconnected state either.
+        assertCapsuleVisual(bar, connected = true)
     }
 
     @Test fun clickLocksBeforeCallbackEvenIfHostDelaysCallingShowTesting() = withBar { bar, _ ->
