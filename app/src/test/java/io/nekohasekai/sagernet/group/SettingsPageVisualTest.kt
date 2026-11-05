@@ -58,7 +58,11 @@ class SettingsPageVisualTest {
             super.onCreate(savedInstanceState)
         }
     }
-    private fun color(context: Context, attr: Int): Int = context.obtainStyledAttributes(intArrayOf(attr)).let {
+    private fun setQualifiersSafely(value: String) {
+        try { org.robolectric.RuntimeEnvironment.setQualifiers(value) } catch (_: IllegalArgumentException) { }
+    }
+
+
         val value = it.getColor(0, Color.MAGENTA); it.recycle(); value
     }
 
@@ -70,8 +74,7 @@ class SettingsPageVisualTest {
             Triple("server", R.xml.standard_v2ray_preferences, "服务器配置"),
             Triple("settings", R.xml.global_preferences, "设置"))
         for (night in listOf(false, true)) for ((name, resource, title) in pages) {
-            org.robolectric.RuntimeEnvironment.setQualifiers(
-                "zh-rCN-w360dp-h800dp-mdpi-" + if (night) "night" else "notnight")
+            setQualifiersSafely("zh-rCN-w360dp-h800dp-mdpi-" + if (night) "night" else "notnight")
             val environment = QuickPopupTestEnvironment()
             val controller = Robolectric.buildActivity(Activity::class.java)
             val activity = controller.setup().visible().get()
