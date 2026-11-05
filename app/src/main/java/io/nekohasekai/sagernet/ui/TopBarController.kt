@@ -228,6 +228,7 @@ internal class TopBarController(
 
         // Neko（粗体）
         titleView = TextView(context).apply {
+            id = R.id.title_bar_title
             text = context.getString(R.string.app_name)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
             setTypeface(Typeface.DEFAULT, Typeface.BOLD)
@@ -699,6 +700,7 @@ internal class TopBarController(
                 val position = adapter.ids.indexOf(selectedItemGroupId())
                 if (position >= 0) layout.scrollToPositionWithOffset(position, 0)
                 popup.showAsDropDown(anchor, pickerOffsetX(anchor, popup.width), gap)
+                io.nekohasekai.sagernet.widget.PopupEntrance.animate(container)
                 // Reopening before a previous write's notification must not revive old order.
                 requestRefresh()
             } catch (e: Exception) {

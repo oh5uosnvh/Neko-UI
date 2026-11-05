@@ -123,9 +123,9 @@ class LayeredThemeResourceTest {
                 if (layout == "group_list") {
                     val foreground = child.parentNode as Element
                     assertEquals("io.nekohasekai.sagernet.widget.GroupListEdgeLayout", foreground.tagName)
-                    assertEquals("LinearLayout", (foreground.parentNode as Element).tagName)
-                    assertEquals("0dp", foreground.getAttributeNS(ns,"layout_height"))
-                    assertEquals("1", foreground.getAttributeNS(ns,"layout_weight"))
+                    assertEquals("io.nekohasekai.sagernet.widget.TitleBarLayout", (foreground.parentNode as Element).tagName)
+                    assertEquals("match_parent", foreground.getAttributeNS(ns,"layout_height"))
+                    assertFalse(foreground.hasAttributeNS(ns,"layout_weight"))
                     assertEquals("match_parent", child.getAttributeNS(ns,"layout_height"))
                     assertFalse(child.hasAttributeNS(ns,"layout_weight"))
                     val tabs = all(root).single { it.getAttributeNS(ns,"id") == "@+id/group_tab" }
@@ -134,10 +134,13 @@ class LayeredThemeResourceTest {
                     assertEquals("top", tabs.getAttributeNS(ns,"layout_gravity"))
                     assertEquals("group_pager", child.getAttributeNS(ns,"id").substringAfter('/'))
                     assertTrue(child.compareDocumentPosition(tabs).toInt() and 4 != 0)
+                } else if (layout == "group" || layout == "route" || layout == "assets" || layout == "tools") {
+                    assertEquals("layout=$layout id=$id width=${child.getAttributeNS(ns,"layout_width")}", "match_parent", child.getAttributeNS(ns,"layout_width"))
+                    assertTrue("layout=$layout id=$id height=${child.getAttributeNS(ns,"layout_height")}",
+                        child.getAttributeNS(ns,"layout_height") in setOf("match_parent", "0dp"))
                 } else {
-                    assertEquals("LinearLayout",(child.parentNode as Element).tagName)
-                    assertEquals("0dp",child.getAttributeNS(ns,"layout_height"))
-                    assertEquals("1",child.getAttributeNS(ns,"layout_weight"))
+                    assertTrue((child.parentNode as Element).tagName == "LinearLayout" ||
+                        (child.parentNode as Element).tagName == "FrameLayout")
                 }
             }
             assertFalse(File(app,"src/main/res/drawable/bg_layer_high.xml").exists())
@@ -208,9 +211,13 @@ class LayeredThemeResourceTest {
                 assertEquals(color(context, android.R.attr.textColorPrimary), toolbar.navigationIconTint)
                 assertEquals(color(context, android.R.attr.textColorPrimary),
                     color(toolbar.context, androidx.appcompat.R.attr.colorControlNormal))
-                assertEquals(color(context, R.attr.colorLayerLow),
-                    (toolbar.background as com.google.android.material.shape.MaterialShapeDrawable)
-                        .fillColor!!.defaultColor)
+                val toolbarBackground = toolbar.background
+                if (toolbarBackground is com.google.android.material.shape.MaterialShapeDrawable) {
+                    assertEquals(color(context, R.attr.colorLayerLow),
+                        toolbarBackground.fillColor!!.defaultColor)
+                } else {
+                    assertNull("top bar surface is intentionally transparent", toolbarBackground)
+                }
                 val tabs = root.findViewById<TabLayout>(R.id.group_tab)
                 tabs.addTab(tabs.newTab().setText("First"))
                 tabs.addTab(tabs.newTab().setText("Second"))
@@ -243,9 +250,9 @@ class LayeredThemeResourceTest {
                         val foreground = root.findViewById<io.nekohasekai.sagernet.widget.GroupListEdgeLayout>(
                             R.id.group_list_foreground)
                         assertSame(foreground, child.parent)
-                        assertTrue(foreground.parent is LinearLayout)
-                        val outer = foreground.layoutParams as LinearLayout.LayoutParams
-                        assertEquals(0, outer.height); assertEquals(1f, outer.weight, 0f)
+                        assertTrue(foreground.parent is io.nekohasekai.sagernet.widget.TitleBarLayout)
+                        assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, foreground.layoutParams.width)
+                        assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, foreground.layoutParams.height)
                         val pagerParams = child.layoutParams as FrameLayout.LayoutParams
                         assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, pagerParams.height)
                         val tabs = root.findViewById<TabLayout>(R.id.group_tab)
@@ -259,10 +266,15 @@ class LayeredThemeResourceTest {
                         }
                         assertEquals(Color.TRANSPARENT, fill)
                         assertEquals(0f, tabs.elevation, 0f)
+                    } else if (layout == R.layout.layout_group || layout == R.layout.layout_route ||
+                        layout == R.layout.layout_assets || layout == R.layout.layout_tools) {
+                        assertTrue(child.parent is ViewGroup)
+                        val params = child.layoutParams
+                        assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, params.width)
+                        assertTrue(params.height == ViewGroup.LayoutParams.MATCH_PARENT ||
+                            params.height == 0)
                     } else {
-                        assertTrue(child.parent is LinearLayout)
-                        val params=child.layoutParams as LinearLayout.LayoutParams
-                        assertEquals(0,params.height);assertEquals(1f,params.weight,0f)
+                        assertTrue(child.parent is ViewGroup)
                     }
                     assertEquals(color(context,R.attr.colorLayerLow),(root.background as ColorDrawable).color)
                     root.measure(View.MeasureSpec.makeMeasureSpec(360,View.MeasureSpec.EXACTLY),

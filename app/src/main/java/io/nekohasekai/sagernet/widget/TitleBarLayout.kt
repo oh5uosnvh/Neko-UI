@@ -46,6 +46,10 @@ class TitleBarLayout @JvmOverloads constructor(
     var titleGlyphBottom: Float = 0f
         private set
 
+    /** Pixel distance from title ink bottom to the complete appbar bottom. */
+    internal fun titleEdgeBandHeight(): Float =
+        (headerBottom.toFloat() - titleGlyphBottom).coerceAtLeast(0f)
+
     /** Optional animation hook. Nonzero translationX on this root/ancestors is automatic. */
     var pageTransitionRunning: Boolean = false
         set(value) { if (field != value) { field = value; invalidate() } }
@@ -77,7 +81,7 @@ class TitleBarLayout @JvmOverloads constructor(
             val child = getChildAt(index)
             when (child.id) {
                 R.id.appbar -> nextHeader = child
-                R.id.title_bar_content -> nextContent = child
+                R.id.title_bar_content, R.id.group_list_foreground -> nextContent = child
                 R.id.title_bar_footer -> nextFooter = child
             }
         }
@@ -224,6 +228,11 @@ class TitleBarLayout @JvmOverloads constructor(
 
     override fun drawChild(canvas: Canvas, child: View, drawingTime: Long): Boolean {
         if (child !== content) return super.drawChild(canvas, child, drawingTime)
+        // The configuration pager has its own pager-only edge renderer. Applying
+        // this container's renderer again would blur the floating group pills twice.
+        if (child is GroupListEdgeLayout ||
+            child.findViewById<GroupListEdgeLayout>(R.id.group_list_foreground) != null
+        ) return super.drawChild(canvas, child, drawingTime)
         return edge.draw(canvas, width, titleGlyphBottom, contentBottom, headerBottom.toFloat(),
             resources.displayMetrics.density, useLocalBlur(canvas.isHardwareAccelerated)) {
             super.drawChild(it, child, drawingTime)

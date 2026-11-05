@@ -21,7 +21,6 @@ import androidx.core.util.set
 import androidx.core.view.ViewCompat
 import androidx.core.widget.addTextChangedListener
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -90,7 +89,11 @@ class AppManagerActivity : ThemedActivity() {
         }
 
         fun handlePayload(payloads: List<String>) {
-            if (payloads.contains(SWITCH)) binding.itemcheck.isChecked = isProxiedApp(item)
+            if (payloads.contains(SWITCH)) {
+                binding.itemcheck.bind(item.packageName) {
+                    binding.itemcheck.isChecked = isProxiedApp(item)
+                }
+            }
         }
 
         override fun onClick(v: View?) {
@@ -250,7 +253,8 @@ class AppManagerActivity : ThemedActivity() {
 
         initProxiedUids()
         binding.list.layoutManager = LinearLayoutManager(this, RecyclerView.VERTICAL, false)
-        binding.list.itemAnimator = DefaultItemAnimator()
+        // Keep the per-app ReferenceSwitch attached while its own 300ms animation runs.
+        binding.list.itemAnimator = null
         binding.list.adapter = appsAdapter
 
         ViewCompat.setOnApplyWindowInsetsListener(binding.root, ListListener)

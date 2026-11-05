@@ -33,7 +33,10 @@ object RouteOutboundMenu {
             onChoice(position)
         }
         popup.show()
-        popup.listView?.let { ThemedChoiceStyle.clipMenu(it) }
+        popup.listView?.let {
+            ThemedChoiceStyle.clipMenu(it)
+            PopupEntrance.animate(it, false)
+        }
         popup.setSelection(current)
         return popup
     }

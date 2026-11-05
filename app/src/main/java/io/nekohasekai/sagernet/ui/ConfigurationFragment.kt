@@ -1763,6 +1763,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
         popupRef = popup
         popup.showAsDropDown(anchor, 0, dp(4))
+        io.nekohasekai.sagernet.widget.PopupEntrance.animate(column)
 
         // 面板超出屏幕右缘时整体左移（-1 = 宽高不变）
         val loc = IntArray(2)
@@ -3328,7 +3329,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                 // 双列卡片框统一大小（图6/7 参照）：名称区固定预留两行，1 行名
                 // （如「台湾 01」）与 2 行名（如「日本 Melbiko mas 08」）的卡片同高，
                 // 协议/延迟行始终落在卡片最后一行，不再出现悬在中间的情况。
-                profileName.minLines = if (twoColumn) 2 else 1
+                // Keep a stable card row in both layouts; single-line names occupy the
+                // second line as reserved space and long names ellipsize there.
+                profileName.minLines = 2
                 profileType.text = io.nekohasekai.sagernet.widget.TwoColumnProtocolLabel.display(proxyEntity.displayType(), twoColumn)
                 profileType.setTextColor(requireContext().getProtocolColor(proxyEntity.type))
 
@@ -3348,10 +3351,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 var address = if (pf.alwaysShowAddress && bean.name.isNotBlank()) {
                     bean.displayAddress()
                 } else ""
-                if (showTraffic && address.length >= 30) {
-                    address = address.substring(0, 27) + "..."
-                }
-
+                // EndpointTextView performs width-aware host truncation while retaining :port.
                 profileAddress.text = address
                 val trafficRowEmpty =
                     (!showTraffic || proxyEntity.status <= 0) && address.isBlank()
@@ -3395,9 +3395,6 @@ class ConfigurationFragment @JvmOverloads constructor(
                 if (statusParams.weight != targetWeight || statusParams.width != targetWidth) {
                     statusParams.weight = targetWeight; statusParams.width = targetWidth
                     profileStatus.layoutParams = statusParams
-                    val row = profileStatus.parent as LinearLayout
-                    val spacer = row.getChildAt(1)
-                    (spacer.layoutParams as LinearLayout.LayoutParams).also { it.weight = if (isDoubleColumn) 0f else 1f; spacer.layoutParams = it }
                 }
                 if (isDoubleColumn) {
                     editButton.isGone = true

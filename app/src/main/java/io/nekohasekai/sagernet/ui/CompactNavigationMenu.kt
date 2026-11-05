@@ -17,6 +17,7 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.view.animation.DecelerateInterpolator
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -87,6 +88,8 @@ internal class CompactNavigationMenu(
             cancelAnimation()
             content.alpha = 1f
             content.translationY = 0f
+            content.scaleX = 1f
+            content.scaleY = 1f
             if (window === popup) { window = null; anchor = null }
             closing = false
             afterClose = null // External dismissal must never execute a queued navigation.
@@ -191,6 +194,7 @@ internal class CompactNavigationMenu(
                     context.getColor(R.color.card_stroke))
             }
             clipToOutline = true
+            outlineProvider = ViewOutlineProvider.BACKGROUND
             layoutDirection = anchor?.layoutDirection ?: host.layoutDirection
             isFillViewport = false
             isVerticalScrollBarEnabled = false
@@ -222,7 +226,12 @@ internal class CompactNavigationMenu(
     private fun animate(content: View, opening: Boolean) {
         cancelAnimation()
         val start = if (opening) 0f else content.alpha
-        if (opening) { content.alpha = 0f; content.translationY = -dp(6).toFloat() }
+        if (opening) {
+            content.alpha = 0f
+            content.translationY = -dp(6).toFloat()
+            content.scaleX = .95f
+            content.scaleY = .95f
+        }
         animation = ValueAnimator.ofFloat(start, if (opening) 1f else 0f).apply {
             duration = if (opening) 140L else CLOSE_DURATION_MS
             interpolator = DecelerateInterpolator()
@@ -230,6 +239,8 @@ internal class CompactNavigationMenu(
                 val progress = it.animatedValue as Float
                 content.alpha = progress
                 content.translationY = -dp(6) * (1f - progress)
+                content.scaleX = .95f + .05f * progress
+                content.scaleY = content.scaleX
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {

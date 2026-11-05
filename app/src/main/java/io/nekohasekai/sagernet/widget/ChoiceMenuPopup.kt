@@ -106,6 +106,7 @@ internal class ChoiceMenuPopup(
         anchor.addOnAttachStateChangeListener(this)
         try {
             showAsDropDown(anchor, 0, 0, Gravity.START)
+            PopupEntrance.animate(surface, isAboveAnchor)
         } catch (_: WindowManager.BadTokenException) {
             cancelImmediately()
         }

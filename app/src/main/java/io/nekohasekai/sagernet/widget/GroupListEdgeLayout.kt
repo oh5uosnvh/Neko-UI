@@ -28,16 +28,21 @@ import java.util.WeakHashMap
 class GroupListEdgeLayout @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null,
 ) : FrameLayout(context, attrs) {
-    private val bandHeight = 56f * resources.displayMetrics.density
+    private val defaultBandHeight = 56f * resources.displayMetrics.density
+    private var bandHeight = defaultBandHeight
     private val fade = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
-        shader = LinearGradient(0f, 0f, 0f, bandHeight,
-            intArrayOf(Color.TRANSPARENT, 0xB3FFFFFF.toInt(), Color.WHITE),
-            floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
     }
     private val blurMask = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
-        shader = LinearGradient(0f, 0f, 0f, bandHeight,
+    }
+    private fun updateShaders(height: Float) {
+        if (height == bandHeight && fade.shader != null && blurMask.shader != null) return
+        bandHeight = height.coerceAtLeast(0f)
+        fade.shader = LinearGradient(0f, 0f, 0f, bandHeight,
+            intArrayOf(Color.TRANSPARENT, 0xB3FFFFFF.toInt(), Color.WHITE),
+            floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
+        blurMask.shader = LinearGradient(0f, 0f, 0f, bandHeight,
             intArrayOf(Color.WHITE, Color.WHITE, Color.TRANSPARENT),
             floatArrayOf(0f, 0.2f, 1f), Shader.TileMode.CLAMP)
     }
@@ -78,8 +83,17 @@ class GroupListEdgeLayout @JvmOverloads constructor(
     private fun syncTop(list: RecyclerView) {
         val original = baseTop[list] ?: return
         val tabs = findViewById<View>(R.id.group_tab)
-        val inset = if (tabs?.visibility == View.VISIBLE) tabs.height else 0
-        val top = original + inset
+        val tabInset = if (tabs?.visibility == View.VISIBLE) tabs.height else 0
+        var ancestor: View? = parent as? View
+        var titleInset = 0
+        while (ancestor != null) {
+            if (ancestor is TitleBarLayout) {
+                titleInset = ancestor.titleEdgeBandHeight().toInt()
+                break
+            }
+            ancestor = ancestor.parent as? View
+        }
+        val top = original + titleInset + tabInset
         if (list.paddingTop != top) {
             list.setPadding(list.paddingLeft, top, list.paddingRight, list.paddingBottom)
         }
@@ -94,6 +108,8 @@ class GroupListEdgeLayout @JvmOverloads constructor(
         if (child.id != R.id.group_pager || width == 0 || height == 0) {
             return super.drawChild(canvas, child, drawingTime)
         }
+        val parentTitle = (parent as? TitleBarLayout)
+        updateShaders(parentTitle?.titleEdgeBandHeight()?.takeIf { it > 0f } ?: defaultBandHeight)
         val band = bandHeight.coerceAtMost(height.toFloat())
         // The unaffected rest is drawn normally (including fast-scroll/overscroll).
         var save = canvas.save()

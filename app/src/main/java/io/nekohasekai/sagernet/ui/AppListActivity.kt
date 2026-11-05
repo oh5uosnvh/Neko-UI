@@ -19,7 +19,6 @@ import androidx.core.util.set
 import androidx.core.view.ViewCompat
 import androidx.core.widget.addTextChangedListener
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.snackbar.Snackbar
@@ -84,7 +83,9 @@ class AppListActivity : ThemedActivity() {
         fun handlePayload(payloads: List<String>) {
             if (payloads.contains(SWITCH)) {
                 val selected = isProxiedApp(item)
-                binding.itemcheck.isChecked = selected
+                binding.itemcheck.bind(item.packageName) {
+                    binding.itemcheck.isChecked = selected
+                }
             }
         }
 
@@ -226,7 +227,9 @@ class AppListActivity : ThemedActivity() {
 
         initProxiedUids()
         binding.list.layoutManager = LinearLayoutManager(this, RecyclerView.VERTICAL, false)
-        binding.list.itemAnimator = DefaultItemAnimator()
+        // ReferenceSwitch owns its 300ms motion. RecyclerView change animations must
+        // not detach the row and collapse that motion into a single settled frame.
+        binding.list.itemAnimator = null
         binding.list.adapter = appsAdapter
 
         ViewCompat.setOnApplyWindowInsetsListener(binding.root, ListListener)

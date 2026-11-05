@@ -64,6 +64,11 @@ internal class TitleBarContentInsets {
     }
 
     private fun collect(view: View, result: MutableList<View>) {
+        if (view is GroupListEdgeLayout) {
+            // It owns the pager's top padding so tabs and the title gap are applied
+            // exactly once by GroupListEdgeLayout.syncTop().
+            return
+        }
         if (isScrollSurface(view)) { result += view; return }
         if (view !is ViewGroup) { result += view; return }
         if (view is LinearLayout && view.orientation == LinearLayout.VERTICAL) {

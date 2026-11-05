@@ -127,19 +127,18 @@
                 android:visibility="gone"
                 tools:visibility="visible">
 
-                <TextView
+                <io.nekohasekai.sagernet.widget.EndpointTextView
                     android:id="@+id/profile_address"
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_weight="1"
                     android:minLines="1"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:ellipsize="end"
                     android:text="@string/server_address"
                     android:textAppearance="?android:attr/textAppearanceSmall"
                     android:textColor="?android:attr/textColorSecondary" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1" />
 
                 <TextView
                     android:id="@+id/traffic_text"
