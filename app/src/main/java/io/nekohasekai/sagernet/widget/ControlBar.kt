@@ -96,6 +96,24 @@ class ControlBar @JvmOverloads constructor(
             null, mask,
         )
     }
+
+    /**
+     * 启动/连接胶囊的框内按压底色：内容层就是 [capsuleBackground]（颜色动画仍直接
+     * 改它，观感不变），外面套一层胶囊形 RippleDrawable——按下时整个胶囊内部出现
+     * 按压底色，涟漪也不会画出胶囊圆角以外。colorControlHighlight 跟随主题（276 曾
+     * 全局置透明导致这里失去按压反馈，已恢复）。
+     */
+    private fun newCapsuleRipple(): RippleDrawable {
+        val mask = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 999f * resources.displayMetrics.density
+            setColor(Color.WHITE)
+        }
+        return RippleDrawable(
+            ColorStateList.valueOf(themeColor(android.R.attr.colorControlHighlight, R.color.control_bar_border)),
+            capsuleBackground, mask,
+        )
+    }
     private enum class Presentation { DISCONNECTED, CONNECTING, CONNECTED }
     private fun presentation(state: BaseService.State = currentState) = when (state) {
         BaseService.State.Connected -> Presentation.CONNECTED
@@ -130,7 +148,7 @@ class ControlBar @JvmOverloads constructor(
         latencyBox.setOnClickListener { requestReadoutAction() }
         capsule.setOnClickListener { requestToggle() }
         capsule.contentDescription = context.getString(R.string.control_bar_connect_action)
-        capsule.background = capsuleBackground
+        capsule.background = newCapsuleRipple()
         speedBox.background = newSideBoxRipple()
         latencyBox.background = newSideBoxRipple()
         ready = true

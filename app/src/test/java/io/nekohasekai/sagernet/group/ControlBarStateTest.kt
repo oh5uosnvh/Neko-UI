@@ -88,7 +88,8 @@ class ControlBarStateTest {
         }
     }
     private fun color(bar: ControlBar) =
-        (bar.box(R.id.capsule).background as GradientDrawable).color!!.defaultColor
+        (((bar.box(R.id.capsule).background as RippleDrawable).getDrawable(0)) as GradientDrawable)
+            .color!!.defaultColor
     private fun attr(context: ContextThemeWrapper, id: Int): Int = TypedValue().let {
         assertTrue(context.theme.resolveAttribute(id, it, true))
         if (it.resourceId != 0) context.resources.getColor(it.resourceId, context.theme) else it.data

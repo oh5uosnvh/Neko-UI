@@ -109,7 +109,13 @@ class ThemedChoiceMenuTest {
             shadowOf(label.typeface).fontDescription.style)
         val card = label.background as GradientDrawable
         val primary = color(context, R.attr.colorPrimary)
-        val fill = (primary and 0x00ffffff) or ((Color.alpha(primary) * 0.16f).toInt() shl 24)
+        // 选中项：主题色底 + 主题色描边；未选中项：中性灰底（textColorPrimary 低透明度）、无描边。
+        val fill = if (selected) {
+            (primary and 0x00ffffff) or ((Color.alpha(primary) * 0.16f).toInt() shl 24)
+        } else {
+            val foreground = color(context, android.R.attr.textColorPrimary)
+            (foreground and 0x00ffffff) or ((Color.alpha(foreground) * 0.09f).toInt() shl 24)
+        }
         assertEquals(fill, card.color!!.defaultColor)
         assertTrue(Color.alpha(card.color!!.defaultColor) > 0)
         assertCorners(card, context.resources.getDimension(R.dimen.choice_corner_radius))

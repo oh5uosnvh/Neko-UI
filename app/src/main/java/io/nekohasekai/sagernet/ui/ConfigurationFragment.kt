@@ -3145,12 +3145,10 @@ class ConfigurationFragment @JvmOverloads constructor(
                         selectProfile(proxyEntity)
                     }
                 }
-                profileStatus.setOnClickListener {
-                    val proxyEntity = entity
-                    if (proxyEntity.status == 3) {
-                        (activity as? MainActivity)?.snackbar(getString(R.string.connection_test_error, proxyEntity.error ?: "<?>"))?.show()
-                    }
-                }
+                // 延迟/状态区域（xxms、超时、不可用）不再消费点击：与卡片其余区域
+                // 一样选中该节点——双列除右上角 ⋮ 外全区域、单列含延迟位置。
+                // （原先 status==3 弹错误 snackbar 的行为移除，用户明确要求可点选。）
+                profileStatus.isClickable = false
                 profileStatus.isFocusable = false
                 editButton.setOnClickListener {
                     val proxyEntity = entity
@@ -3327,6 +3325,10 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                 profileName.text = bean.displayName()
                 val twoColumn = layoutManager is FixedGridLayoutManager
+                // 双列卡片框统一大小（图6/7 参照）：名称区固定预留两行，1 行名
+                // （如「台湾 01」）与 2 行名（如「日本 Melbiko mas 08」）的卡片同高，
+                // 协议/延迟行始终落在卡片最后一行，不再出现悬在中间的情况。
+                profileName.minLines = if (twoColumn) 2 else 1
                 profileType.text = io.nekohasekai.sagernet.widget.TwoColumnProtocolLabel.display(proxyEntity.displayType(), twoColumn)
                 profileType.setTextColor(requireContext().getProtocolColor(proxyEntity.type))
 

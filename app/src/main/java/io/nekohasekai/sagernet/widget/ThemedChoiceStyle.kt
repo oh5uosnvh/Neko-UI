@@ -15,6 +15,8 @@ import io.nekohasekai.sagernet.R
 /** The same theme-derived card treatment used by the ☴ group picker. No theme caches. */
 object ThemedChoiceStyle {
     private const val FILL_ALPHA = 0.16f
+    /** 未选中项的中性灰底强度：取 textColorPrimary 的低透明度，日/夜间主题都自动适配。 */
+    private const val NEUTRAL_FILL_ALPHA = 0.09f
 
     private fun color(context: Context, attr: Int): Int {
         val values = context.obtainStyledAttributes(intArrayOf(attr))
@@ -24,9 +26,16 @@ object ThemedChoiceStyle {
     fun itemCard(context: Context, selected: Boolean): GradientDrawable = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
         cornerRadius = context.resources.getDimension(R.dimen.choice_corner_radius)
+        if (!selected) {
+            // 未选中项：中性灰底、无描边 —— 主题色底、主题色框与粗体只属于选中项
+            // （见 bind()），像「代理 / 绕过 / 屏蔽」菜单里只有当前出站项被点亮。
+            val foreground = color(context, android.R.attr.textColorPrimary)
+            setColor(ColorUtils.setAlphaComponent(foreground, (Color.alpha(foreground) * NEUTRAL_FILL_ALPHA).toInt()))
+            return@apply
+        }
         val primary = color(context, R.attr.colorPrimary)
         setColor(ColorUtils.setAlphaComponent(primary, (Color.alpha(primary) * FILL_ALPHA).toInt()))
-        if (selected) setStroke(
+        setStroke(
             context.resources.getDimensionPixelSize(R.dimen.card_stroke_width_selected), primary,
         )
     }

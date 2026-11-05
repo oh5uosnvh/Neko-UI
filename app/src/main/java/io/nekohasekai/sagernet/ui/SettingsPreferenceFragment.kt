@@ -27,6 +27,11 @@ import java.io.File
 
 class SettingsPreferenceFragment : PreferenceFragmentCompat() {
 
+    override fun onCreateRecyclerView(
+        inflater: android.view.LayoutInflater, parent: android.view.ViewGroup, savedInstanceState: Bundle?,
+    ): androidx.recyclerview.widget.RecyclerView =
+        super.onCreateRecyclerView(settingsRowsInflater(inflater, parent), parent, savedInstanceState)
+
     private lateinit var isProxyApps: SwitchPreference
 
     private lateinit var globalCustomConfig: EditConfigPreference
@@ -107,7 +112,7 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         logLevel.setOnLongClickListener {
             if (context == null) return@setOnLongClickListener true
 
-            val view = EditText(context).apply {
+            val view = dialogInputEditText().apply {
                 inputType = EditorInfo.TYPE_CLASS_NUMBER
                 var size = DataStore.logBufSize
                 if (size == 0) size = 50

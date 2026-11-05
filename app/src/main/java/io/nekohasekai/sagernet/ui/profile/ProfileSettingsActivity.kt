@@ -30,6 +30,7 @@ import com.github.shadowsocks.plugin.Empty
 import com.github.shadowsocks.plugin.fragment.AlertDialogFragment
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.*
+import io.nekohasekai.sagernet.ui.settingsRowsInflater
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupManager
 import io.nekohasekai.sagernet.database.ProfileManager
@@ -216,6 +217,11 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
     }
 
     class MyPreferenceFragmentCompat : PreferenceFragmentCompat() {
+
+        override fun onCreateRecyclerView(
+            inflater: android.view.LayoutInflater, parent: android.view.ViewGroup, savedInstanceState: Bundle?,
+        ): androidx.recyclerview.widget.RecyclerView =
+            super.onCreateRecyclerView(settingsRowsInflater(inflater, parent), parent, savedInstanceState)
 
         var activity: ProfileSettingsActivity<*>? = null
 

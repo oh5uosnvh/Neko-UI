@@ -623,6 +623,11 @@ class GroupSettingsActivity(
 
     class MyPreferenceFragmentCompat : PreferenceFragmentCompat() {
 
+        override fun onCreateRecyclerView(
+            inflater: android.view.LayoutInflater, parent: android.view.ViewGroup, savedInstanceState: Bundle?,
+        ): androidx.recyclerview.widget.RecyclerView =
+            super.onCreateRecyclerView(settingsRowsInflater(inflater, parent), parent, savedInstanceState)
+
         var activity: GroupSettingsActivity? = null
 
         override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {

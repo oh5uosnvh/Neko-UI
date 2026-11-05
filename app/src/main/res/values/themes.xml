@@ -66,11 +66,9 @@
         <item name="bottomSheetDialogTheme">@style/ThemeOverlay.SagerNet.BottomSheetDialog</item>
         <item name="materialButtonStyle">@style/Widget.SagerNet.Button</item>
 
-        <!-- 按压涟漪/高亮全部透明：设置行、编辑入口、列表菜单项的点击反馈
-             就是随之打开的弹窗 / 列表菜单本身，不需要底色变化。
-             本主题 parent 为 DayNight，此声明日/夜间同时生效。 -->
-        <item name="android:colorControlHighlight">@android:color/transparent</item>
-
+        <!-- 按压/触摸底色保持系统默认：启动胶囊、路由配置卡片、节点卡片等
+             点击时要有按压底色。「设置/编辑参数选项行不要按压底色」只通过
+             ThemeOverlay.SagerNet.SettingsHighlight 精确作用于偏好列表行。 -->
         <!-- 全局开关样式：绿色胶囊 track + 白色圆 thumb（滑动动画是 Switch 自带的）。
              switchStyle 覆盖 SwitchMaterial / SwitchCompat / SwitchPreference(Compat)，
              materialSwitchStyle 覆盖 Material 1.7+ 的 MaterialSwitch。 -->
@@ -143,8 +141,11 @@
         <item name="bottomSheetDialogTheme">@style/ThemeOverlay.SagerNet.BottomSheetDialog</item>
         <item name="materialButtonStyle">@style/Widget.SagerNet.Button</item>
 
-        <!-- 与 Theme.SagerNet.Base 保持一致（此主题不继承 Base）：无按压底色 + 全局开关样式 -->
-        <item name="android:colorControlHighlight">@android:color/transparent</item>
+        <!-- 与 Theme.SagerNet.Base 保持一致（此主题不继承 Base）：全局开关样式；
+             按压底色同样保持系统默认（见 Base 内注释）。 -->
+        <item name="switchStyle">@style/Widget.SagerNet.Switch</item>
+        <item name="materialSwitchStyle">@style/Widget.SagerNet.Switch</item>
+
         <item name="switchStyle">@style/Widget.SagerNet.Switch</item>
         <item name="materialSwitchStyle">@style/Widget.SagerNet.Switch</item>
 
@@ -179,6 +180,11 @@
         <item name="android:backgroundDimEnabled">false</item>
         <!-- 弹窗动态展开/收起，与列表菜单一致。 -->
         <item name="android:windowAnimationStyle">@style/DialogWindowAnimation</item>
+        <!-- 对话框的主题链不经过 app 主题的 switchStyle：这里显式携带全局绿色
+             开关样式，弹窗里出现的 SwitchMaterial / SwitchCompat / SwitchPreference
+             才会与全应用一致（用户代理弹窗、本地代理设置弹窗等）。 -->
+        <item name="switchStyle">@style/Widget.SagerNet.Switch</item>
+        <item name="materialSwitchStyle">@style/Widget.SagerNet.Switch</item>
         <item name="colorLayerLow">@color/layer_low</item>
         <item name="colorLayerHigh">@color/layer_high</item>
         <item name="colorLayerStroke">@color/layer_stroke</item>
@@ -278,6 +284,9 @@
     </style>
     <style name="ThemeOverlay.SagerNet.BottomSheetDialog" parent="ThemeOverlay.MaterialComponents.BottomSheetDialog">
         <item name="bottomSheetStyle">@style/Widget.SagerNet.BottomSheet</item>
+        <!-- 底部弹层的内容视图同样吃不到 app 主题的 switchStyle，显式补上绿色开关。 -->
+        <item name="switchStyle">@style/Widget.SagerNet.Switch</item>
+        <item name="materialSwitchStyle">@style/Widget.SagerNet.Switch</item>
     </style>
 
     <style name="ShapeAppearanceOverlay.SagerNet.Button" parent="">
@@ -299,6 +308,16 @@
         <item name="android:thumbTint">@color/switch_thumb_color</item>
         <item name="android:trackTint">@color/switch_track_color</item>
         <item name="useMaterialThemeColors">false</item>
+    </style>
+
+    <!-- 设置/编辑参数选项行专用：只关按压底色（点击行为是直接弹弹窗/菜单，
+         不需要高亮反馈）。其余界面（启动胶囊、路由/分组/节点卡片等）不受影响，
+         按压底色保持系统默认。通过各 PreferenceFragmentCompat.onCreateRecyclerView
+         用 ContextThemeWrapper 叠加——PreferenceGroupAdapter 用 RecyclerView.context
+         填充每一行；ContextThemeWrapper 先继承运行期主题再叠加本 overlay，
+         其余属性（含绿色开关样式）与配色变体原样继承。 -->
+    <style name="ThemeOverlay.SagerNet.SettingsHighlight" parent="">
+        <item name="android:colorControlHighlight">@android:color/transparent</item>
     </style>
 
     <style name="ShapeAppearance.SagerNet.NavItem" parent="ShapeAppearance.MaterialComponents.SmallComponent">
