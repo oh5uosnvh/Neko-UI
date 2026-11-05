@@ -101,15 +101,13 @@ class ControlBarTest {
         assertEquals("-- ms", bar.text(R.id.latency).text.toString())
     }
 
-    private fun assertBareCapsule(bar: ControlBar) {
-        val capsule = bar.box(R.id.capsule)
-        assertNull("the whole click target has no fill", capsule.background)
-        assertNull("the click target has no pressed/focused touch fill", capsule.foreground)
+    private fun assertCapsuleHasNoTouchFill(bar: ControlBar) {
+        assertThemedCapsuleWithoutPressFill(bar)
         assertEquals(0f, bar.box(R.id.capsule_icon).rotation, 0f)
     }
 
     private fun assertCapsuleVisual(bar: ControlBar, connected: Boolean) {
-        assertBareCapsule(bar)
+        assertCapsuleHasNoTouchFill(bar)
         assertEquals(bar.context.getString(if (connected) R.string.control_bar_connected
             else R.string.control_bar_disconnected), bar.text(R.id.capsule_label).text.toString())
         val drawable = bar.findViewById<ImageView>(R.id.capsule_icon).drawable
@@ -137,7 +135,7 @@ class ControlBarTest {
     @Test fun everyServiceStateUsesOnlyTheAuthoritativeConnectedOrDisconnectedVisual() = withBar { bar, _ ->
         for (state in BaseService.State.values()) {
             bar.changeState(state)
-            assertBareCapsule(bar) // No fill/ripple may appear even during a fade or a locked state.
+            assertCapsuleHasNoTouchFill(bar) // Persistent theme fill stays; pressed overlays never appear.
             advance(180)
             val connected = state == BaseService.State.Connected
             val capsule = bar.box(R.id.capsule)

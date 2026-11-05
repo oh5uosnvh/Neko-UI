@@ -25,7 +25,6 @@ import androidx.appcompat.widget.SearchView
 import androidx.appcompat.widget.Toolbar
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
-import androidx.core.view.GravityCompat
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -222,9 +221,8 @@ internal class TopBarController(
         // ☰ 抽屉
         drawerView = iconView(R.drawable.ic_topbar_drawer, R.string.topbar_drawer_desc)
             .apply {
-                setOnClickListener {
-                    (host.activity as? MainActivity)
-                        ?.binding?.drawerLayout?.openDrawer(GravityCompat.START)
+                setOnClickListener { anchor ->
+                    (host.activity as? MainActivity)?.openNavigationMenu(anchor)
                 }
             }
 

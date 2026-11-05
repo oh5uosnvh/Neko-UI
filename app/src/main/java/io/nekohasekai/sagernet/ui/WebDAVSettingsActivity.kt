@@ -57,6 +57,7 @@ class WebDAVSettingsActivity : ThemedActivity() {
             inflater: android.view.LayoutInflater, parent: android.view.ViewGroup, savedInstanceState: Bundle?,
         ): androidx.recyclerview.widget.RecyclerView =
             super.onCreateRecyclerView(settingsRowsInflater(inflater, parent), parent, savedInstanceState)
+                .withoutSettingsRowPress()
 
         private var lastClickTime = 0L
         private val DEBOUNCE_TIME = 1000L  // 1秒内不允许重复点击

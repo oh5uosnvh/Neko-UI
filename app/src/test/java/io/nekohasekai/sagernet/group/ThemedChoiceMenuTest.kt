@@ -21,7 +21,6 @@ import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.graphics.drawable.DrawableWrapperCompat
-import androidx.appcompat.widget.AppCompatSpinner
 import androidx.appcompat.widget.ListPopupWindow
 import androidx.core.content.ContextCompat
 import androidx.preference.ListPreference
@@ -31,6 +30,7 @@ import androidx.room.Room
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.preference.PublicDatabase
 import io.nekohasekai.sagernet.database.preference.RoomPreferenceDataStore
+import io.nekohasekai.sagernet.widget.ChoiceMenuPopup
 import io.nekohasekai.sagernet.widget.OutboundPreference
 import io.nekohasekai.sagernet.widget.ReselectableSpinner
 import io.nekohasekai.sagernet.widget.RouteOutboundMenu
@@ -386,9 +386,19 @@ class ThemedChoiceMenuTest {
         return row.findViewById(R.id.spinner)
     }
 
-    private fun spinnerPopup(spinner: Spinner): ListPopupWindow =
-        if (spinner is AppCompatSpinner) ReflectionHelpers.getField(spinner, "mPopup")
-        else error("The themed dropdown must use AppCompatSpinner")
+    private fun preferencePopup(preference: SimpleMenuPreference): ChoiceMenuPopup =
+        ReflectionHelpers.getField(preference, "choicePopup")
+
+    private fun ChoiceMenuPopup.performItemClick(position: Int): Boolean {
+        if (!isShowing) return false
+        val list = listView
+        return list.performItemClick(list.adapter.getView(position, null, list), position,
+            list.adapter.getItemId(position))
+    }
+
+    private fun finishPreferenceExit() {
+        repeat(16) { shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(16)) }
+    }
 
     private fun attachPreference(context: Context, store: RoomPreferenceDataStore,
         preference: SimpleMenuPreference) {
@@ -467,26 +477,28 @@ class ThemedChoiceMenuTest {
                 }
                 preference.performClick()
                 idle()
-                var popup = spinnerPopup(spinner)
+                var popup = preferencePopup(preference)
                 assertTrue(popup.isShowing)
-                assertBackground(f.activity, popup.background as GradientDrawable)
-                assertClipping(popup.listView!!)
+                assertBackground(f.activity, popup.contentView.background as GradientDrawable)
+                assertClipping(popup.listView)
                 popup.performItemClick(1)
-                idle()
+                assertTrue("Veto listener cannot block the visible exit", calls.isEmpty())
+                finishPreferenceExit()
                 assertEquals(listOf("b"), calls)
                 assertEquals("a", preference.value)
                 assertEquals("a", store.getString("listenerChoices"))
                 assertFalse(popup.isShowing)
-                // A veto can leave Spinner's mechanical position changed; rebinding restores the value.
+                // A veto leaves both the persisted value and the rebound selection unchanged.
                 preference.onBindViewHolder(PreferenceViewHolder.createInstanceForTests(spinner.parent as View))
                 idle()
                 calls.clear()
                 accept = true
                 preference.performClick()
                 idle()
-                popup = spinnerPopup(spinner)
+                popup = preferencePopup(preference)
                 popup.performItemClick(2)
-                idle()
+                assertTrue(calls.isEmpty())
+                finishPreferenceExit()
                 assertEquals(listOf("c"), calls)
                 assertEquals("c", preference.value)
                 assertEquals("c", store.getString("listenerChoices"))
@@ -494,9 +506,10 @@ class ThemedChoiceMenuTest {
                 calls.clear()
                 preference.performClick()
                 idle()
-                popup = spinnerPopup(spinner)
+                popup = preferencePopup(preference)
                 popup.dismiss()
-                idle()
+                finishPreferenceExit()
+                assertFalse(popup.isShowing)
                 assertTrue(calls.isEmpty())
                 assertEquals("c", preference.value)
                 assertEquals("c", store.getString("listenerChoices"))
@@ -526,10 +539,11 @@ class ThemedChoiceMenuTest {
                 repeat(2) {
                     preference.performClick()
                     idle()
-                    val popup = spinnerPopup(spinner)
+                    val popup = preferencePopup(preference)
                     assertTrue(popup.isShowing)
                     popup.performItemClick(3)
-                    idle()
+                    assertEquals(it, calls.size)
+                    finishPreferenceExit()
                     assertEquals(List(it + 1) { "3" }, calls)
                     assertEquals("3", preference.value)
                     assertEquals("3", store.getString("reselectOutbound"))
@@ -538,7 +552,8 @@ class ThemedChoiceMenuTest {
                 calls.clear()
                 preference.performClick()
                 idle()
-                spinnerPopup(spinner).dismiss()
+                preferencePopup(preference).dismiss()
+                finishPreferenceExit()
                 spinner.onWindowFocusChanged(true)
                 spinner.setSelection(3)
                 idle()
@@ -548,8 +563,8 @@ class ThemedChoiceMenuTest {
                 idle()
                 preference.performClick()
                 idle()
-                spinnerPopup(spinner).performItemClick(0)
-                idle()
+                preferencePopup(preference).performItemClick(0)
+                finishPreferenceExit()
                 assertTrue("Only the profile option supports selecting the same value", calls.isEmpty())
             } finally { database.close() }
         }

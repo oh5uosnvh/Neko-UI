@@ -25,6 +25,20 @@ class GroupExportMenuContractTest {
         assertTrue(menu.contains("groupProfileExport.toFile(group.id, group.displayName())"))
     }
 
+    @Test fun tabMenuUsesHighLayerWithoutChangingTheBorderOrActions() {
+        val menu = source("ui/ConfigurationFragment")
+            .substringAfter("private fun showTabGroupMenu(")
+            .substringBefore("fun deleteGroupWithUndo(")
+        assertTrue(menu.contains("setColor(themeColor(R.attr.colorLayerHigh))"))
+        assertFalse(menu.contains("setColor(themeColor(android.R.attr.colorBackground))"))
+        assertTrue(menu.contains("R.dimen.popup_corner_radius"))
+        assertTrue(menu.contains("R.dimen.card_stroke_width"))
+        for ((directory, color) in listOf("values" to "#FFFFFF", "values-night" to "#252628")) {
+            val palette = File(app, "src/main/res/$directory/colors.xml").readText()
+            assertTrue(palette.contains("<color name=\"layer_high\">$color</color>"))
+        }
+    }
+
     @Test fun bothFragmentsCreateTheSameExporterAndSaveItsState() {
         for (name in listOf("ConfigurationFragment", "GroupFragment")) {
             val fragment = source("ui/$name")

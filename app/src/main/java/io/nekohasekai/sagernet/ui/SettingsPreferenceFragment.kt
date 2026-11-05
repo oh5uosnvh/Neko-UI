@@ -31,6 +31,7 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         inflater: android.view.LayoutInflater, parent: android.view.ViewGroup, savedInstanceState: Bundle?,
     ): androidx.recyclerview.widget.RecyclerView =
         super.onCreateRecyclerView(settingsRowsInflater(inflater, parent), parent, savedInstanceState)
+            .withoutSettingsRowPress()
 
     private lateinit var isProxyApps: SwitchPreference
 
@@ -69,7 +70,11 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
 
         val nightTheme = findPreference<SimpleMenuPreference>(Key.NIGHT_THEME)!!
         nightTheme.setOnPreferenceChangeListener { _, newTheme ->
-            Theme.currentNightMode = (newTheme as String).toInt()
+            // SimpleMenuPreference delivers only after the old popup has exited and detached.
+            // Persist before applyNightTheme can recreate the activity and read this setting.
+            val mode = (newTheme as String).toInt()
+            DataStore.nightTheme = mode
+            Theme.currentNightMode = mode
             Theme.applyNightTheme()
             true
         }

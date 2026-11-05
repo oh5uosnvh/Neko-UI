@@ -56,7 +56,7 @@
             android:layout_width="0dp"
             android:layout_height="48dp"
             android:layout_weight="1.4"
-            android:background="@null"
+            android:background="@drawable/bg_capsule"
             android:clickable="true"
             android:descendantFocusability="blocksDescendants"
             android:focusable="true"

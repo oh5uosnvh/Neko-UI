@@ -88,9 +88,8 @@ class ControlBarStateTest {
             remaining -= step
         }
     }
-    private fun assertBareCapsule(bar: ControlBar) {
-        assertNull(bar.box(R.id.capsule).background)
-        assertNull(bar.box(R.id.capsule).foreground)
+    private fun assertCapsuleHasNoTouchFill(bar: ControlBar) {
+        assertThemedCapsuleWithoutPressFill(bar)
     }
     private fun assertNoTransform(bar: ControlBar) {
         for (view in listOf(bar, bar.box(R.id.capsule), bar.box(R.id.capsule_pair),
@@ -108,7 +107,7 @@ class ControlBarStateTest {
         }
     }
     private fun assertVisual(bar: ControlBar, connected: Boolean) {
-        assertBareCapsule(bar)
+        assertCapsuleHasNoTouchFill(bar)
         assertNoTransform(bar)
         assertEquals(bar.context.getString(if (connected) R.string.control_bar_connected
             else R.string.control_bar_disconnected), bar.text(R.id.capsule_label).text.toString())
@@ -119,7 +118,7 @@ class ControlBarStateTest {
     }
     private fun assertNoAnimation(bar: ControlBar) {
         assertNull(field(bar, "fadeAnimator"))
-        assertBareCapsule(bar)
+        assertCapsuleHasNoTouchFill(bar)
         assertNoTransform(bar)
         assertEquals(1f, bar.box(R.id.capsule_pair).alpha, 0f)
     }
@@ -151,7 +150,7 @@ class ControlBarStateTest {
         assertNoAnimation(bar)
     }
 
-    @Test fun eachDirectionUsesOne150MsPairFadeWithoutFillOrTransformsAndDuplicatesDoNotRestart() = withBar { bar, _, _ ->
+    @Test fun eachDirectionFadesOnlyThePairWhileThemeCapsuleStaysFixedAndDuplicatesDoNotRestart() = withBar { bar, _, _ ->
         for (connected in listOf(true, false)) {
             val state = if (connected) BaseService.State.Connected else BaseService.State.Stopped
             bar.changeState(state)
@@ -184,20 +183,20 @@ class ControlBarStateTest {
         }
     }
 
-    @Test fun bluePinkAmberStayBareInEveryStateAndAfterLiveThemeChanges() {
+    @Test fun bluePinkAmberKeepTheirCapsuleColorWithoutTouchFillAcrossStatesAndThemes() {
         // Resolve by name so this regression coexists with the host-owned Pink palette.
         val pink = ApplicationProviderStyle.pink()
         for (theme in listOf(R.style.Theme_SagerNet_Blue, pink, R.style.Theme_SagerNet_Amber)) {
             for (night in listOf(false, true)) withBar(theme, night) { bar, _, context ->
                 for (state in BaseService.State.values()) {
                     bar.changeState(state)
-                    assertBareCapsule(bar)
+                    assertCapsuleHasNoTouchFill(bar)
                     advance(180)
                     assertVisual(bar, state == BaseService.State.Connected)
                     assertNoAnimation(bar)
                     val capsule = bar.box(R.id.capsule)
                     capsule.isPressed = true
-                    assertBareCapsule(bar)
+                    assertCapsuleHasNoTouchFill(bar)
                     capsule.isPressed = false
                 }
                 context.theme.applyStyle(R.style.Theme_SagerNet_Amber, true)
@@ -413,7 +412,7 @@ class ControlBarStateTest {
         assertTrue(bar.foreground is RippleDrawable)
         assertNull(bar.box(R.id.speed_box).background)
         assertNull(bar.box(R.id.latency_box).background)
-        assertBareCapsule(bar)
+        assertCapsuleHasNoTouchFill(bar)
         assertTrue(bar.clipToOutline)
         val mask = field(bar, "sideMask") as Drawable
         mask.setBounds(0, 0, bar.width, bar.height)
@@ -441,17 +440,30 @@ class ControlBarStateTest {
             bar.dispatchTouchEvent(cancel); cancel.recycle()
             assertFalse(ripple.state.contains(android.R.attr.state_pressed))
         }
+        // Pixel-level guard: the capsule's theme fill is present and pressing changes no pixels.
+        val capsuleBitmap = Bitmap.createBitmap(capsule.width, capsule.height, Bitmap.Config.ARGB_8888)
+        capsule.draw(Canvas(capsuleBitmap))
+        val beforePress = IntArray(capsule.width * capsule.height)
+        capsuleBitmap.getPixels(beforePress, 0, capsule.width, 0, 0, capsule.width, capsule.height)
+        val expectedFill = (capsule.background as android.graphics.drawable.GradientDrawable).color!!.defaultColor
+        assertEquals(expectedFill, capsuleBitmap.getPixel(capsule.width / 2, 3))
         val down = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, cx.toFloat(), cy.toFloat(), 0)
         bar.dispatchTouchEvent(down); down.recycle()
-        assertBareCapsule(bar)
-        advance(64) // A held press must not introduce a toggle fill or trigger the side ripple.
-        assertBareCapsule(bar)
+        assertCapsuleHasNoTouchFill(bar)
+        advance(64) // A held press must not add a touch overlay or trigger the side ripple.
+        capsuleBitmap.eraseColor(Color.TRANSPARENT)
+        capsule.draw(Canvas(capsuleBitmap))
+        val afterPress = IntArray(beforePress.size)
+        capsuleBitmap.getPixels(afterPress, 0, capsule.width, 0, 0, capsule.width, capsule.height)
+        assertArrayEquals("Holding the connection button must not recolor any capsule pixel", beforePress, afterPress)
+        assertCapsuleHasNoTouchFill(bar)
         assertNoTransform(bar)
         assertFalse(ripple.state.contains(android.R.attr.state_pressed))
         val cancel = MotionEvent.obtain(0, 80, MotionEvent.ACTION_CANCEL, cx.toFloat(), cy.toFloat(), 0)
         bar.dispatchTouchEvent(cancel); cancel.recycle()
-        assertBareCapsule(bar)
+        assertCapsuleHasNoTouchFill(bar)
         assertFalse(ripple.state.contains(android.R.attr.state_pressed))
+        capsuleBitmap.recycle()
         bitmap.recycle()
     }
 

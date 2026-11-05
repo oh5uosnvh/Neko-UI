@@ -15,6 +15,7 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.content.Context
 import android.os.SystemClock
@@ -84,6 +85,9 @@ class ControlBar @JvmOverloads constructor(
     private var windowVisible = true
     private var failed = false
     private var fadeAnimator: ValueAnimator? = null
+    private val capsuleBackground = GradientDrawable().apply {
+        cornerRadius = 999f * resources.displayMetrics.density
+    }
     private val sideMask = CapsuleExclusionMask(resources.displayMetrics.density)
     private val sideRipple = RippleDrawable(
         ColorStateList.valueOf(themeColor(android.R.attr.colorControlHighlight, R.color.control_bar_border)),
@@ -123,8 +127,8 @@ class ControlBar @JvmOverloads constructor(
         latencyBox.setOnClickListener { requestReadoutAction() }
         capsule.setOnClickListener { requestToggle() }
         capsule.contentDescription = context.getString(R.string.control_bar_connect_action)
-        // Only the icon/label pair is visible; keep the 48dp click target transparent.
-        capsule.background = null
+        // Keep the persistent THEME capsule; remove only transient press/focus feedback.
+        capsule.background = capsuleBackground
         capsule.foreground = null
         // Preserve the readouts' outer-frame feedback, but never paint the toggle target.
         foreground = sideRipple
@@ -142,6 +146,7 @@ class ControlBar @JvmOverloads constructor(
         val previous = currentState
         val changedPresentation = presentation(previous) != presentation(state)
         currentState = state
+        updateCapsuleSurface()
         togglePending = false
         capsule.isSelected = state == BaseService.State.Connected
         capsule.contentDescription = context.getString(when {
@@ -166,7 +171,12 @@ class ControlBar @JvmOverloads constructor(
         } else resources.getColor(fallback, context.theme)
     }
 
+    private fun updateCapsuleSurface() {
+        capsuleBackground.setColor(themeColor(R.attr.colorMaterial300, R.color.brand_primary_light))
+    }
+
     private fun updateCapsuleIcon() {
+        updateCapsuleSurface()
         capsuleLabel.setText(when (presentation()) {
             Presentation.CONNECTED -> if (compactCapsule) R.string.control_bar_connected_compact
                 else R.string.control_bar_connected

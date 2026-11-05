@@ -325,6 +325,7 @@
          其余属性（含绿色开关样式）与配色变体原样继承。 -->
     <style name="ThemeOverlay.SagerNet.SettingsHighlight" parent="">
         <item name="android:colorControlHighlight">@android:color/transparent</item>
+        <item name="colorControlHighlight">@android:color/transparent</item>
     </style>
 
     <style name="ShapeAppearance.SagerNet.NavItem" parent="ShapeAppearance.MaterialComponents.SmallComponent">

@@ -1688,7 +1688,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             background = android.graphics.drawable.GradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.RECTANGLE
                 cornerRadius = resources.getDimension(R.dimen.popup_corner_radius)
-                setColor(themeColor(android.R.attr.colorBackground))
+                setColor(themeColor(R.attr.colorLayerHigh))
                 setStroke(
                     resources.getDimensionPixelSize(R.dimen.card_stroke_width),
                     androidx.core.content.ContextCompat.getColor(context, R.color.card_stroke),

@@ -13,8 +13,8 @@ import org.junit.Test
  * 1. 普通开关必须统一走 ReferenceSwitch：44x24dp、18dp thumb、300ms 双曲线。
  *    默认框架 widgetLayout 本地覆盖，保留 android:id/switch_widget 与行点击；
  *    三条主题命名空间是配色 fallback，不能替代真实 widget/绑定覆盖测试。
- * 2. 控制条中央按钮仅保留图标＋文字的淡出淡入，无背景/按压底色；
- *    两侧读数继续使用单一外框反馈与中央区域镂空，避免改动其他交互。
+ * 2. 控制条中央按钮保留常驻主题胶囊，只有图标＋文字淡出淡入；
+ *    点击/按压前景为空，两侧读数原有反馈不变。
  */
 class SwitchThemeContractTest {
     private val app = sequenceOf(File("."), File("app")).first {
@@ -128,22 +128,22 @@ class SwitchThemeContractTest {
         assertTrue("long-click preferences share binding scope", ": ReferenceSwitchPreference(" in longClick)
     }
 
-    /** 最新需求：连接按钮无底色，只保留图标/文案的淡出淡入；两侧读数反馈不变。 */
-    @Test fun controlBarUsesOnlyBareIconLabelFade() {
+    /** 常驻主题胶囊必须保留；只取消按压反馈，图标文案仍淡出淡入。 */
+    @Test fun controlBarKeepsThemeCapsuleWithoutTouchFill() {
         val bar = File(
             app, "src/main/java/io/nekohasekai/sagernet/widget/ControlBar.kt"
         ).readText()
         assertTrue("保留两侧读数的外框反馈", "foreground = sideRipple" in bar)
         assertTrue("反馈不能盖住连接按钮", "class CapsuleExclusionMask" in bar)
-        assertTrue("连接按钮不得有胶囊底色", "capsule.background = null" in bar)
-        assertTrue("按压也不得产生底色", "capsule.foreground = null" in bar)
-        assertFalse("不得重新引入色彩动画", "capsuleBackground" in bar)
+        assertTrue("常驻胶囊底色必须保留", "capsule.background = capsuleBackground" in bar)
+        assertTrue("只移除按压前景底色", "capsule.foreground = null" in bar)
+        assertTrue("胶囊取当前主题色", "capsuleBackground.setColor(themeColor(R.attr.colorMaterial300" in bar)
         assertFalse("不得增加旋转中间态", "connectingAnimator" in bar)
         assertFalse("两侧反馈范围不变", "newSideBoxRipple" in bar)
         assertFalse("连接按钮不需要涟漪", "newCapsuleRipple" in bar)
         val layout = File(app, "src/main/res/layout/layout_control_bar.xml").readText()
             .substringAfter("android:id=\"@+id/capsule\"").substringBefore("<LinearLayout")
-        assertTrue("XML 首帧无底色", "android:background=\"@null\"" in layout)
+        assertTrue("XML 首帧保留主题胶囊", "android:background=\"@drawable/bg_capsule\"" in layout)
         assertTrue("XML 首帧无按压底色", "android:foreground=\"@null\"" in layout)
     }
 }

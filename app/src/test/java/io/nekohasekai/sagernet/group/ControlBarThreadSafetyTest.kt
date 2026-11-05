@@ -87,7 +87,7 @@ class ControlBarThreadSafetyTest {
             bar.findViewById<TextView>(R.id.capsule_label).text.toString())
         assertEquals(1f, bar.findViewById<View>(R.id.capsule_pair).alpha, 0f)
         assertEquals(0f, bar.findViewById<View>(R.id.capsule_icon).rotation, 0f)
-        assertNull(capsule.background)
+        assertThemedCapsuleWithoutPressFill(bar)
         assertNull(capsule.foreground)
         onWorker(bar) { it.changeState(BaseService.State.Connected) }
         assertFalse(capsule.isSelected)
@@ -99,7 +99,7 @@ class ControlBarThreadSafetyTest {
             bar.findViewById<TextView>(R.id.capsule_label).text.toString())
         assertEquals(1f, bar.findViewById<View>(R.id.capsule_pair).alpha, 0f)
         assertEquals(0f, bar.findViewById<View>(R.id.capsule_icon).rotation, 0f)
-        assertNull(capsule.background)
+        assertThemedCapsuleWithoutPressFill(bar)
         assertNull(capsule.foreground)
     }
 

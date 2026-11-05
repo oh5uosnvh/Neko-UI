@@ -13,10 +13,15 @@ class ConfigurationOverlayHostContractTest {
     @Test fun coldRestoreCommitAndPagerCreationAllResyncActualPageVisibility() {
         assertTrue(main.contains("controlOverlay = ConfigurationControlOverlay(binding.fragmentHolder, binding.controlBar)"))
         assertTrue(main.contains("registerFragmentLifecycleCallbacks(navInsetCallbacks, true)"))
-        // REQ-08：提交回调除主控件同步外还负责新页淡入（只淡入，无淡出）。
-        val commitBlock = section("transaction.runOnCommit {", "transaction.commitAllowingStateLoss()")
+        // Commit and slide completion both reconcile the actual configuration overlay host.
+        val commitBlock = section("transaction.runOnCommit {", "transaction.commit()")
         assertTrue(commitBlock.contains("syncMainControls()"))
-        assertTrue(commitBlock.contains("fadeInDisplayedPage(fragment)"))
+        assertTrue(main.contains("transaction.setCustomAnimations(animation, animation"))
+        assertTrue(section("private val pageSlide = PageSlideTransition {", "private var currentNavId")
+            .contains("syncMainControls()"))
+        assertTrue(section("internal fun createPageAnimator", "private val navInsetCallbacks")
+            .contains("pageSlide.create(view, enter, nextAnim)"))
+        assertFalse(main.contains("fadeInDisplayedPage"))
         assertTrue(main.contains("onViewAttachedToWindow"))
         assertTrue(main.contains("onFragmentResumed"))
         assertTrue(main.contains("onFragmentViewDestroyed"))
@@ -29,6 +34,8 @@ class ConfigurationOverlayHostContractTest {
         assertTrue(sync.contains("configuration?.select"))
         assertTrue(sync.contains("configuration?.isHidden"))
         assertTrue(sync.contains("root?.isAttachedToWindow"))
+        assertTrue(sync.contains("pageSlide.isRunning"))
+        assertTrue(sync.contains("root?.translationX"))
         assertFalse(sync.contains("changeState("))
         assertFalse(sync.contains("reset("))
         assertFalse(sync.contains("invalidateControlLatency()"))
@@ -47,6 +54,24 @@ class ConfigurationOverlayHostContractTest {
         assertTrue(section("override fun onStop()","override fun onDestroy()").contains("invalidateControlLatency()"))
         assertTrue(section("override fun onDestroy()","override fun onSaveInstanceState").contains("invalidateControlLatency()"))
     }
+    @Test fun stopSaveAndRestoreCannotReviveAQueuedPopupSlideOrGroupJump() {
+        val cancel = section("private fun cancelNavigationWork()", "override fun onStop()")
+        assertTrue(cancel.contains("navigation.cancel()"))
+        assertTrue(cancel.contains("pendingGroupNavigation?.cancel()"))
+        assertTrue(cancel.contains("it.cancelGroupJump()"))
+        assertTrue(cancel.contains("pageSlide.cancel()"))
+        assertTrue(section("override fun onStop()", "override fun onDestroy()").contains("cancelNavigationWork()"))
+        assertTrue(section("override fun onSaveInstanceState", "fun openDrawer()").contains("cancelNavigationWork()"))
+        assertTrue(section("private fun restoreFragments", "private fun syncMainControls").contains("currentNavId = lastId"))
+        val jump = section("fun openGroupAt", "private fun restoreFragments")
+        assertTrue(jump.contains("prepareGroupJump(groupId)"))
+        assertTrue(jump.contains("displayFragment(fragment)"))
+        assertFalse(jump.contains("GroupSettingsActivity"))
+        val xml = File(app, "src/main/res/layout/layout_main.xml").readText()
+        assertFalse(xml.contains("DrawerLayout"))
+        assertFalse(xml.contains("NavigationView"))
+    }
+
     @Test fun insetsNeverReserveControlHeightAndHiddenControlCannotRequestTests() {
         val insets=section("private fun installControlBarInsets()","private fun invalidateControlLatency()")
         assertTrue(insets.contains("controlOverlay.applyInsets"))

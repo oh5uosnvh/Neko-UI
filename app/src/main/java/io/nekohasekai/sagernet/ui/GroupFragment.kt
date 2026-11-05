@@ -67,31 +67,95 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         private const val SORT_DESC = 2
     }
 
-    /** 问题1-B：切回分组页时列表回顶部 */
-    override fun resetScrollState() {
-        if (::groupListView.isInitialized) groupListView.scrollToPosition(0)
-    }
+    // Normal menu navigation retains the cached layout manager position. Only jump resets top.
+    override fun resetScrollState() = Unit
 
-    /** MainActivity 复用本实例时的定位请求（替代一次性 arguments 方案） */
-    private var pendingScrollGroupId = -1L
+    private var preparedGroups: List<ProxyGroup>? = null
+    private var preparedGroupId = -1L
+    private var jumpGeneration = 0
+    private var jump: GroupJumpController? = null
+    private var highlightCard: com.google.android.material.card.MaterialCardView? = null
+    private var highlightColor: android.content.res.ColorStateList? = null
+    private var highlightReset: Runnable? = null
 
-    /** 跳到指定分组（由 MainActivity#openGroupAt 调用） */
-    fun scrollToGroup(groupId: Long) {
-        pendingScrollGroupId = groupId
-        if (::groupListView.isInitialized) {
-            groupListView.post { consumePendingScroll() }
+    suspend fun prepareGroupJump(groupId: Long) {
+        cancelGroupJump()
+        val token = jumpGeneration
+        val groups = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { loadGroups() }
+        if (token != jumpGeneration) return
+        preparedGroups = groups
+        preparedGroupId = groupId
+        if (view != null && ::groupAdapter.isInitialized) {
+            // A prior type filter must not make a requested (otherwise valid) group unreachable.
+            val target = groups.firstOrNull { it.id == groupId }
+            if (target != null && filterSubscription != null &&
+                (target.type == GroupType.SUBSCRIPTION) != filterSubscription) filterSubscription = null
+            groupAdapter.submitGroups(groups)
+            preparedGroups = null
+            jump?.prepare(groupId)
         }
     }
 
-    private fun consumePendingScroll() {
-        if (!::groupListView.isInitialized || !::groupAdapter.isInitialized) return
-        val targetId = pendingScrollGroupId
-        if (targetId <= 0L) return
-        val position = groupAdapter.groupList.indexOfFirst { it.id == targetId }
-        if (position >= 0) {
-            groupListView.scrollToPosition(position)
-            pendingScrollGroupId = -1L
+    fun beginPreparedGroupJump() { jump?.start() }
+
+    internal fun onGroupPageReady() { jump?.onReady() }
+
+    override fun onResume() {
+        super.onResume()
+        onGroupPageReady()
+    }
+
+    fun cancelGroupJump() {
+        jumpGeneration++
+        preparedGroups = null
+        preparedGroupId = -1L
+        jump?.cancel()
+        clearJumpHighlight()
+    }
+
+    /** Compatibility entry; the activity owns the lifecycle-cancelled asynchronous preparation. */
+    fun scrollToGroup(groupId: Long) { (getActivity() as? MainActivity)?.openGroupAt(groupId) }
+
+    private fun clearJumpHighlight() {
+        highlightReset?.let { if (::groupListView.isInitialized) groupListView.removeCallbacks(it) }
+        highlightReset = null
+        val card = highlightCard
+        val color = highlightColor
+        if (card != null && color != null) card.setCardBackgroundColor(color)
+        highlightCard = null
+        highlightColor = null
+    }
+
+    private fun highlightGroup(id: Long) {
+        val holder = groupListView.findViewHolderForItemId(id) as? GroupHolder ?: return
+        if (holder.itemId != id || holder.proxyGroup.id != id) return
+        val card = holder.itemView as? com.google.android.material.card.MaterialCardView ?: return
+        clearJumpHighlight()
+        highlightCard = card
+        highlightColor = card.cardBackgroundColor
+        val foreground = toolbarForeground()
+        card.setCardBackgroundColor(ColorUtils.blendARGB(card.cardBackgroundColor.defaultColor, foreground, .12f))
+        // Visual feedback only: no performClick, pressed state, edit, subscription or drag event.
+        highlightReset = Runnable { clearJumpHighlight() }.also { groupListView.postDelayed(it, 220L) }
+    }
+
+    override fun onHiddenChanged(hidden: Boolean) {
+        super.onHiddenChanged(hidden)
+        if (hidden) { cancelGroupJump(); dismissFilterPicker() }
+        else if (preparedGroupId > 0L) beginPreparedGroupJump()
+    }
+
+    private suspend fun loadGroups(): List<ProxyGroup> {
+        val groups = SagerDatabase.groupDao.allGroups().toMutableList()
+        if (groups.isEmpty()) {
+            SagerDatabase.groupDao.createGroup(ProxyGroup(ungrouped = true))
+            groups.addAll(SagerDatabase.groupDao.allGroups())
         }
+        val ungrouped = groups.firstOrNull { it.ungrouped }
+        if (groups.size > 1 && ungrouped != null && PendingProfileDeletes.count(ungrouped.id) == 0L) {
+            groups.removeAll { it.ungrouped }
+        }
+        return groups
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -114,6 +178,16 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         }
         GroupManager.addListener(groupAdapter)
         groupListView.adapter = groupAdapter
+        jump = GroupJumpController(groupListView, layoutManager,
+            { groupAdapter.groupList.map { it.id } },
+            { !isHidden && view.translationX == 0f && isResumed },
+            ::highlightGroup, ::clearJumpHighlight)
+        preparedGroups?.let { groupAdapter.submitGroups(it) }
+        preparedGroups = null
+        if (preparedGroupId > 0L) {
+            jump?.prepare(preparedGroupId)
+            jump?.start()
+        }
 
         undoManager = UndoSnackbarManager(activity, groupAdapter)
 
@@ -359,30 +433,22 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         private val fullList = ArrayList<ProxyGroup>()
         val groupList = ArrayList<ProxyGroup>()
 
-        suspend fun reload() {
-            val groups = SagerDatabase.groupDao.allGroups().toMutableList()
-            if (groups.isEmpty()) {
-                SagerDatabase.groupDao.createGroup(ProxyGroup(ungrouped = true))
-                groups.addAll(SagerDatabase.groupDao.allGroups())
-            }
-            val ungrouped = groups.firstOrNull { it.ungrouped }
-            if (groups.size > 1 && ungrouped != null && PendingProfileDeletes.count(ungrouped.id) == 0L) {
-                groups.removeAll { it.ungrouped }
-            }
+        private var dataGeneration = 0
+
+        fun submitGroups(groups: List<ProxyGroup>) {
+            dataGeneration++
             fullList.clear()
             fullList.addAll(groups)
             rebuildVisible()
-            groupListView.post {
-                notifyDataSetChanged()
-                val targetId = arguments?.getLong(EXTRA_TARGET_GROUP_ID, -1L) ?: -1L
-                if (targetId > 0L) {
-                    val targetPos = groupList.indexOfFirst { it.id == targetId }
-                    if (targetPos >= 0) {
-                        groupListView.scrollToPosition(targetPos)
-                    }
-                    arguments?.remove(EXTRA_TARGET_GROUP_ID)
-                }
-                consumePendingScroll()
+            notifyDataSetChanged()
+        }
+
+        suspend fun reload() {
+            val token = onMainDispatcher { dataGeneration }
+            val groups = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { loadGroups() }
+            onMainDispatcher {
+                if (view == null || groupAdapter !== this@GroupAdapter || token != dataGeneration) return@onMainDispatcher
+                submitGroups(groups)
             }
         }
 
@@ -463,10 +529,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
         init {
             setHasStableIds(true)
-
-            runOnDefaultDispatcher {
-                reload()
-            }
+            if (preparedGroups == null) viewLifecycleOwner.lifecycleScope.launch { reload() }
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): GroupHolder {
@@ -474,7 +537,13 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         }
 
         override fun onBindViewHolder(holder: GroupHolder, position: Int) {
+            if (holder.itemView === highlightCard) clearJumpHighlight()
             holder.bind(groupList[position])
+        }
+
+        override fun onViewRecycled(holder: GroupHolder) {
+            if (holder.itemView === highlightCard) clearJumpHighlight()
+            super.onViewRecycled(holder)
         }
 
         override fun getItemCount(): Int {
@@ -646,6 +715,10 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     }
 
     override fun onDestroyView() {
+        cancelGroupJump()
+        jump?.close()
+        jump = null
+        preparedGroups = null
         dismissFilterPicker()
         if (::groupAdapter.isInitialized) GroupManager.removeListener(groupAdapter)
         if (::undoManager.isInitialized) undoManager.flush()

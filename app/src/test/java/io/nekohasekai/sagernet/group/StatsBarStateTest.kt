@@ -34,7 +34,6 @@ class StatsBarStateTest {
         controller.setup().visible()
         try {
             val binding=LayoutMainBinding.inflate(activity.layoutInflater)
-            binding.drawerLayout.removeView(binding.navViewBlack)
             activity.setContentView(binding.root)
             layout(binding)
             block(binding,ConfigurationControlOverlay(binding.fragmentHolder,binding.controlBar))

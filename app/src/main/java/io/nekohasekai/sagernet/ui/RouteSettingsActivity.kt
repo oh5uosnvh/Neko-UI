@@ -332,6 +332,7 @@ class RouteSettingsActivity(
             inflater: android.view.LayoutInflater, parent: android.view.ViewGroup, savedInstanceState: Bundle?,
         ): androidx.recyclerview.widget.RecyclerView =
             super.onCreateRecyclerView(settingsRowsInflater(inflater, parent), parent, savedInstanceState)
+                .withoutSettingsRowPress()
 
         var activity: RouteSettingsActivity? = null
 

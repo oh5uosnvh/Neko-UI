@@ -37,6 +37,10 @@ class ReferenceSwitch @JvmOverloads constructor(
     private var targetChecked = false
     private var bindingOwner: Any? = null
     private var suppressAnimation = false
+    private var bindingDepth = 0
+    private var checkedUpdateDepth = 0
+    private var drawableStateDepth = 0
+    private var pendingBoundUpdate: Runnable? = null
     internal var thumbFraction = 0f
         private set
     internal var trackFraction = 0f
@@ -98,9 +102,18 @@ class ReferenceSwitch @JvmOverloads constructor(
     }
 
     override fun setChecked(checked: Boolean) {
-        super.setChecked(checked) // listener/veto/reentrant updates own the real boolean
+        checkedUpdateDepth++
+        try {
+            super.setChecked(checked) // listener/veto/reentrant updates own the real boolean
+        } finally {
+            checkedUpdateDepth--
+        }
         if (!ready) return // called by the framework constructor
         super.jumpDrawablesToCurrentState() // cancel the hidden framework 250ms animator
+        if (bindingDepth == 0) updateMotion()
+    }
+
+    private fun updateMotion() {
         if (suppressAnimation || !canAnimate()) settle() else animateToChecked()
     }
 
@@ -109,12 +122,30 @@ class ReferenceSwitch @JvmOverloads constructor(
         val previous = suppressAnimation
         val newOwner = bindingOwner != owner
         suppressAnimation = previous || newOwner
+        bindingDepth++
         try {
             update()
         } finally {
-            if (newOwner) settle()
+            bindingDepth--
             bindingOwner = owner
             suppressAnimation = previous
+            if (newOwner || suppressAnimation || !isAttachedToWindow) settle()
+            else if (bindingDepth == 0 && isShown) {
+                cancelBoundUpdate()
+                updateMotion()
+            } else if (bindingDepth == 0) {
+                // RecyclerView 1.3 temporarily removes the row's parent while rebinding
+                // a scrapped holder. isAttachedToWindow/isLaidOut remain true, but
+                // isShown is false until LinearLayoutManager adds the SAME row back.
+                // Resolve visibility after that traversal, not inside setChecked.
+                pendingBoundUpdate?.let(::removeCallbacks)
+                val updateMotion = Runnable {
+                    pendingBoundUpdate = null
+                    updateMotion()
+                }
+                pendingBoundUpdate = updateMotion
+                post(updateMotion)
+            }
         }
     }
 
@@ -163,7 +194,13 @@ class ReferenceSwitch @JvmOverloads constructor(
         old?.cancel()
     }
 
+    private fun cancelBoundUpdate() {
+        pendingBoundUpdate?.let(::removeCallbacks)
+        pendingBoundUpdate = null
+    }
+
     private fun settle() {
+        cancelBoundUpdate()
         cancelMotion()
         targetChecked = isChecked
         thumbFraction = if (isChecked) 1f else 0f
@@ -171,9 +208,22 @@ class ReferenceSwitch @JvmOverloads constructor(
         invalidate()
     }
 
+    override fun drawableStateChanged() {
+        drawableStateDepth++
+        try {
+            super.drawableStateChanged()
+        } finally {
+            drawableStateDepth--
+        }
+    }
+
     override fun jumpDrawablesToCurrentState() {
         super.jumpDrawablesToCurrentState()
-        if (ready) settle()
+        // Android 15 View.drawableStateChanged may request a drawable jump while
+        // checked/pressed state is being dispatched. It must still update native
+        // drawables, but cannot commit our independent, non-drawable transition.
+        // Explicit jumps outside state/binding dispatch retain their usual meaning.
+        if (ready && bindingDepth == 0 && checkedUpdateDepth == 0 && drawableStateDepth == 0) settle()
     }
 
     override fun onAttachedToWindow() {
@@ -188,7 +238,8 @@ class ReferenceSwitch @JvmOverloads constructor(
 
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
         super.onVisibilityChanged(changedView, visibility)
-        if (ready && !isShown) settle()
+        // A VISIBLE callback during a scrapped-holder bind is not an actual hide.
+        if (ready && visibility != VISIBLE) settle()
     }
 
     override fun onWindowVisibilityChanged(visibility: Int) {
