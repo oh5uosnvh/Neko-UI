@@ -1,7 +1,6 @@
 package io.nekohasekai.sagernet.group
 
 import android.animation.ValueAnimator
-import android.app.Activity
 import android.app.Application
 import android.os.Looper
 import android.view.LayoutInflater
@@ -59,15 +58,27 @@ class ReferenceSwitchTest {
         }
     }
 
-    private class Fixture : AutoCloseable {
-        val controller = Robolectric.buildActivity(Activity::class.java).setup().visible()
+    private inner class Fixture : AutoCloseable {
+        val controller = Robolectric.buildActivity(androidx.appcompat.app.AppCompatActivity::class.java)
         val activity = controller.get().apply { setTheme(R.style.Theme_SagerNet) }
         val root = FrameLayout(activity)
         val widget = ReferenceSwitch(activity)
         init {
+            controller.setup().visible()
             activity.setContentView(root)
             root.addView(widget, FrameLayout.LayoutParams(-2, -2))
             layout()
+            advance(32) // Flush actual window attachment/visibility before exercising live motion.
+            // Legacy Robolectric manually lays out views without WindowManager relayout;
+            // deliver its visible-window state, while retaining the widget's production guard.
+            val attachInfo = org.robolectric.util.ReflectionHelpers.getField<Any>(
+                activity.window.decorView, "mAttachInfo")
+            org.robolectric.util.ReflectionHelpers.setField(attachInfo, "mWindowVisibility", View.VISIBLE)
+            activity.window.decorView.dispatchWindowVisibilityChanged(View.VISIBLE)
+            layout()
+            assertTrue("test switch must be attached", widget.isAttachedToWindow)
+            assertTrue("test switch must be shown", widget.isShown)
+            assertEquals(View.VISIBLE, widget.windowVisibility)
         }
         fun layout() {
             root.measure(View.MeasureSpec.makeMeasureSpec(600, View.MeasureSpec.EXACTLY),
@@ -113,10 +124,13 @@ class ReferenceSwitchTest {
             w.setOnCheckedChangeListener { _, value -> values += value }
             val time = android.os.SystemClock.uptimeMillis()
             listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP).forEach { action ->
-                val event = MotionEvent.obtain(time, time + 1, action, 20f, 24f, 0)
-                w.dispatchTouchEvent(event)
+                val event = MotionEvent.obtain(time, time, action, 20f, 24f, 0)
+                assertTrue("native widget handles touch $action", w.dispatchTouchEvent(event))
                 event.recycle()
             }
+            // The real ViewRoot posts its click behind traversal; process it with paused frames.
+            shadowOf(Looper.getMainLooper()).idle()
+            advance(32)
             assertEquals(listOf(true), values)
             assertTrue(w.isChecked)
             assertEquals(0f, w.thumbFraction, .01f)
