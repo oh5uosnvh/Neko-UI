@@ -112,7 +112,7 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         logLevel.setOnLongClickListener {
             if (context == null) return@setOnLongClickListener true
 
-            val view = dialogInputEditText().apply {
+            val view = requireContext().dialogInputEditText().apply {
                 inputType = EditorInfo.TYPE_CLASS_NUMBER
                 var size = DataStore.logBufSize
                 if (size == 0) size = 50

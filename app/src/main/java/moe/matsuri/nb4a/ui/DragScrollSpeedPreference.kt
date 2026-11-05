@@ -28,7 +28,7 @@ class DragScrollSpeedPreference @JvmOverloads constructor(
     }
 
     override fun onClick() {
-        val input = dialogInputEditText().apply {
+        val input = context.dialogInputEditText().apply {
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
             setText(display(currentValue()))
             setSelection(text.length)

@@ -26,7 +26,7 @@ class MTUPreference
         super.onBindViewHolder(holder)
         val itemView: View = holder.itemView
         itemView.setOnLongClickListener {
-            val view = dialogInputEditText().apply {
+            val view = context.dialogInputEditText().apply {
                 inputType = EditorInfo.TYPE_CLASS_NUMBER
                 setText(preferenceDataStore?.getString(key, "") ?: "")
             }
