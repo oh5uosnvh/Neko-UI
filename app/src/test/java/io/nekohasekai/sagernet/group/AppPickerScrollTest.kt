@@ -62,6 +62,7 @@ class AppPickerScrollTest {
                         }) {}
                     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
                         if (position != 0) (holder.itemView as TextView).text = "App $position"
+                        else header.bindHolder(holder)
                     }
                 }
                 list.layoutManager = LinearLayoutManager(activity)
@@ -77,10 +78,11 @@ class AppPickerScrollTest {
                 }
                 layout()
                 search.setText("keep me")
-                assertSame(list, filters.parent)
-                val initialY = filters.y
+                assertSame(list, filters.parent.parent)
+                val shell = filters.parent as View
+                val initialY = shell.y
                 list.scrollBy(0, 160)
-                assertTrue(filters.y < initialY)
+                assertTrue(shell.y < initialY)
                 repeat(4) {
                     list.scrollToPosition(count)
                     layout()
@@ -89,7 +91,7 @@ class AppPickerScrollTest {
                     layout()
                     list.scrollToPosition(0)
                     layout()
-                    assertSame(filters, list.findViewHolderForAdapterPosition(0)!!.itemView)
+                    assertSame(filters.parent, list.findViewHolderForAdapterPosition(0)!!.itemView)
                     assertEquals("keep me", search.text.toString())
                 }
                 count = 0

@@ -11,8 +11,9 @@ class NavigationColdStartContractTest {
     private fun source(name: String) = File(app, "src/main/java/io/nekohasekai/sagernet/ui/$name.kt").readText()
 
     @Test fun hamburgerHasThreeEqualBarsRatherThanTheOldDescendingPaths() {
+        for (icon in listOf("ic_navigation_menu", "ic_topbar_drawer")) {
         val xml = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }
-            .newDocumentBuilder().parse(File(app, "src/main/res/drawable/ic_navigation_menu.xml"))
+            .newDocumentBuilder().parse(File(app, "src/main/res/drawable/$icon.xml"))
         val paths = xml.getElementsByTagName("path")
         assertEquals(1, paths.length)
         val path = paths.item(0) as org.w3c.dom.Element
@@ -26,6 +27,7 @@ class NavigationColdStartContractTest {
             assertEquals("18", it.groupValues[3])
             assertEquals("2", it.groupValues[4])
             assertEquals("3", it.groupValues[5])
+        }
         }
     }
 

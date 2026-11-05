@@ -117,10 +117,11 @@ class AppManagerActivity : ThemedActivity() {
 
         override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
             if (holder is AppViewHolder) holder.bind(filteredApps[position - AppPickerHeader.ROWS])
+            else header.bindHolder(holder)
         }
 
         override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int, payloads: List<Any>) {
-            if (holder !is AppViewHolder) return
+            if (holder !is AppViewHolder) { header.bindHolder(holder); return }
             if (payloads.isNotEmpty()) {
                 @Suppress("UNCHECKED_CAST") holder.handlePayload(payloads as List<String>)
                 return

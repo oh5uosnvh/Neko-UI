@@ -11,14 +11,24 @@ import androidx.recyclerview.widget.RecyclerView
 internal class AppPickerHeader(private val content: View) {
     init {
         (content.parent as? ViewGroup)?.removeView(content)
-        content.layoutParams = RecyclerView.LayoutParams(
+        content.layoutParams = android.widget.FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 
-    private val holder = object : RecyclerView.ViewHolder(content) {}
-    fun createHolder(): RecyclerView.ViewHolder {
-        check(content.parent == null) { "App picker header must not have two live holders" }
-        return holder
+    fun createHolder(): RecyclerView.ViewHolder = object : RecyclerView.ViewHolder(
+        android.widget.FrameLayout(content.context).apply {
+            layoutParams = RecyclerView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+    ) {}
+
+    fun bindHolder(holder: RecyclerView.ViewHolder) {
+        val shell = holder.itemView as ViewGroup
+        if (content.parent !== shell) {
+            (content.parent as? ViewGroup)?.removeView(content)
+            shell.removeAllViews()
+            shell.addView(content)
+        }
     }
 
     /** Keep status feedback below the filters, never over the search/chip controls. */
