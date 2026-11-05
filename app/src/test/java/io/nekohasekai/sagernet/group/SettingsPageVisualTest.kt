@@ -61,8 +61,7 @@ class SettingsPageVisualTest {
     private fun setQualifiersSafely(value: String) {
         try { org.robolectric.RuntimeEnvironment.setQualifiers(value) } catch (_: IllegalArgumentException) { }
     }
-
-
+    private fun color(context: Context, attr: Int): Int = context.obtainStyledAttributes(intArrayOf(attr)).let {
         val value = it.getColor(0, Color.MAGENTA); it.recycle(); value
     }
 
