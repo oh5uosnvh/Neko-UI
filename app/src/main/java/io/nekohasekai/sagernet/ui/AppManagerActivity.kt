@@ -35,11 +35,11 @@ import io.nekohasekai.sagernet.databinding.LayoutAppsBinding
 import io.nekohasekai.sagernet.databinding.LayoutAppsItemBinding
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
-import io.nekohasekai.sagernet.ktx.crossFadeFrom
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.utils.PackageCache
 import io.nekohasekai.sagernet.widget.ListListener
+import io.nekohasekai.sagernet.widget.AppPickerHeader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
@@ -98,11 +98,11 @@ class AppManagerActivity : ThemedActivity() {
             DataStore.individual = apps.filter { isProxiedApp(it) }
                 .joinToString("\n") { it.packageName }
 
-            appsAdapter.notifyItemRangeChanged(0, appsAdapter.itemCount, SWITCH)
+            appsAdapter.updateSwitches()
         }
     }
 
-    private inner class AppsAdapter : RecyclerView.Adapter<AppViewHolder>(),
+    private inner class AppsAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>(),
         Filterable,
         FastScrollRecyclerView.SectionedAdapter {
         var filteredApps = apps
@@ -115,22 +115,30 @@ class AppManagerActivity : ThemedActivity() {
             }.sortedWith(compareBy({ !isProxiedApp(it) }, { it.name.toString() }))
         }
 
-        override fun onBindViewHolder(holder: AppViewHolder, position: Int) =
-            holder.bind(filteredApps[position])
+        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+            if (holder is AppViewHolder) holder.bind(filteredApps[position - AppPickerHeader.ROWS])
+        }
 
-        override fun onBindViewHolder(holder: AppViewHolder, position: Int, payloads: List<Any>) {
+        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int, payloads: List<Any>) {
+            if (holder !is AppViewHolder) return
             if (payloads.isNotEmpty()) {
                 @Suppress("UNCHECKED_CAST") holder.handlePayload(payloads as List<String>)
                 return
             }
-
             onBindViewHolder(holder, position)
         }
 
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): AppViewHolder =
-            AppViewHolder(LayoutAppsItemBinding.inflate(layoutInflater, parent, false))
+        override fun getItemViewType(position: Int) = if (position == 0) AppPickerHeader.VIEW_TYPE else 0
 
-        override fun getItemCount(): Int = filteredApps.size
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder =
+            if (viewType == AppPickerHeader.VIEW_TYPE) header.createHolder()
+            else AppViewHolder(LayoutAppsItemBinding.inflate(layoutInflater, parent, false))
+
+        override fun getItemCount(): Int = filteredApps.size + AppPickerHeader.ROWS
+
+        fun updateSwitches() {
+            notifyItemRangeChanged(AppPickerHeader.ROWS, filteredApps.size, SWITCH)
+        }
 
         private val filterImpl = object : Filter() {
             override fun performFiltering(constraint: CharSequence) = FilterResults().apply {
@@ -153,15 +161,15 @@ class AppManagerActivity : ThemedActivity() {
 
         override fun getFilter(): Filter = filterImpl
 
-        override fun getSectionName(position: Int): String {
-            return filteredApps[position].name.firstOrNull()?.toString() ?: ""
-        }
+        override fun getSectionName(position: Int): String =
+            AppPickerHeader.section(position, filteredApps.size) {
+                filteredApps[it].name.firstOrNull()?.toString() ?: ""
+            }
 
     }
 
-    private val loading by lazy { findViewById<View>(R.id.loading) }
-
     private lateinit var binding: LayoutAppsBinding
+    private lateinit var header: AppPickerHeader
     private val proxiedUids = SparseBooleanArray()
     private var loader: Job? = null
     private var apps = emptyList<ProxiedApp>()
@@ -183,15 +191,16 @@ class AppManagerActivity : ThemedActivity() {
     private fun loadApps() {
         loader?.cancel()
         loader = lifecycleScope.launchWhenCreated {
-            loading.crossFadeFrom(binding.list)
-            val adapter = binding.list.adapter as AppsAdapter
-            withContext(Dispatchers.IO) { adapter.reload() }
-            adapter.filter.filter(binding.search.text?.toString() ?: "")
-            if (apps.isEmpty()) {
-                binding.list.visibility = View.GONE
-                binding.appPlaceholder.root.crossFadeFrom(loading)
-            } else {
-                binding.list.crossFadeFrom(loading)
+            // Keep the filters interactive; neither loading nor empty feedback covers them.
+            binding.list.visibility = View.VISIBLE
+            binding.loading.visibility = View.VISIBLE
+            binding.appPlaceholder.root.visibility = View.GONE
+            withContext(Dispatchers.IO) { appsAdapter.reload() }
+            appsAdapter.filter.filter(binding.search.text?.toString() ?: "") {
+                if (!isFinishing && !isDestroyed) {
+                    binding.loading.visibility = View.GONE
+                    binding.appPlaceholder.root.visibility = if (apps.isEmpty()) View.VISIBLE else View.GONE
+                }
             }
         }
     }
@@ -200,6 +209,9 @@ class AppManagerActivity : ThemedActivity() {
         super.onCreate(savedInstanceState)
 
         binding = LayoutAppsBinding.inflate(layoutInflater)
+        header = AppPickerHeader(binding.appListHeader)
+        header.placeStatus(binding.loading)
+        header.placeStatus(binding.appPlaceholder.root)
         setContentView(binding.root)
 
         binding.appPlaceholder.openSettings.setOnClickListener {
@@ -325,7 +337,7 @@ class AppManagerActivity : ThemedActivity() {
                             binding.list, R.string.action_import_msg, Snackbar.LENGTH_LONG
                         )).show()
                         initProxiedUids(apps)
-                        appsAdapter.notifyItemRangeChanged(0, appsAdapter.itemCount, SWITCH)
+                        appsAdapter.updateSwitches()
                         return true
                     } catch (_: IllegalArgumentException) {
                     }

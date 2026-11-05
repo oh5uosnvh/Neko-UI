@@ -42,6 +42,7 @@ import io.nekohasekai.sagernet.fmt.AbstractBean
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.ui.ThemedActivity
 import io.nekohasekai.sagernet.widget.ListListener
+import io.nekohasekai.sagernet.widget.createSettingsCardAdapter
 import io.nekohasekai.sagernet.widget.CopyableEditTextPreferenceDialog
 import kotlinx.parcelize.Parcelize
 import kotlin.properties.Delegates
@@ -224,6 +225,9 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
         ): androidx.recyclerview.widget.RecyclerView =
             super.onCreateRecyclerView(settingsRowsInflater(inflater, parent), parent, savedInstanceState)
                 .withoutSettingsRowPress()
+
+        override fun onCreateAdapter(preferenceScreen: androidx.preference.PreferenceScreen) =
+            createSettingsCardAdapter(preferenceScreen)
 
         var activity: ProfileSettingsActivity<*>? = null
 

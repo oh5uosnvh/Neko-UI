@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Direct children of widget.TitleBarLayout. The appbar/toolbar IDs already exist. -->
+    <item name="title_bar_content" type="id" />
+    <item name="title_bar_footer" type="id" />
+</resources>

@@ -300,7 +300,7 @@ class LayeredThemeResourceTest {
                 }
             }
         }
-        @Test fun settingsRemainOnePlainNativePageWithNoNewCardOrBorder() {
+        @Test fun settingsUseSectionCardsWithoutOneFullscreenOuterCard() {
             for(night in listOf(false,true)) for(layout in listOf(R.layout.layout_config_settings,
                 R.layout.layout_settings_activity)) {
                 val context=context(night,R.style.Theme_SagerNet)
@@ -310,6 +310,13 @@ class LayeredThemeResourceTest {
                 assertEquals(color(context,R.attr.colorLayerLow),(root.background as ColorDrawable).color)
                 assertNull(settings.background)
                 assertFalse(root is MaterialCardView)
+                assertTrue(root is io.nekohasekai.sagernet.widget.TitleBarLayout)
+                val viewport = root.findViewById<View>(R.id.title_bar_content)
+                assertSame(viewport, settings.parent)
+                assertNull(viewport.background) // per-section decoration, not a full-page card
+                val toolbar = root.findViewById<MaterialToolbar>(R.id.toolbar)
+                assertNull(toolbar.background) // glyphs/actions overlay only the fading strip
+                assertEquals(0f, root.findViewById<View>(R.id.appbar).elevation, 0f)
             }
         }
     }

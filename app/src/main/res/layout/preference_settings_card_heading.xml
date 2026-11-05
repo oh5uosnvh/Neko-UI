@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:baselineAligned="false"
+    android:paddingStart="@dimen/settings_card_heading_inset"
+    android:paddingEnd="@dimen/settings_card_heading_inset"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp"
+    android:background="@android:color/transparent">
+
+    <!-- No reserved icon column: headings begin 16dp inside the card, like About. -->
+    <ImageView
+        android:id="@android:id/icon"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_marginEnd="16dp"
+        android:importantForAccessibility="no"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@android:id/title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAlignment="viewStart"
+            android:textAppearance="?attr/textAppearanceSubtitle2" />
+
+        <TextView
+            android:id="@android:id/summary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAlignment="viewStart"
+            android:textAppearance="?attr/textAppearanceBody2"
+            android:textColor="?android:attr/textColorSecondary"
+            android:visibility="gone" />
+    </LinearLayout>
+</LinearLayout>

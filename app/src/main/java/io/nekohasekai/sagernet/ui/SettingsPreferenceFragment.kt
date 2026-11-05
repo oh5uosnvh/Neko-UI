@@ -22,6 +22,7 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
 import io.nekohasekai.sagernet.widget.ReferenceSwitch
+import io.nekohasekai.sagernet.widget.createSettingsCardAdapter
 import com.google.android.material.textfield.TextInputEditText
 import java.io.File
 
@@ -32,6 +33,9 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
     ): androidx.recyclerview.widget.RecyclerView =
         super.onCreateRecyclerView(settingsRowsInflater(inflater, parent), parent, savedInstanceState)
             .withoutSettingsRowPress()
+
+    override fun onCreateAdapter(preferenceScreen: PreferenceScreen) =
+        createSettingsCardAdapter(preferenceScreen)
 
     private lateinit var isProxyApps: SwitchPreference
 

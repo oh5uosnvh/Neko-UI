@@ -73,6 +73,7 @@ class MainActivity : ThemedActivity(),
     lateinit var binding: LayoutMainBinding
     private lateinit var navigation: CompactNavigationMenu
     private val pageSlide = PageSlideTransition {
+        clearNavigationContent()
         syncMainControls()
         (currentMainFragment as? GroupFragment)?.onGroupPageReady()
         currentMainFragment?.view?.postInvalidateOnAnimation()
@@ -87,25 +88,19 @@ class MainActivity : ThemedActivity(),
     private var controlErrorDetail: String? = null
     private var lastErrorDialog = ""
 
-    // Navigation keeps cached page instances warm; the compact popup closes before
-    // FragmentManager slides the existing pages horizontally without re-inflation.
-    /** nav id -> 已创建的 Fragment 实例（同一页面只 inflate 一次） */
+    // Only pages explicitly visited by the user are retained. Cold navigation waits for the
+    // requested view's real first draw instead of inflating unrelated pages during startup.
     private val fragmentCache = HashMap<Int, ToolbarFragment>()
+    private var navigationGeneration = 0L
+    private var navigationCommitPending = false
+    private var pendingPageNavigation: Runnable? = null
+    private var coldNavigationFragment: ToolbarFragment? = null
+    private var navigationContent: NavigationPageContent? = null
 
-    private var warmIndex = 0
-    private val drawerWarmup = object : Runnable {
-        override fun run() {
-            if (isFinishing || isDestroyed || supportFragmentManager.isStateSaved || warmIndex >= DRAWER_WARM_IDS.size) return
-            val id = DRAWER_WARM_IDS[warmIndex++]
-            val fragment = obtainFragment(id)
-            if (!fragment.isAdded && currentMainFragment !== fragment) {
-                supportFragmentManager.beginTransaction().setReorderingAllowed(true)
-                    .add(R.id.fragment_holder, fragment, tagOf(fragment))
-                    .hide(fragment).setMaxLifecycle(fragment, Lifecycle.State.STARTED)
-                    .commitAllowingStateLoss()
-            }
-            binding.root.postDelayed(this, DRAWER_WARM_INTERVAL_MS)
-        }
+    private fun clearNavigationContent() {
+        navigationContent?.dispose()
+        navigationContent = null
+        coldNavigationFragment = null
     }
 
     companion object {
@@ -116,15 +111,6 @@ class MainActivity : ThemedActivity(),
         )
         private const val NAV_TAG_PREFIX = "main_nav:"
         private const val STATE_NAV_ID = "main_nav_id"
-        // Six light side pages are added one-by-one from 240–1490 ms after startup.
-        // WebView/traffic stays cold; configuration is already the active page.
-        private val DRAWER_WARM_IDS = intArrayOf(
-            R.id.nav_group, R.id.nav_route, R.id.nav_settings,
-            R.id.nav_tools, R.id.nav_logcat, R.id.nav_about,
-        )
-        private const val DRAWER_WARM_START_MS = 240L
-        private const val DRAWER_WARM_INTERVAL_MS = 250L
-
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -148,6 +134,8 @@ class MainActivity : ThemedActivity(),
             if (navigation.isShowing) {
                 navigation.dismiss()
             } else if (currentMainFragment is ConfigurationFragment) {
+                cancelPendingPageNavigation()
+                pageSlide.cancel()
                 moveTaskToBack(true)
             } else {
                 displayFragmentWithId(R.id.nav_configuration, forward = false)
@@ -180,10 +168,6 @@ class MainActivity : ThemedActivity(),
         }
 
         refreshNavMenu(DataStore.enableClashAPI)
-
-        // Cold-start only: stagger six lightweight side pages across < 2 seconds. This warms
-        // their first inflation without the old synchronous measure/layout or WebView prewarm.
-        if (savedInstanceState == null) binding.root.postDelayed(drawerWarmup, DRAWER_WARM_START_MS)
 
         // sdk 33 notification
         if (Build.VERSION.SDK_INT >= 33) {
@@ -434,25 +418,77 @@ class MainActivity : ThemedActivity(),
     fun onNavigationItemSelected(item: MenuItem): Boolean {
         if (!item.isVisible || !item.isEnabled) return false
         if (item.itemId == currentNavId && currentMainFragment != null) {
+            cancelPendingPageNavigation()
             navigation.dismiss()
             return true
         }
         return displayFragmentWithId(item.itemId)
     }
 
-    /** Reuse cached pages. FragmentManager retains exiting views until their animators end. */
-    @SuppressLint("CommitTransaction")
+    /** Reuse cached pages; delay only the requested commit, never unrelated UI construction. */
     fun displayFragment(fragment: ToolbarFragment, forward: Boolean = true) {
         if (supportFragmentManager.isStateSaved || isFinishing || isDestroyed) return
         navigation.cancel()
+        cancelPendingPageNavigation()
         if (currentMainFragment === fragment) return
         pendingGroupNavigation?.cancel()
         pendingGroupNavigation = null
         (currentMainFragment as? GroupFragment)?.cancelGroupJump()
         pageSlide.cancel()
+        val generation = navigationGeneration
+        if (currentMainFragment == null || !binding.root.isAttachedToWindow) {
+            commitPageNavigation(fragment, forward, generation)
+            return
+        }
+        // Popup dismissal runs in an animation callback. Yield a drawn frame before cold
+        // inflation, and coalesce rapid selections without flushing FragmentManager globally.
+        val commit = object : Runnable {
+            override fun run() {
+                if (generation != navigationGeneration) return
+                if (!canNavigate()) { cancelPendingPageNavigation(); return }
+                if (navigationCommitPending) {
+                    binding.root.postOnAnimation(this)
+                    return
+                }
+                pendingPageNavigation = null
+                commitPageNavigation(fragment, forward, generation)
+            }
+        }
+        pendingPageNavigation = commit
+        binding.root.postOnAnimation {
+            if (generation == navigationGeneration) binding.root.post(commit)
+        }
+    }
+
+    private fun canNavigate() = !isFinishing && !isDestroyed &&
+        !supportFragmentManager.isStateSaved &&
+        lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+
+    private fun cancelPendingPageNavigation() {
+        navigationGeneration++
+        clearNavigationContent()
+        pendingPageNavigation?.let { if (::binding.isInitialized) binding.root.removeCallbacks(it) }
+        pendingPageNavigation = null
+    }
+
+    /** No commitNow/executePendingTransactions: nested pages own their initialization. */
+    @SuppressLint("CommitTransaction")
+    private fun commitPageNavigation(fragment: ToolbarFragment, forward: Boolean, generation: Long) {
+        if (generation != navigationGeneration || supportFragmentManager.isStateSaved ||
+            isFinishing || isDestroyed) return
         val old = currentMainFragment
+        if (old === fragment) return
+        // Capture before a traffic removal destroys Fragment.view; the animator still owns it.
+        val outgoingView = old?.view
         val transaction = supportFragmentManager.beginTransaction().setReorderingAllowed(true)
-        if (old != null && old.isAdded && binding.root.isAttachedToWindow) {
+        if (old != null && old.isAdded && binding.root.isAttachedToWindow && canNavigate()) {
+            pageSlide.prepare(binding.fragmentHolder,
+                isValid = { generation == navigationGeneration && canNavigate() },
+                isReady = { !navigationCommitPending && currentMainFragment === fragment &&
+                    (navigationContent?.isReady() != false) &&
+                    NavigationFrameGate.isPageReady(fragment.view) },
+                accepts = { it === outgoingView || it === fragment.view })
+            if (fragment.view == null) coldNavigationFragment = fragment
             val animation = if (forward) R.animator.page_slide_forward else R.animator.page_slide_backward
             transaction.setCustomAnimations(animation, animation, R.animator.page_slide_backward, R.animator.page_slide_backward)
         }
@@ -481,7 +517,11 @@ class MainActivity : ThemedActivity(),
         currentMainFragment = fragment
         currentNavId = fragmentCache.entries.firstOrNull { it.value === fragment }?.key ?: R.id.nav_traffic
         navigation.setSelected(currentNavId)
-        transaction.runOnCommit { syncMainControls() }
+        navigationCommitPending = true
+        transaction.runOnCommit {
+            navigationCommitPending = false
+            syncMainControls()
+        }
         transaction.commit()
         syncMainControls()
     }
@@ -498,6 +538,10 @@ class MainActivity : ThemedActivity(),
             savedInstanceState: Bundle?,
         ) {
             applyStatusBarInset(v)
+            if (f === coldNavigationFragment) {
+                navigationContent?.dispose()
+                navigationContent = NavigationPageContent(v, currentNavId)
+            }
             if (f is ConfigurationFragment && !f.select) {
                 v.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                     override fun onViewAttachedToWindow(view: View) = syncMainControls()
@@ -707,8 +751,13 @@ class MainActivity : ThemedActivity(),
         navigation.cancel()
         pendingGroupNavigation?.cancel()
         pendingGroupNavigation = null
-        if (id == currentNavId && currentMainFragment != null) return true
+        if (id == currentNavId && currentMainFragment != null) {
+            cancelPendingPageNavigation()
+            return true
+        }
         if (id == R.id.nav_faq) {
+            cancelPendingPageNavigation()
+            pageSlide.cancel()
             launchCustomTab("https://matsuridayo.github.io/")
             return false
         }
@@ -830,6 +879,7 @@ class MainActivity : ThemedActivity(),
     }
 
     private fun cancelNavigationWork() {
+        cancelPendingPageNavigation()
         if (::navigation.isInitialized) navigation.cancel()
         pendingGroupNavigation?.cancel()
         pendingGroupNavigation = null
@@ -847,7 +897,6 @@ class MainActivity : ThemedActivity(),
     override fun onDestroy() {
         cancelNavigationWork()
         invalidateControlLatency()
-        if (::binding.isInitialized) binding.root.removeCallbacks(drawerWarmup)
         if (::binding.isInitialized) {
             binding.controlBar.onToggle = null
             binding.controlBar.onTest = null
@@ -871,6 +920,8 @@ class MainActivity : ThemedActivity(),
 
     fun openNavigationMenu(anchor: View? = null) {
         if (supportFragmentManager.isStateSaved || isFinishing || isDestroyed) return
+        cancelPendingPageNavigation()
+        pageSlide.cancel()
         pendingGroupNavigation?.cancel()
         pendingGroupNavigation = null
         (currentMainFragment as? GroupFragment)?.cancelGroupJump()

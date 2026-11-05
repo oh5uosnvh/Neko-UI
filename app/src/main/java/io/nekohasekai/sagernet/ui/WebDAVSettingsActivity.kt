@@ -15,6 +15,7 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.ktx.snackbar
+import io.nekohasekai.sagernet.widget.createSettingsCardAdapter
 import kotlinx.coroutines.launch
 import okhttp3.Credentials
 import okhttp3.OkHttpClient
@@ -42,9 +43,13 @@ class WebDAVSettingsActivity : ThemedActivity() {
             setHomeAsUpIndicator(R.drawable.ic_navigation_close)
         }
         
-        supportFragmentManager.beginTransaction()
-            .replace(R.id.settings, WebDAVSettingsFragment())
-            .commit()
+        if (supportFragmentManager.findFragmentById(R.id.settings) == null) {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.settings, WebDAVSettingsFragment())
+                .commitNow()
+        }
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(
+            findViewById(R.id.title_bar_content), io.nekohasekai.sagernet.widget.ListListener)
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -58,6 +63,9 @@ class WebDAVSettingsActivity : ThemedActivity() {
         ): androidx.recyclerview.widget.RecyclerView =
             super.onCreateRecyclerView(settingsRowsInflater(inflater, parent), parent, savedInstanceState)
                 .withoutSettingsRowPress()
+
+        override fun onCreateAdapter(preferenceScreen: androidx.preference.PreferenceScreen) =
+            createSettingsCardAdapter(preferenceScreen)
 
         private var lastClickTime = 0L
         private val DEBOUNCE_TIME = 1000L  // 1秒内不允许重复点击

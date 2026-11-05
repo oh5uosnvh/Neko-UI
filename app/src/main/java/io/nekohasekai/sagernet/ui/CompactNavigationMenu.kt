@@ -185,7 +185,11 @@ internal class CompactNavigationMenu(
                 return super.dispatchKeyEvent(event)
             }
         }.apply {
-            background = round(surfaceColor, 16)
+            background = round(surfaceColor, 16).apply {
+                // Match the unselected node card, including density and day/night palette.
+                setStroke(context.resources.getDimensionPixelSize(R.dimen.card_stroke_width),
+                    context.getColor(R.color.card_stroke))
+            }
             clipToOutline = true
             layoutDirection = anchor?.layoutDirection ?: host.layoutDirection
             isFillViewport = false

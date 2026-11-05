@@ -1,41 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<io.nekohasekai.sagernet.widget.TitleBarLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:duplicateParentState="false"
-    android:orientation="vertical">
+    android:background="?attr/colorLayerLow">
 
-    <com.google.android.material.appbar.AppBarLayout
-        android:id="@+id/appbar"
+    <FrameLayout
+        android:id="@id/title_bar_content"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="?attr/colorPrimary">
+        android:layout_height="match_parent">
 
-        <com.google.android.material.appbar.CollapsingToolbarLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            app:layout_scrollFlags="scroll|enterAlways"
-            app:titleEnabled="false">
-
-            <com.google.android.material.appbar.MaterialToolbar
-                android:id="@+id/toolbar"
-                android:layout_width="match_parent"
-                android:layout_height="?attr/actionBarSize"
-                android:background="?attr/colorPrimary"
-                android:elevation="0dp"
-                android:theme="?actionBarTheme"
-                android:touchscreenBlocksFocus="false"
-                app:layout_collapseMode="pin"
-                app:popupTheme="@style/ThemeOverlay.AppCompat.DayNight"
-                app:title="@string/app_name" />
-
+            <!-- Moved into the RecyclerView header after ViewBinding inflation. -->
             <LinearLayout
+                android:id="@+id/app_list_header"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingTop="56dp">
+                android:orientation="vertical">
 
                 <com.google.android.material.card.MaterialCardView
                     android:layout_width="match_parent"
@@ -120,10 +101,6 @@
 
             </LinearLayout>
 
-        </com.google.android.material.appbar.CollapsingToolbarLayout>
-
-    </com.google.android.material.appbar.AppBarLayout>
-
     <LinearLayout
         android:id="@+id/loading"
         android:layout_width="match_parent"
@@ -149,11 +126,35 @@
         app:fastScrollPopupTextColor="?colorPrimary"
         app:fastScrollThumbColor="?colorPrimary"
         app:fastScrollThumbInactiveColor="?colorPrimary"
-        app:layout_behavior="@string/appbar_scrolling_view_behavior"
         tools:listitem="@layout/layout_apps_item" />
 
     <include
         android:id="@+id/app_placeholder"
         layout="@layout/layout_app_placeholder" />
 
-</androidx.coordinatorlayout.widget.CoordinatorLayout>
+    </FrameLayout>
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:id="@+id/appbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorLayerLow"
+        android:elevation="0dp"
+        android:stateListAnimator="@null"
+        app:elevation="0dp"
+        app:liftOnScroll="false">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:background="?attr/colorLayerLow"
+            android:theme="@style/ThemeOverlay.SagerNet.LayeredToolbar"
+            android:touchscreenBlocksFocus="false"
+            app:navigationIconTint="?android:attr/textColorPrimary"
+            app:popupTheme="@style/ThemeOverlay.SagerNet.LayeredPopup"
+            app:titleTextColor="?android:attr/textColorPrimary"
+            app:title="@string/proxied_apps" />
+
+    </com.google.android.material.appbar.AppBarLayout>
+</io.nekohasekai.sagernet.widget.TitleBarLayout>

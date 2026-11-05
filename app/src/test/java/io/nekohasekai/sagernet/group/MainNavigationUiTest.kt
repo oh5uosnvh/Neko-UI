@@ -92,6 +92,12 @@ class MainNavigationUiTest {
             assertEquals(Color.TRANSPARENT, (popup.background as ColorDrawable).color)
             assertEquals(Color.WHITE, (content.background as GradientDrawable).color!!.defaultColor)
             assertEquals(Color.WHITE, f.menu.surfaceColor)
+            val surface = content.background as GradientDrawable
+            assertEquals(f.activity.resources.getDimensionPixelSize(R.dimen.card_stroke_width),
+                shadowOf(surface).strokeWidth)
+            assertEquals(f.activity.getColor(R.color.card_stroke), shadowOf(surface).strokeColor)
+            assertEquals(16f, surface.cornerRadius, 0f)
+            assertTrue(content.clipToOutline)
             assertTrue(popup.width in 1..304)
             val frame = Rect().also { f.anchor.getWindowVisibleDisplayFrame(it) }
             assertTrue(popup.height in 1..(frame.height() - 16))
@@ -221,6 +227,11 @@ class MainNavigationUiTest {
             val popup = f.open()
             assertEquals(Color.rgb(37, 38, 40), f.menu.surfaceColor)
             assertEquals(f.menu.surfaceColor, (popup.contentView.background as GradientDrawable).color!!.defaultColor)
+            val surface = popup.contentView.background as GradientDrawable
+            assertEquals(f.activity.resources.getDimensionPixelSize(R.dimen.card_stroke_width),
+                shadowOf(surface).strokeWidth)
+            assertEquals(f.activity.getColor(R.color.card_stroke), shadowOf(surface).strokeColor)
+            assertEquals(16f, surface.cornerRadius, 0f)
             assertEquals(View.LAYOUT_DIRECTION_RTL, popup.contentView.layoutDirection)
             for (id in allIds) assertNotNull(popup.contentView.findViewById<View>(id))
         }

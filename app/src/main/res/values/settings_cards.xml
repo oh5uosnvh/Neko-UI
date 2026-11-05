@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="settings_card_inset">8dp</dimen>
+    <dimen name="settings_card_gap">8dp</dimen>
+    <dimen name="settings_card_content_padding">8dp</dimen>
+    <dimen name="settings_card_heading_inset">16dp</dimen>
+</resources>

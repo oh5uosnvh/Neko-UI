@@ -39,6 +39,7 @@ import io.nekohasekai.sagernet.widget.AppListPreference
 import io.nekohasekai.sagernet.widget.ListListener
 import io.nekohasekai.sagernet.widget.CopyableEditTextPreferenceDialog
 import io.nekohasekai.sagernet.widget.OutboundPreference
+import io.nekohasekai.sagernet.widget.createSettingsCardAdapter
 import kotlinx.parcelize.Parcelize
 import moe.matsuri.nb4a.ui.EditConfigPreference
 
@@ -333,6 +334,9 @@ class RouteSettingsActivity(
         ): androidx.recyclerview.widget.RecyclerView =
             super.onCreateRecyclerView(settingsRowsInflater(inflater, parent), parent, savedInstanceState)
                 .withoutSettingsRowPress()
+
+        override fun onCreateAdapter(preferenceScreen: androidx.preference.PreferenceScreen) =
+            createSettingsCardAdapter(preferenceScreen)
 
         var activity: RouteSettingsActivity? = null
 
