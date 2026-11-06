@@ -7,6 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.appcompat.widget.Toolbar
+import com.google.android.material.appbar.AppBarLayout
 import io.nekohasekai.sagernet.R
 import kotlin.math.max
 
@@ -14,13 +15,19 @@ import kotlin.math.max
 internal object TitleGlyphMetrics {
     fun titleView(toolbar: Toolbar): TextView? {
         // ConfigurationFragment hides the native Toolbar title and installs a custom
-        // TextView in the appbar row. Prefer that explicit marker when present.
-        var ancestor: View? = toolbar
-        while (ancestor != null) {
-            (ancestor as? ViewGroup)?.findViewById<TextView>(R.id.title_bar_title)?.let { marked ->
+        // TextView in the appbar row. Prefer that explicit marker when present — but
+        // search ONLY inside this page's appbar subtree. Hidden sibling pages stay
+        // attached in MainActivity's fragment holder and also carry a marked title;
+        // walking above the appbar would return a foreign view whose ancestor chain
+        // cannot reach this page's TitleBarLayout, silently zeroing the edge band.
+        var scope: ViewGroup? = toolbar
+        while (scope != null) {
+            scope.findViewById<TextView>(R.id.title_bar_title)?.let { marked ->
                 if (marked.visibility == View.VISIBLE && !marked.text.isNullOrEmpty()) return marked
             }
-            ancestor = ancestor.parent as? View
+            // Stop at this page's appbar: never search above it.
+            if (scope is AppBarLayout) break
+            scope = scope.parent as? ViewGroup
         }
         if (toolbar.title.isNullOrEmpty()) return null
         var result: TextView? = null
