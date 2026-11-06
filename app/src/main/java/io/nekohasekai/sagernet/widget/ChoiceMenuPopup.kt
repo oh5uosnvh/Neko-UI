@@ -96,12 +96,17 @@ internal class ChoiceMenuPopup(
     }
 
     /** Test/driver hook with the exact user-click semantics: stage the choice, own the exit. */
-    fun performItemClick(position: Int) {
-        if (!exiting && !finished && position in 0 until (listView.adapter?.count ?: 0)) {
-            pending = position
-            dismiss()
-        }
+    fun performItemClick(position: Int): Boolean {
+        if (exiting || finished) return false
+        if (position !in 0 until (listView.adapter?.count ?: 0)) return false
+        pending = position
+        dismiss()
+        return true
     }
+
+
+    /** Modal list semantics (takes input focus), same contract as ListPopupWindow.isModal(). */
+    val isModal: Boolean get() = isFocusable
 
     fun show() {
         if (!anchor.isAttachedToWindow || anchor.windowToken == null) {
@@ -119,7 +124,7 @@ internal class ChoiceMenuPopup(
 
     override fun dismiss() {
         if (finished || exiting) return
-        if (!isShowing || !surface.isAttachedToWindow) {
+        if (!isShowing) {
             cancelImmediately()
             return
         }

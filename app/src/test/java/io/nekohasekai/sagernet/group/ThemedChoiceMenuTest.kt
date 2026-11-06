@@ -11,6 +11,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Looper
+import java.time.Duration
 import android.util.Xml
 import android.view.ContextThemeWrapper
 import android.view.LayoutInflater
@@ -21,7 +22,6 @@ import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.graphics.drawable.DrawableWrapperCompat
-import androidx.appcompat.widget.ListPopupWindow
 import androidx.core.content.ContextCompat
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceManager
@@ -291,9 +291,9 @@ class ThemedChoiceMenuTest {
             for ((selected, outbound) in outbounds.withIndex()) {
                 for (clicked in entries.indices) {
                     val calls = mutableListOf<Int>()
-                    lateinit var popup: ListPopupWindow
+                    lateinit var popup: ChoiceMenuPopup
                     popup = RouteOutboundMenu.show(f.anchor, outbound) {
-                        assertFalse("Selection is immediate but runs after the popup closes", popup.isShowing)
+                        assertFalse("Selection is delivered only after the popup closes", popup.isShowing)
                         calls += it
                     }
                     try {
@@ -310,9 +310,14 @@ class ThemedChoiceMenuTest {
                         for (position in entries.indices) assertRow(
                             list.adapter.getView(position, null, list), f.activity,
                             entries[position], position == selected)
-                        assertBackground(f.activity, popup.background as GradientDrawable)
+                        assertBackground(f.activity, popup.contentView.background as GradientDrawable)
                         assertClipping(list)
                         assertTrue(popup.performItemClick(clicked))
+                        // The unified engine owns the visible exit first; the choice is
+                        // delivered after the shrink+fade removal, never one-frame.
+                        assertTrue(popup.isShowing)
+                        assertTrue(calls.isEmpty())
+                        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(400))
                         assertEquals(listOf(clicked), calls)
                         assertFalse(popup.isShowing)
                         assertFalse(popup.performItemClick(clicked))
