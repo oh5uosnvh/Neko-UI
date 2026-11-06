@@ -221,7 +221,7 @@ internal class CompactNavigationMenu(
         closing = true
         afterClose = action
         io.nekohasekai.sagernet.widget.PopupEntrance.cancel(popup.contentView)
-        animate(popup.contentView, opening = false)
+        animate(popup.contentView)
     }
 
     private fun animate(content: View) {
