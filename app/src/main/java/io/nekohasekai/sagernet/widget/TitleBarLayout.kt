@@ -46,6 +46,10 @@ class TitleBarLayout @JvmOverloads constructor(
     var titleGlyphBottom: Float = 0f
         private set
 
+    /** Read-only geometry contract for tests and edge renderers; does not move content. */
+    internal fun titleEdgeBandHeight(): Float =
+        (headerBottom.toFloat() - titleGlyphBottom).coerceAtLeast(0f)
+
     /** Optional animation hook. Nonzero translationX on this root/ancestors is automatic. */
     var pageTransitionRunning: Boolean = false
         set(value) { if (field != value) { field = value; invalidate() } }
