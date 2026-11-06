@@ -386,6 +386,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             elevation = dp2px(8).toFloat()
             isOutsideTouchable = true
             showAsDropDown(anchor, 0, dp2px(4))
+            io.nekohasekai.sagernet.widget.PopupEntrance.animate(card)
         }
     }
 
@@ -815,8 +816,13 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 if (menuGroup.type != GroupType.SUBSCRIPTION) {
                     popup.menu.removeItem(R.id.action_share_subscription)
                 }
-                popup.setOnMenuItemClickListener { item -> onMenuItemClick(item, menuGroup) }
-                popup.show()
+                val listener = PopupMenu.OnMenuItemClickListener { item ->
+                    onMenuItemClick(item, menuGroup)
+                }
+                popup.setOnMenuItemClickListener(listener)
+                AppCompatPopupWindowHelper.show(popup.menu, it,
+                    onClick = { listener.onMenuItemClick(it) },
+                    fallback = { popup.show() })
             }
 
             if (proxyGroup.id in GroupUpdater.updating) {

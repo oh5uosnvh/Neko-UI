@@ -3119,7 +3119,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
 
                 popup.setOnMenuItemClickListener(this)
-                popup.show()
+                AppCompatPopupWindowHelper.show(popup.menu, anchor,
+                    onClick = { onMenuItemClick(it) },
+                    fallback = { popup.show() })
             }
 
             val profileName: TextView = view.findViewById(R.id.profile_name)
@@ -3254,7 +3256,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val popup = PopupMenu(requireContext(), anchor)
                 popup.menuInflater.inflate(R.menu.double_column_item_menu, popup.menu)
                 if (select) popup.menu.removeItem(R.id.action_delete)
-                popup.setOnMenuItemClickListener { menuItem ->
+                val listener = PopupMenu.OnMenuItemClickListener { menuItem ->
                     when (menuItem.itemId) {
                         R.id.action_edit -> {
                             anchor.context.startActivity(
@@ -3275,7 +3277,10 @@ class ConfigurationFragment @JvmOverloads constructor(
                         else -> false
                     }
                 }
-                popup.show()
+                popup.setOnMenuItemClickListener(listener)
+                AppCompatPopupWindowHelper.show(popup.menu, anchor,
+                    onClick = { listener.onMenuItemClick(it) },
+                    fallback = { popup.show() })
             }
 
             private fun applySelected(selected: Boolean) {

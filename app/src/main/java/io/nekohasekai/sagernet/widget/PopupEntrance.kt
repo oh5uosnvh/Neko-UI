@@ -4,6 +4,9 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.view.View
 import android.view.animation.DecelerateInterpolator
+import androidx.appcompat.view.menu.MenuPopup
+import androidx.appcompat.view.menu.MenuPopupHelper
+import androidx.appcompat.widget.ListPopupWindow
 
 /** Shared popup entrance: the same short alpha/scale reveal used by choice menus. */
 object PopupEntrance {
@@ -37,5 +40,31 @@ object PopupEntrance {
             })
             start()
         }
+    }
+
+    /**
+     * Framework menu popups (PopupMenu / MenuPopupHelper) join the same reveal: the
+     * platform dropdown window animation is dropped and the shared alpha/scale entrance
+     * runs on the menu list once the window is visible. Best effort by design.
+     */
+    fun applyTo(helper: MenuPopupHelper) {
+        try {
+            listPopupWindowOf(helper.popup)?.animationStyle = 0
+        } catch (_: Throwable) {
+        }
+    }
+
+    fun reveal(helper: MenuPopupHelper) {
+        try {
+            val list = helper.popup.listView ?: return
+            animate(list, false)
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun listPopupWindowOf(popup: MenuPopup): ListPopupWindow? {
+        val field = popup.javaClass.getDeclaredField("mPopup")
+        field.isAccessible = true
+        return field.get(popup) as? ListPopupWindow
     }
 }

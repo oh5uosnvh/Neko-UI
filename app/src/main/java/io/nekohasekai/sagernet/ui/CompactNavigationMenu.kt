@@ -107,7 +107,8 @@ internal class CompactNavigationMenu(
         val y = (location[1] + view.height).coerceIn(frame.top + marginY, maxOf(frame.top + marginY, frame.bottom - popup.height - marginY))
         popup.showAtLocation(host, Gravity.TOP or Gravity.LEFT, x, y)
         content.requestFocus()
-        animate(content, opening = true)
+        // 与所有列表菜单共用同一套入场：自顶向下的 alpha/scale 展开。
+        io.nekohasekai.sagernet.widget.PopupEntrance.animate(content)
     }
 
     private fun bounds(view: View) = Rect().also {
@@ -220,25 +221,18 @@ internal class CompactNavigationMenu(
         if (closing) return
         closing = true
         afterClose = action
-        animate(popup.contentView, opening = false)
+        animate(popup.contentView)
     }
 
-    private fun animate(content: View, opening: Boolean) {
+    private fun animate(content: View) {
         cancelAnimation()
-        val start = if (opening) 0f else content.alpha
-        if (opening) {
-            content.alpha = 0f
-            content.translationY = -dp(6).toFloat()
-            content.scaleX = .95f
-            content.scaleY = .95f
-        }
-        animation = ValueAnimator.ofFloat(start, if (opening) 1f else 0f).apply {
-            duration = if (opening) 140L else CLOSE_DURATION_MS
+        val start = content.alpha
+        animation = ValueAnimator.ofFloat(start, 0f).apply {
+            duration = CLOSE_DURATION_MS
             interpolator = DecelerateInterpolator()
             addUpdateListener {
                 val progress = it.animatedValue as Float
                 content.alpha = progress
-                content.translationY = -dp(6) * (1f - progress)
                 content.scaleX = .95f + .05f * progress
                 content.scaleY = content.scaleX
             }
@@ -247,13 +241,11 @@ internal class CompactNavigationMenu(
                     animation.removeAllListeners()
                     (animation as? ValueAnimator)?.removeAllUpdateListeners()
                     this@CompactNavigationMenu.animation = null
-                    if (!opening) {
-                        val action = afterClose
-                        afterClose = null
-                        window?.dismiss()
-                        // Commit only after the popup window has gone, including cold inflation.
-                        action?.invoke()
-                    }
+                    val action = afterClose
+                    afterClose = null
+                    window?.dismiss()
+                    // Commit only after the popup window has gone, including cold inflation.
+                    action?.invoke()
                 }
             })
             start()

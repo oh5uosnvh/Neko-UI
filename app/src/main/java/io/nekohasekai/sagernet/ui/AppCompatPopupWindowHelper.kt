@@ -8,6 +8,7 @@ import androidx.appcompat.view.menu.MenuBuilder
 import androidx.appcompat.view.menu.MenuPopupHelper
 import androidx.appcompat.widget.PopupMenu
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.widget.PopupEntrance
 
 /**
  * 把菜单挂到任意锚点视图下方弹出。
@@ -45,7 +46,11 @@ object AppCompatPopupWindowHelper {
             val helper = MenuPopupHelper(anchor.context, builder, anchor)
             helper.setForceShowIcon(true)
             helper.setGravity(Gravity.END)
+            // Shared reveal for every toolbar/card menu: no platform dropdown animation,
+            // then the same alpha/scale entrance as the choice menus.
+            PopupEntrance.applyTo(helper)
             helper.show()
+            PopupEntrance.reveal(helper)
         } catch (e: Throwable) {
             Logs.w(e)
             try {
