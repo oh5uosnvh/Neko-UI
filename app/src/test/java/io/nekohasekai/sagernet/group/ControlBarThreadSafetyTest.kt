@@ -51,7 +51,7 @@ class ControlBarThreadSafetyTest {
         a.setContentView(host)
         host.measure(View.MeasureSpec.makeMeasureSpec(360, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(76, View.MeasureSpec.EXACTLY))
         host.layout(0, 0, 360, 76); advance(32)
-        try { bar.changeState(BaseService.State.Connected); advance(180); block(bar) } finally { c.pause().stop().destroy() }
+        try { bar.changeState(BaseService.State.Connected); advance(500); block(bar) } finally { c.pause().stop().destroy() }
     }
     private fun onWorker(bar: ControlBar, action: (ControlBar) -> Unit) {
         val failure = arrayOfNulls<Throwable>(1)
@@ -80,7 +80,7 @@ class ControlBarThreadSafetyTest {
         onWorker(bar) { it.changeState(BaseService.State.Connecting) }
         advance(16)
         assertSame(stoppingFade, fade(bar))
-        advance(180)
+        advance(500)
         assertFalse(stoppingFade.isRunning)
         assertNull(fade(bar))
         assertEquals(bar.context.getString(R.string.control_bar_disconnected),
@@ -91,7 +91,7 @@ class ControlBarThreadSafetyTest {
         assertNull(capsule.foreground)
         onWorker(bar) { it.changeState(BaseService.State.Connected) }
         assertFalse(capsule.isSelected)
-        advance(200)
+        advance(500)
         assertTrue(capsule.isSelected)
         assertTrue(capsule.isEnabled)
         assertNull(fade(bar))

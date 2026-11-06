@@ -137,7 +137,9 @@ class SwitchThemeContractTest {
         assertTrue("反馈不能盖住连接按钮", "class CapsuleExclusionMask" in bar)
         assertTrue("常驻胶囊底色必须保留", "capsule.background = capsuleBackground" in bar)
         assertTrue("只移除按压前景底色", "capsule.foreground = null" in bar)
-        assertTrue("胶囊取当前主题色", "capsuleBackground.setColor(themeColor(R.attr.colorMaterial300" in bar)
+        assertTrue("连接态胶囊取主题色渐变",
+            "capsuleOnGradient.setColors(intArrayOf(highlight, primary))" in bar)
+        assertTrue("断开态胶囊为日夜间灰蓝渐变", "capsuleOffGradient" in bar)
         assertFalse("不得增加旋转中间态", "connectingAnimator" in bar)
         assertFalse("两侧反馈范围不变", "newSideBoxRipple" in bar)
         assertFalse("连接按钮不需要涟漪", "newCapsuleRipple" in bar)

@@ -136,7 +136,7 @@ class ControlBarTest {
         for (state in BaseService.State.values()) {
             bar.changeState(state)
             assertCapsuleHasNoTouchFill(bar) // Persistent theme fill stays; pressed overlays never appear.
-            advance(180)
+            advance(500)
             val connected = state == BaseService.State.Connected
             val capsule = bar.box(R.id.capsule)
             assertEquals("state=$state", connected, capsule.isSelected)
@@ -180,12 +180,12 @@ class ControlBarTest {
         assertCapsuleVisual(bar, connected = false)
         capsule.performClick()
         bar.changeState(BaseService.State.Stopping)
-        advance(180)
+        advance(500)
         assertCapsuleVisual(bar, connected = false)
         capsule.performClick()
         assertEquals(2, toggles)
         bar.changeState(BaseService.State.Connected)
-        advance(180)
+        advance(500)
         assertCapsuleVisual(bar, connected = true)
         capsule.performClick()
         capsule.performClick()
@@ -371,6 +371,8 @@ class ControlBarTest {
                         assertEquals(expected,bar.text(id).currentTextColor)
                     }
                 }
+                // Only a connected state may paint the green latency (spec 7.5).
+                bar.changeState(BaseService.State.Connected)
                 bar.showTesting()
                 assertEquals(bar.resources.getColor(R.color.latency_green,bar.context.theme),bar.text(R.id.latency).currentTextColor)
             }
@@ -466,7 +468,8 @@ class ControlBarTest {
                     bar.text(R.id.speed_down).typeface)
                 assertEquals(Typeface.create("sans-serif", Typeface.NORMAL),
                     bar.text(R.id.speed_up).typeface)
-                assertEquals(bar.resources.getColor(R.color.latency_green,bar.context.theme),
+                // Not connected yet: the readout is neutral, never green (spec 7.5).
+                assertEquals(bar.resources.getColor(R.color.control_bar_text,bar.context.theme),
                     bar.text(R.id.latency).currentTextColor)
             }
         }
@@ -481,7 +484,7 @@ class ControlBarTest {
             withBar(locale = locale) { bar, _ ->
                 assertEquals(disconnected, bar.text(R.id.capsule_label).text.toString())
                 bar.changeState(BaseService.State.Connected)
-                advance(180)
+                advance(500)
                 assertEquals(connected, bar.text(R.id.capsule_label).text.toString())
                 for (id in listOf(R.id.speed_box, R.id.capsule, R.id.latency_box)) {
                     val view = bar.box(id)
@@ -498,7 +501,13 @@ class ControlBarTest {
         val pair=bar.box(R.id.capsule_pair)
         val icon=bar.findViewById<ImageView>(R.id.capsule_icon)
         val label=bar.text(R.id.capsule_label)
-        assertEquals(dp(bar,6),label.left-icon.right)
+        if (label.visibility == View.VISIBLE) {
+            assertEquals(dp(bar,6),label.left-icon.right)
+        } else {
+            // Disconnected: power icon only, no connection text (spec 7.3).
+            assertEquals(View.GONE,label.visibility)
+            assertEquals(capsule.width/2f,(icon.left+icon.right)/2f,1f)
+        }
         assertEquals(capsule.width/2f,(pair.left+pair.right)/2f,1f)
         assertEquals(capsule.height/2f,(pair.top+pair.bottom)/2f,1f)
         assertEquals(dp(bar,18),icon.width)
@@ -507,7 +516,7 @@ class ControlBarTest {
         assertTrue(pair.width<=capsule.width-capsule.paddingLeft-capsule.paddingRight)
         assertNotNull(icon.drawable)
         assertFalse(pair.isClickable);assertFalse(icon.isClickable);assertFalse(label.isClickable)
-        assertTextFits(label)
+        if (label.visibility == View.VISIBLE) assertTextFits(label)
     }
     @Test
     @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)

@@ -9,7 +9,6 @@ import android.view.ContextThemeWrapper
 import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
-import androidx.appcompat.widget.ListPopupWindow
 import androidx.core.content.ContextCompat
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.RuleEntity
@@ -64,7 +63,7 @@ class RouteOutboundTouchFeedbackTest {
             content.layout(0, 0, 320, 640)
         }
 
-        fun popup() = ReflectionHelpers.getField<ListPopupWindow?>(fragment, "outboundPopup")
+        fun popup() = ReflectionHelpers.getField<io.nekohasekai.sagernet.widget.ChoiceMenuPopup?>(fragment, "outboundPopup")
 
         override fun close() {
             popup()?.dismiss()

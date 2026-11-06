@@ -243,6 +243,9 @@ class ControlBar @JvmOverloads constructor(
         var swapped = false
         val animator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 450L
+            // Linear play time: the two phases are driven by exact fractions, so the
+            // swap happens precisely at the midpoint (contract tested at 225ms).
+            interpolator = LinearInterpolator()
             addUpdateListener { animation ->
                 val fraction = animation.animatedValue as Float
                 if (fraction < .5f) {
@@ -558,7 +561,12 @@ class ControlBar @JvmOverloads constructor(
         pressAnimator?.cancel()
         pressAnimator = null
         pressTarget = false
-        findViewById<View>(R.id.capsule_pair).alpha = 1f
+        val pair = findViewById<View>(R.id.capsule_pair)
+        pair.alpha = 1f
+        pair.scaleX = 1f
+        pair.scaleY = 1f
+        pair.rotation = 0f
+        capsuleIcon.translationY = 0f
         sidePressed = false
         sideRipple.state = intArrayOf()
         sideRipple.jumpToCurrentState()
@@ -579,9 +587,7 @@ class ControlBar @JvmOverloads constructor(
 
     private fun syncAnimationVisibility() {
         if (!canShowReadouts()) {
-            cancelPresentationAnimations()
-            findViewById<View>(R.id.capsule_pair).alpha = 1f
-            updateCapsuleIcon()
+            settlePresentation() // Also restores scale/rotation/translation mid-states.
             sidePressed = false
             sideRipple.state = intArrayOf()
             sideRipple.jumpToCurrentState()
