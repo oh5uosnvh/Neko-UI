@@ -62,11 +62,11 @@ class ControlBarStateTest {
         val context = ContextThemeWrapper(activity.createConfigurationContext(config), theme)
         val host = FrameLayout(activity)
         val bar = ControlBar(context)
-        host.addView(bar, FrameLayout.LayoutParams(584, 152))
+        host.addView(bar, FrameLayout.LayoutParams(584, 168))
         activity.setContentView(host)
         host.measure(View.MeasureSpec.makeMeasureSpec(584, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(152, View.MeasureSpec.EXACTLY))
-        host.layout(0, 0, 584, 152)
+            View.MeasureSpec.makeMeasureSpec(168, View.MeasureSpec.EXACTLY))
+        host.layout(0, 0, 584, 168)
         advance(32) // Let the actual window attach/visibility callbacks settle before state assertions.
         try { block(bar, host, context) }
         finally { controller.pause().stop().destroy() }
@@ -151,29 +151,34 @@ class ControlBarStateTest {
     }
 
     @Test fun eachDirectionFadesOnlyThePairWhileThemeCapsuleStaysFixedAndDuplicatesDoNotRestart() = withBar { bar, _, _ ->
+        // Crossfade contract (spec 7.3): 450ms, icon swap at the midpoint.
+        fun expectedAlpha(playTimeMs: Long): Float {
+            val fraction = playTimeMs / 450f
+            return if (fraction < .5f) 1f - fraction * 2f else (fraction - .5f) * 2f
+        }
         for (connected in listOf(true, false)) {
             val state = if (connected) BaseService.State.Connected else BaseService.State.Stopped
             bar.changeState(state)
             val fade = field(bar, "fadeAnimator") as ValueAnimator
             val pair = bar.box(R.id.capsule_pair)
-            assertEquals(150L, fade.duration)
+            assertEquals(450L, fade.duration)
             assertEquals(0, fade.repeatCount)
             assertVisual(bar, !connected)
             fade.currentPlayTime = 37
-            assertEquals(1f - 74f / 150f, pair.alpha, .001f)
+            assertEquals(expectedAlpha(37), pair.alpha, .001f)
             assertVisual(bar, !connected)
             bar.changeState(state)
             assertSame(fade, field(bar, "fadeAnimator"))
-            assertEquals(1f - 74f / 150f, pair.alpha, .001f)
-            fade.currentPlayTime = 75
+            assertEquals(expectedAlpha(37), pair.alpha, .001f)
+            fade.currentPlayTime = 225
             assertEquals(0f, pair.alpha, .001f)
             assertVisual(bar, connected)
-            fade.currentPlayTime = 112
-            assertEquals(224f / 150f - 1f, pair.alpha, .001f)
+            fade.currentPlayTime = 337
+            assertEquals(expectedAlpha(337), pair.alpha, .001f)
             assertVisual(bar, connected)
             bar.changeState(state)
             assertSame(fade, field(bar, "fadeAnimator"))
-            advance(180)
+            advance(500)
             assertFalse(fade.isRunning)
             assertVisual(bar, connected)
             assertNoAnimation(bar)
@@ -191,7 +196,7 @@ class ControlBarStateTest {
                 for (state in BaseService.State.values()) {
                     bar.changeState(state)
                     assertCapsuleHasNoTouchFill(bar)
-                    advance(180)
+                    advance(500)
                     assertVisual(bar, state == BaseService.State.Connected)
                     assertNoAnimation(bar)
                     val capsule = bar.box(R.id.capsule)
@@ -201,7 +206,7 @@ class ControlBarStateTest {
                 }
                 context.theme.applyStyle(R.style.Theme_SagerNet_Amber, true)
                 bar.changeState(BaseService.State.Stopped)
-                advance(180)
+                advance(500)
                 assertVisual(bar, connected = false)
                 assertNoAnimation(bar)
             }
@@ -244,7 +249,8 @@ class ControlBarStateTest {
             assertEquals(2, errors); assertEquals(3, tests)
             bar.showLatency(-1); advance(250)
             assertEquals("-- ms", bar.text(R.id.latency).text.toString())
-            assertEquals(bar.resources.getColor(R.color.latency_green,bar.context.theme),bar.text(R.id.latency).currentTextColor)
+            // Disconnected readouts are neutral now (spec 7.5), never green.
+            assertEquals(bar.resources.getColor(R.color.control_bar_text,bar.context.theme),bar.text(R.id.latency).currentTextColor)
         }
     }
 
@@ -300,7 +306,7 @@ class ControlBarStateTest {
         advance(1200)
         assertNoAnimation(bar)
         assertEquals("-- ms", bar.text(R.id.latency).text.toString())
-        host.addView(bar, FrameLayout.LayoutParams(584, 152))
+        host.addView(bar, FrameLayout.LayoutParams(584, 168))
         advance(180)
         assertVisual(bar, connected = true)
         assertNoAnimation(bar)
@@ -327,7 +333,7 @@ class ControlBarStateTest {
             bar.changeState(BaseService.State.Stopped)
             bar.changeState(BaseService.State.Idle)
             assertSame(reverseFade, field(bar, "fadeAnimator")) // Same disconnected visual, no restart.
-            advance(250)
+            advance(500)
             assertFalse(reverseFade.isRunning)
             assertNoAnimation(bar)
             assertVisual(bar, connected = false)

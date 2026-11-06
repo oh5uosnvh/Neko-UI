@@ -68,10 +68,7 @@ internal class ChoiceMenuPopup(
             }
         }
         listView.setOnItemClickListener { _, _, position, _ ->
-            if (!exiting && !finished && position in 0 until adapter.count) {
-                pending = position
-                dismiss()
-            }
+            performItemClick(position)
         }
 
         val visible = Rect().also(anchor::getWindowVisibleDisplayFrame)
@@ -98,6 +95,14 @@ internal class ChoiceMenuPopup(
         listView.setSelection(selected)
     }
 
+    /** Test/driver hook with the exact user-click semantics: stage the choice, own the exit. */
+    fun performItemClick(position: Int) {
+        if (!exiting && !finished && position in 0 until (listView.adapter?.count ?: 0)) {
+            pending = position
+            dismiss()
+        }
+    }
+
     fun show() {
         if (!anchor.isAttachedToWindow || anchor.windowToken == null) {
             cancelImmediately()
@@ -106,7 +111,7 @@ internal class ChoiceMenuPopup(
         anchor.addOnAttachStateChangeListener(this)
         try {
             showAsDropDown(anchor, 0, 0, Gravity.START)
-            PopupEntrance.animate(surface, isAboveAnchor)
+            PopupEntrance.animate(surface, isAboveAnchor, anchor)
         } catch (_: WindowManager.BadTokenException) {
             cancelImmediately()
         }
@@ -123,13 +128,14 @@ internal class ChoiceMenuPopup(
         surface.pivotX = surface.width / 2f
         surface.pivotY = if (isAboveAnchor) surface.height.toFloat() else 0f
         animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            // Matches popup_exit.xml, but completion is an animation event, never a timed post.
-            duration = 100L
+            // FlClash close: easeOut shrink 1.0 -> 0.8 plus fade (spec 3.3), completion
+            // is an animation event, never a timed post.
+            duration = PopupEntrance.CLOSE_DURATION_MS
             interpolator = AccelerateDecelerateInterpolator()
             addUpdateListener {
                 val fraction = it.animatedValue as Float
                 surface.alpha = 1f - fraction
-                surface.scaleX = 1f - .05f * fraction
+                surface.scaleX = 1f - .2f * fraction
                 surface.scaleY = surface.scaleX
             }
             addListener(object : AnimatorListenerAdapter() {

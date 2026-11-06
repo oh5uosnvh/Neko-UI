@@ -33,8 +33,8 @@ class LatencyPresentationTest {
     private fun advance(ms:Long){var remaining=ms;while(remaining>0){val step=minOf(16L,remaining);shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(step));remaining-=step}}
     private fun withBar(block:(ControlBar)->Unit){
         val c=Robolectric.buildActivity(AppCompatActivity::class.java);val a=c.get();a.setTheme(R.style.Theme_SagerNet);c.setup().visible()
-        val host=FrameLayout(a);val bar=ControlBar(a);host.addView(bar,FrameLayout.LayoutParams(360,76));a.setContentView(host)
-        host.measure(View.MeasureSpec.makeMeasureSpec(360,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(76,View.MeasureSpec.EXACTLY));host.layout(0,0,360,76);advance(32)
+        val host=FrameLayout(a);val bar=ControlBar(a);host.addView(bar,FrameLayout.LayoutParams(360,84));a.setContentView(host)
+        host.measure(View.MeasureSpec.makeMeasureSpec(360,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(84,View.MeasureSpec.EXACTLY));host.layout(0,0,360,84);advance(32)
         try{bar.changeState(BaseService.State.Connected);advance(180);block(bar)}finally{c.pause().stop().destroy()}
     }
     @Test fun fastTwentyMsResultWaitsFor150MsSpinnerAndStillDisplaysTwenty()=withBar{bar->

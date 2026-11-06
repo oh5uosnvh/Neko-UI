@@ -1,13 +1,11 @@
 package io.nekohasekai.sagernet.ui
 
-import android.view.Gravity
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
-import androidx.appcompat.view.menu.MenuBuilder
-import androidx.appcompat.view.menu.MenuPopupHelper
 import androidx.appcompat.widget.PopupMenu
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.widget.FlMenu
 
 /**
  * 把菜单挂到任意锚点视图下方弹出。
@@ -15,10 +13,9 @@ import io.nekohasekai.sagernet.ktx.Logs
  * 顶栏的 📄+ 与 ⋮ 是自绘图标，不是 AppCompat 的 action item，所以要自己
  * 指定锚点弹菜单。菜单本身仍然挂在（已隐藏的）Toolbar 上，这里取它的子菜单。
  *
- * MenuPopupHelper 是 AppCompat 内部弹菜单的实现（PopupMenu 只是它的一层壳），
- * 可以绑到任意 View 上，且天然支持子菜单级联展开（📄+ 的「手动设置」是二级菜单）。
- * 它是 @RestrictTo 内部类，但 @RestrictTo 只影响 lint，编译期可访问；
- * 这里仍整体兜底，异常时退回 PopupMenu。
+ * 弹出统一走 FlMenu 单窗口引擎（FlClash 弹簧入场 + 缩小淡化退场）：
+ * 带 ▶ 的项目（📄+ 的「手动设置」、⋮ 的「排序与外观」等）在同一窗口内切页，
+ * 不再经 MenuPopupHelper 级联弹出第二个窗口。
  */
 object AppCompatPopupWindowHelper {
 
@@ -32,20 +29,8 @@ object AppCompatPopupWindowHelper {
             fallback()
             return
         }
-
         try {
-            val builder = menu as MenuBuilder
-            builder.setCallback(object : MenuBuilder.Callback {
-                override fun onMenuItemSelected(menu: MenuBuilder, item: MenuItem): Boolean =
-                    onClick(item)
-
-                override fun onMenuModeChange(menu: MenuBuilder) = Unit
-            })
-
-            val helper = MenuPopupHelper(anchor.context, builder, anchor)
-            helper.setForceShowIcon(true)
-            helper.setGravity(Gravity.END)
-            helper.show()
+            FlMenu.show(anchor, menu, onClick)
         } catch (e: Throwable) {
             Logs.w(e)
             try {

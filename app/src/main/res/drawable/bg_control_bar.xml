@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- HTML 参考单层表面：只有 surface 背景 + 圆角，不再有描边线，
+     外层控制条与中间启动胶囊的边缘因此彻底分离绘制。 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
     <solid android:color="@color/control_bar_surface" />
-    <stroke android:width="1dp" android:color="@color/control_bar_border" />
-    <corners android:radius="24dp" />
+    <corners android:radius="30dp" />
 </shape>

@@ -7,7 +7,7 @@ import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.widget.ListPopupWindow
+import io.nekohasekai.sagernet.widget.ChoiceMenuPopup
 import androidx.appcompat.widget.Toolbar
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -37,7 +37,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
     lateinit var ruleAdapter: RuleAdapter
     lateinit var undoManager: UndoSnackbarManager<RuleEntity>
 
-    private var outboundPopup: ListPopupWindow? = null
+    private var outboundPopup: ChoiceMenuPopup? = null
     private var pendingProfileRuleId = 0L
     private val savingOutbounds = hashSetOf<Long>()
 

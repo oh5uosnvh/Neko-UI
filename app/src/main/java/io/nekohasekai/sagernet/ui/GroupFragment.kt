@@ -386,12 +386,23 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             elevation = dp2px(8).toFloat()
             isOutsideTouchable = true
             showAsDropDown(anchor, 0, dp2px(4))
+            io.nekohasekai.sagernet.widget.PopupEntrance.animate(card, isAboveAnchor, anchor)
         }
+        filterCard = card
     }
 
+    private var filterCard: View? = null
+
     private fun dismissFilterPicker() {
-        filterPopup?.dismiss()
+        val popup = filterPopup ?: return
         filterPopup = null
+        val surface = filterCard
+        filterCard = null
+        if (surface != null && popup.isShowing) {
+            io.nekohasekai.sagernet.widget.PopupEntrance.exit(surface, popup.isAboveAnchor, null) {
+                popup.dismiss()
+            }
+        } else popup.dismiss()
     }
 
     private fun filterRow(label: String, selected: Boolean): TextView = TextView(requireContext()).apply {
@@ -815,8 +826,9 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 if (menuGroup.type != GroupType.SUBSCRIPTION) {
                     popup.menu.removeItem(R.id.action_share_subscription)
                 }
-                popup.setOnMenuItemClickListener { item -> onMenuItemClick(item, menuGroup) }
-                popup.show()
+                io.nekohasekai.sagernet.widget.FlMenu.show(it, popup.menu) { item ->
+                    onMenuItemClick(item, menuGroup)
+                }
             }
 
             if (proxyGroup.id in GroupUpdater.updating) {

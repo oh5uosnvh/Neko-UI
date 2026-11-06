@@ -32,6 +32,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.content.res.AppCompatResources
+import androidx.core.graphics.ColorUtils
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.bg.BaseService
 import java.util.Locale
@@ -85,9 +86,18 @@ class ControlBar @JvmOverloads constructor(
     private var windowVisible = true
     private var failed = false
     private var fadeAnimator: ValueAnimator? = null
-    private val capsuleBackground = GradientDrawable().apply {
-        cornerRadius = 999f * resources.displayMetrics.density
-    }
+    private val night get() = context.resources.configuration.uiMode and
+        android.content.res.Configuration.UI_MODE_NIGHT_MASK ==
+        android.content.res.Configuration.UI_MODE_NIGHT_YES
+
+    /** HTML 参考：关闭态灰蓝渐变，连接态主题色渐变（顶部亮 22%）。 */
+    private val capsuleOffGradient = GradientDrawable(
+        GradientDrawable.Orientation.TOP_BOTTOM,
+        intArrayOf(if (night) 0xFF3A4351.toInt() else 0xFFC7CFDB.toInt(),
+            if (night) 0xFF2E3644.toInt() else 0xFFB5BFCE.toInt()))
+    private val capsuleOnGradient = GradientDrawable(
+        GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0, 0))
+    private var capsuleBackground: GradientDrawable = capsuleOffGradient
     private val sideMask = CapsuleExclusionMask(resources.displayMetrics.density)
     private val sideRipple = RippleDrawable(
         ColorStateList.valueOf(themeColor(android.R.attr.colorControlHighlight, R.color.control_bar_border)),
@@ -172,17 +182,29 @@ class ControlBar @JvmOverloads constructor(
     }
 
     private fun updateCapsuleSurface() {
-        capsuleBackground.setColor(themeColor(R.attr.colorMaterial300, R.color.brand_primary_light))
+        val density = resources.displayMetrics.density
+        for (gradient in listOf(capsuleOffGradient, capsuleOnGradient)) {
+            gradient.cornerRadius = 999f * density
+        }
+        val primary = themeColor(androidx.appcompat.R.attr.colorPrimary, R.color.brand_primary_light)
+        val highlight = ColorUtils.blendARGB(primary, Color.WHITE, .22f)
+        capsuleOnGradient.setColors(intArrayOf(highlight, primary))
+        capsuleBackground = if (presentation() == Presentation.CONNECTED) capsuleOnGradient
+            else capsuleOffGradient
+        if (capsule.background !== capsuleBackground) capsule.background = capsuleBackground
     }
 
     private fun updateCapsuleIcon() {
         updateCapsuleSurface()
+        val connected = presentation() == Presentation.CONNECTED
         capsuleLabel.setText(when (presentation()) {
             Presentation.CONNECTED -> if (compactCapsule) R.string.control_bar_connected_compact
                 else R.string.control_bar_connected
             Presentation.DISCONNECTED -> if (compactCapsule) R.string.control_bar_disconnected_compact
                 else R.string.control_bar_disconnected
         })
+        // HTML 关闭态只有电源图标；连接态才出现飞机 + 「已连接」文字。
+        capsuleLabel.visibility = if (connected) View.VISIBLE else View.GONE
         capsuleIcon.setColorFilter(resources.getColor(R.color.control_bar_text, context.theme))
         capsuleIcon.setImageDrawable(AppCompatResources.getDrawable(context, when (presentation()) {
             Presentation.CONNECTED -> R.drawable.ic_control_plane
@@ -202,31 +224,60 @@ class ControlBar @JvmOverloads constructor(
 
     private fun settlePresentation() {
         cancelPresentationAnimations()
-        findViewById<View>(R.id.capsule_pair).alpha = 1f
+        val pair = findViewById<View>(R.id.capsule_pair)
+        pair.alpha = 1f
+        pair.scaleX = 1f
+        pair.scaleY = 1f
+        pair.rotation = 0f
+        capsuleIcon.translationY = 0f
         updateCapsuleIcon()
     }
 
+    /** 连接/断开切换：电源层与飞机层交叉过渡（spec 7.3，总时长 ~450ms）。 */
     private fun animatePresentation() {
         cancelPresentationAnimations()
         val pair = findViewById<View>(R.id.capsule_pair)
+        val icon = capsuleIcon
         val initialAlpha = pair.alpha
+        val takeoff = 4f * resources.displayMetrics.density
         var swapped = false
         val animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 150L // One 150ms fade-out/fade-in transition, not a delayed state change.
-            interpolator = LinearInterpolator()
+            duration = 450L
             addUpdateListener { animation ->
                 val fraction = animation.animatedValue as Float
-                if (fraction >= .5f && !swapped) {
-                    swapped = true
-                    updateCapsuleIcon()
+                if (fraction < .5f) {
+                    // power: alpha 1 -> 0, scale 1 -> .4, rotation 0 -> -90°
+                    val t = fraction * 2f
+                    pair.alpha = initialAlpha * (1f - t)
+                    pair.scaleX = 1f - .6f * t
+                    pair.scaleY = pair.scaleX
+                    pair.rotation = -90f * t
+                } else {
+                    if (!swapped) {
+                        swapped = true
+                        updateCapsuleIcon()
+                        pair.pivotX = pair.width / 2f
+                        pair.pivotY = pair.height / 2f
+                    }
+                    // plane: alpha 0 -> 1, scale .4 -> 1, rotation 90° -> 0°
+                    val t = (fraction - .5f) * 2f
+                    pair.alpha = t
+                    pair.scaleX = .4f + .6f * t
+                    pair.scaleY = pair.scaleX
+                    pair.rotation = 90f * (1f - t)
+                    // 起飞：translateY 4dp -> -2dp -> 0
+                    icon.translationY = if (t < .45f) takeoff - (takeoff + 2f * resources.displayMetrics.density) * (t / .45f)
+                        else -2f * resources.displayMetrics.density * (1f - (t - .45f) / .55f)
                 }
-                pair.alpha = if (fraction < .5f) initialAlpha * (1f - fraction * 2f)
-                    else (fraction - .5f) * 2f
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     fadeAnimator = null
                     pair.alpha = 1f
+                    pair.scaleX = 1f
+                    pair.scaleY = 1f
+                    pair.rotation = 0f
+                    icon.translationY = 0f
                     if (!swapped) updateCapsuleIcon()
                 }
             })
@@ -248,9 +299,8 @@ class ControlBar @JvmOverloads constructor(
             val capsulePadding = ((if (compact) 4 else 8) * density).toInt()
             capsule.setPaddingRelative(capsulePadding, capsule.paddingTop, capsulePadding, capsule.paddingBottom)
             (speedBox.layoutParams as LinearLayout.LayoutParams).weight = if (compact) 1.35f else 1f
-            (capsule.layoutParams as LinearLayout.LayoutParams).weight = if (compact) 1.05f else 1.4f
             (latencyBox.layoutParams as LinearLayout.LayoutParams).weight = 1f
-            // Compact space budget still keeps the right label at exactly 18dp + 4dp from end.
+            // The toggle keeps the HTML-fixed 118x44dp capsule; only readout weights flex.
             speedBox.setPaddingRelative(speedBox.paddingStart, speedBox.paddingTop,
                 ((if (compact) 0 else 4) * density).toInt(), speedBox.paddingBottom)
             latencyBox.setPaddingRelative(((if (compact) 0 else 4) * density).toInt(),
@@ -266,8 +316,8 @@ class ControlBar @JvmOverloads constructor(
 
     fun updateSpeed(txRate: Long, rxRate: Long) = onControlThread {
         if (!canReceiveMeasurements()) return@onControlThread
-        speedDown.text = context.getString(R.string.control_bar_speed_down, fmt(rxRate))
-        speedUp.text = context.getString(R.string.control_bar_speed_up, fmt(txRate))
+        speedDown.text = spannedSpeed(context.getString(R.string.control_bar_speed_down, fmt(rxRate)))
+        speedUp.text = spannedSpeed(context.getString(R.string.control_bar_speed_up, fmt(txRate)))
         updateSpeedDescription()
     }
 
@@ -331,7 +381,11 @@ class ControlBar @JvmOverloads constructor(
                 ?.takeIf { it.isNotEmpty() } ?: context.getString(R.string.control_bar_latency_unknown)
             else if (currentState != BaseService.State.Connected || ms < 0) context.getString(R.string.control_bar_latency_unknown)
             else context.getString(R.string.control_bar_latency_value, ms.toString())
-            latency.setTextColor(resources.getColor(if (failed) R.color.control_bar_failure else R.color.latency_green, context.theme))
+            latency.setTextColor(resources.getColor(when {
+                failed -> R.color.control_bar_failure
+                currentState == BaseService.State.Connected -> R.color.latency_green
+                else -> R.color.control_bar_text
+            }, context.theme))
             latencyAnimator?.cancel(); latencyAnimator = null
             latencyTransition?.removeAllUpdateListeners(); latencyTransition?.cancel()
             latencyTransition = null
@@ -450,13 +504,30 @@ class ControlBar @JvmOverloads constructor(
         cancelLatencyPresentation()
         testing = false
         failed = false
-        latency.setTextColor(resources.getColor(R.color.latency_green, context.theme))
+        // 未连接一律中性色；绿色延迟只在已连接的读数上出现（spec 7.5）。
+        latency.setTextColor(resources.getColor(
+            if (currentState == BaseService.State.Connected) R.color.latency_green
+            else R.color.control_bar_text, context.theme))
         val unknown = context.getString(R.string.control_bar_speed_unknown)
-        speedDown.text = context.getString(R.string.control_bar_speed_down, unknown)
-        speedUp.text = context.getString(R.string.control_bar_speed_up, unknown)
+        speedDown.text = spannedSpeed(context.getString(R.string.control_bar_speed_down, unknown))
+        speedUp.text = spannedSpeed(context.getString(R.string.control_bar_speed_up, unknown))
         latency.setText(R.string.control_bar_latency_unknown)
         updateSpeedDescription()
         updateLatencyDescription()
+    }
+
+    /** 数字为主色，单位 kB/s 更浅更小（HTML 参考）；文本内容保持不变供无障碍使用。 */
+    private fun spannedSpeed(composed: CharSequence): CharSequence {
+        val text = composed.toString()
+        val unitStart = text.lastIndexOf(' ') + 1
+        if (unitStart <= 0 || unitStart >= text.length) return text
+        val spannable = android.text.SpannableString(text)
+        val unitColor = themeColor(android.R.attr.textColorSecondary, R.color.control_bar_text)
+        spannable.setSpan(android.text.style.ForegroundColorSpan(unitColor), unitStart, text.length,
+            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        spannable.setSpan(android.text.style.RelativeSizeSpan(.82f), unitStart, text.length,
+            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        return spannable
     }
 
     private fun updateSpeedDescription() {
@@ -482,6 +553,11 @@ class ControlBar @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         detached = true
         cancelPresentationAnimations()
+        pressAnimator?.removeAllListeners()
+        pressAnimator?.removeAllUpdateListeners()
+        pressAnimator?.cancel()
+        pressAnimator = null
+        pressTarget = false
         findViewById<View>(R.id.capsule_pair).alpha = 1f
         sidePressed = false
         sideRipple.state = intArrayOf()
@@ -535,6 +611,9 @@ class ControlBar @JvmOverloads constructor(
                     offsetDescendantRectToMyCoords(box, rect)
                     box.isEnabled && rect.contains(event.x.toInt(), event.y.toInt())
                 }
+                capsule.getDrawingRect(rect)
+                offsetDescendantRectToMyCoords(capsule, rect)
+                pressCapsule(rect.contains(event.x.toInt(), event.y.toInt()) && capsule.isEnabled)
             }
             if (sidePressed) sideRipple.setHotspot(event.x, event.y)
             updateSideRippleState()
@@ -547,10 +626,48 @@ class ControlBar @JvmOverloads constructor(
             latencyBox.isPressed = false
             speedBox.cancelLongPress()
             latencyBox.cancelLongPress()
+            pressCapsule(false)
             updateSideRippleState()
         }
         return handled
     }
+
+    /**
+     * HTML 按压手感：按下整体缩到 0.90（120ms 快速），松手带过冲回弹（300ms）。
+     * 只动 transform，不改变胶囊颜色，也不在胶囊外层叠加 ripple 边框。
+     */
+    private fun pressCapsule(pressed: Boolean) {
+        if (!ready || pressed == pressTarget) return
+        pressTarget = pressed
+        pressAnimator?.removeAllListeners()
+        pressAnimator?.removeAllUpdateListeners()
+        pressAnimator?.cancel()
+        capsule.pivotX = capsule.width / 2f
+        capsule.pivotY = capsule.height / 2f
+        val from = capsule.scaleX
+        val to = if (pressed) .90f else 1f
+        pressAnimator = ValueAnimator.ofFloat(from, to).apply {
+            duration = if (pressed) 120L else 300L
+            interpolator = if (pressed) android.view.animation.AnimationUtils
+                .loadAnimation(context, android.R.anim.decelerate_interpolator).interpolator
+                else android.view.animation.OvershootInterpolator(2.2f)
+            addUpdateListener {
+                val value = it.animatedValue as Float
+                capsule.scaleX = value
+                capsule.scaleY = value
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    pressAnimator = null
+                    capsule.scaleX = to
+                    capsule.scaleY = to
+                }
+            })
+            start()
+        }
+    }
+    private var pressAnimator: ValueAnimator? = null
+    private var pressTarget = false
 
     override fun dispatchDraw(canvas: Canvas) {
         if (ready) updateSideRippleState()
@@ -578,9 +695,10 @@ class ControlBar @JvmOverloads constructor(
         fun setCapsuleBounds(rect: Rect) { capsuleBounds.set(rect); invalidateSelf() }
         override fun draw(canvas: Canvas) {
             path.rewind()
-            val inset = density // Keep feedback inside the existing 1dp border.
-            path.addRoundRect(RectF(bounds).apply { inset(inset, inset) }, 23f * density,
-                23f * density, Path.Direction.CW)
+            // The frame no longer has a stroke: keep only a hairline inset for antialiasing.
+            val inset = density * .5f
+            path.addRoundRect(RectF(bounds).apply { inset(inset, inset) }, 29.5f * density,
+                29.5f * density, Path.Direction.CW)
             val hole = RectF(capsuleBounds).apply { inset(-density, -density) }
             path.addRoundRect(hole, hole.height() / 2f, hole.height() / 2f, Path.Direction.CW)
             path.fillType = Path.FillType.EVEN_ODD

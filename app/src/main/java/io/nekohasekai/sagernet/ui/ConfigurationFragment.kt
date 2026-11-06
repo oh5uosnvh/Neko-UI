@@ -1635,6 +1635,19 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
 
         var popupRef: android.widget.PopupWindow? = null
+        var popupContentRef: View? = null
+
+        fun closeGroupMenu(action: () -> Unit) {
+            val popup = popupRef
+            val content = popupContentRef
+            if (popup == null || !popup.isShowing || content == null) {
+                popup?.dismiss(); action(); return
+            }
+            io.nekohasekai.sagernet.widget.PopupEntrance.exit(content, popup.isAboveAnchor) {
+                popup.dismiss()
+                action()
+            }
+        }
 
         fun menuItem(label: String, action: () -> Unit): TextView {
             val item = TextView(context)
@@ -1651,8 +1664,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             item.setPadding(dp(16), dp(11), dp(16), dp(11))
             item.isClickable = true
             item.setOnClickListener {
-                popupRef?.dismiss()
-                action()
+                closeGroupMenu(action)
             }
             return item
         }
@@ -1762,8 +1774,9 @@ class ConfigurationFragment @JvmOverloads constructor(
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0x00000000))
         }
         popupRef = popup
+        popupContentRef = column
         popup.showAsDropDown(anchor, 0, dp(4))
-        io.nekohasekai.sagernet.widget.PopupEntrance.animate(column)
+        io.nekohasekai.sagernet.widget.PopupEntrance.animate(column, popup.isAboveAnchor, anchor)
 
         // 面板超出屏幕右缘时整体左移（-1 = 宽高不变）
         val loc = IntArray(2)
@@ -3118,8 +3131,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                     popup.menu.removeItem(R.id.action_group_configuration)
                 }
 
-                popup.setOnMenuItemClickListener(this)
-                popup.show()
+                // Single-window engine: QR/clipboard/configuration ▶ become pages
+                // inside the same animated surface instead of a second cascade popup.
+                io.nekohasekai.sagernet.widget.FlMenu.show(anchor, popup.menu) { onMenuItemClick(it) }
             }
 
             val profileName: TextView = view.findViewById(R.id.profile_name)
@@ -3254,7 +3268,29 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val popup = PopupMenu(requireContext(), anchor)
                 popup.menuInflater.inflate(R.menu.double_column_item_menu, popup.menu)
                 if (select) popup.menu.removeItem(R.id.action_delete)
-                popup.setOnMenuItemClickListener { menuItem ->
+                // 「分享 ▶」合并进同一窗口：其子项成为二级页，不再弹第二个菜单。
+                val share = popup.menu.findItem(R.id.action_share)
+                if (share != null) {
+                    val sub = share.subMenu
+                        ?: popup.menu.addSubMenu(share.groupId, share.itemId, share.order, share.title)
+                    popup.menuInflater.inflate(R.menu.profile_share_menu, sub)
+                    when {
+                        !proxyEntity.haveStandardLink() -> {
+                            sub.findItem(R.id.action_group_qr)?.subMenu?.removeItem(R.id.action_standard_qr)
+                            sub.findItem(R.id.action_group_clipboard)?.subMenu?.removeItem(
+                                R.id.action_standard_clipboard
+                            )
+                        }
+                        !proxyEntity.haveLink() -> {
+                            sub.removeItem(R.id.action_group_qr)
+                            sub.removeItem(R.id.action_group_clipboard)
+                        }
+                    }
+                    if (proxyEntity.nekoBean != null) {
+                        sub.removeItem(R.id.action_group_configuration)
+                    }
+                }
+                io.nekohasekai.sagernet.widget.FlMenu.show(anchor, popup.menu) { menuItem ->
                     when (menuItem.itemId) {
                         R.id.action_edit -> {
                             anchor.context.startActivity(
@@ -3264,18 +3300,14 @@ class ConfigurationFragment @JvmOverloads constructor(
                             )
                             true
                         }
-                        R.id.action_share -> {
-                            showShareMenu(anchor, proxyEntity)
-                            true
-                        }
+                        R.id.action_share -> true // Handled through its submenu page.
                         R.id.action_delete -> {
                             removeProfile(proxyEntity)
                             true
                         }
-                        else -> false
+                        else -> onMenuItemClick(menuItem)
                     }
                 }
-                popup.show()
             }
 
             private fun applySelected(selected: Boolean) {

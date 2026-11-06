@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.group
 
 import android.app.Application
 import android.os.Looper
+import java.time.Duration
 import android.view.ContextThemeWrapper
 import android.widget.FrameLayout
 import android.widget.TextView
@@ -55,7 +56,7 @@ class RouteQuickOutboundTest {
             assertNull(RouteOutboundStore.set(db,rule.id,0))
         } finally {db.close()}
     }
-    @Test fun cardPopupUsesExistingFourOptionsAndSelectionIsImmediate() {
+    @Test fun cardPopupUsesExistingFourOptionsAndDeliversSelectionAfterTheVisibleExit() {
         val controller=Robolectric.buildActivity(AppCompatActivity::class.java)
         val activity=controller.get().apply{setTheme(R.style.Theme_SagerNet)}
         controller.setup().visible()
@@ -69,6 +70,11 @@ class RouteQuickOutboundTest {
             assertEquals(activity.resources.getStringArray(R.array.outbound_entry).toList(),(0 until list.adapter.count).map{list.adapter.getItem(it).toString()})
             assertEquals(1,list.selectedItemPosition)
             popup.performItemClick(2)
+            // The unified engine owns the visible exit FIRST; the choice is delivered
+            // only after the shrink+fade removal (spec 3.3), never one-frame.
+            assertTrue(popup.isShowing)
+            assertEquals(-1,chosen)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(400))
             assertEquals(2,chosen);assertFalse(popup.isShowing)
         } finally {controller.pause().stop().destroy()}
     }

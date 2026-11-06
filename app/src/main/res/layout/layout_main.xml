@@ -18,7 +18,7 @@
         <io.nekohasekai.sagernet.widget.ControlBar
             android:id="@+id/control_bar"
             android:layout_width="match_parent"
-            android:layout_height="76dp"
+            android:layout_height="84dp"
             android:layout_gravity="bottom|center_horizontal"
             android:layout_marginStart="14dp"
             android:layout_marginEnd="14dp"

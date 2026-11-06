@@ -352,6 +352,12 @@ internal class TopBarController(
         // 右侧常驻的 ✕：点它退出搜索
         container.addView(closeSearchButton())
 
+        // 搜索输入区域从放大镜位置平滑展开（spec 2.1.2）：淡入 + 自左侧轻推。
+        sv.alpha = 0f
+        sv.translationX = -dp(24).toFloat()
+        sv.animate().alpha(1f).translationX(0f).setDuration(240L)
+            .setInterpolator(android.view.animation.DecelerateInterpolator(1.5f)).start()
+
         container.requestLayout()
         sv.requestFocus()
         host.showKeyboard(sv)
@@ -362,15 +368,26 @@ internal class TopBarController(
     fun collapseSearch() {
         if (!searchExpanded) return
         searchExpanded = false
-        searchField?.let { sv ->
-            (sv.parent as? ViewGroup)?.removeView(sv)
-            sv.setQuery("", false)
-        }
+        val sv = searchField
         host.clearSearchQuery()
         host.hideKeyboard()
         host.onSearchStateChanged(false)
-        showPersistent()
-        row?.requestLayout()
+        if (sv == null || !sv.isAttachedToWindow) {
+            (sv?.parent as? ViewGroup)?.removeView(sv)
+            sv?.setQuery("", false)
+            showPersistent()
+            row?.requestLayout()
+            return
+        }
+        // 展开的反向：淡出并滑回放大镜位置，再恢复图标行，不留下半透明状态。
+        sv.animate().alpha(0f).translationX(-dp(24).toFloat()).setDuration(180L)
+            .setInterpolator(android.view.animation.AccelerateInterpolator())
+            .withEndAction {
+                (sv.parent as? ViewGroup)?.removeView(sv)
+                sv.setQuery("", false)
+                showPersistent()
+                row?.requestLayout()
+            }.start()
     }
 
     /**
@@ -700,7 +717,8 @@ internal class TopBarController(
                 val position = adapter.ids.indexOf(selectedItemGroupId())
                 if (position >= 0) layout.scrollToPositionWithOffset(position, 0)
                 popup.showAsDropDown(anchor, pickerOffsetX(anchor, popup.width), gap)
-                io.nekohasekai.sagernet.widget.PopupEntrance.animate(container)
+                io.nekohasekai.sagernet.widget.PopupEntrance.animate(container,
+                    popup.isAboveAnchor, anchor)
                 // Reopening before a previous write's notification must not revive old order.
                 requestRefresh()
             } catch (e: Exception) {
