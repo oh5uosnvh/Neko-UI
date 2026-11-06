@@ -22,6 +22,7 @@ import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.MotionEvent
+import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
 import android.view.View.AccessibilityDelegate
 import android.view.LayoutInflater
@@ -654,8 +655,7 @@ class ControlBar @JvmOverloads constructor(
         val to = if (pressed) .90f else 1f
         pressAnimator = ValueAnimator.ofFloat(from, to).apply {
             duration = if (pressed) 120L else 300L
-            interpolator = if (pressed) android.view.animation.AnimationUtils
-                .loadAnimation(context, android.R.anim.decelerate_interpolator).interpolator
+            interpolator = if (pressed) DecelerateInterpolator()
                 else android.view.animation.OvershootInterpolator(2.2f)
             addUpdateListener {
                 val value = it.animatedValue as Float
