@@ -144,7 +144,8 @@ class GroupFloatingHeaderTest {
         edge.bindList(list)
         measure(root, 360)
         assertEquals(0, pager.top)
-        assertEquals(4, list.paddingTop)
+        val titleGap = (root as TitleBarLayout).titleEdgeBandHeight().toInt()
+        assertEquals(titleGap + 4, list.paddingTop)
         assertFalse(list.clipToPadding)
         assertEquals(131, list.paddingBottom)
         tabs.visibility = View.VISIBLE
@@ -159,7 +160,7 @@ class GroupFloatingHeaderTest {
         assertEquals(131, list.paddingBottom)
         tabs.visibility = View.GONE
         measure(root, 360)
-        assertEquals(4, list.paddingTop)
+        assertEquals(titleGap + 4, list.paddingTop)
         assertEquals(131, list.paddingBottom)
     }
 }
