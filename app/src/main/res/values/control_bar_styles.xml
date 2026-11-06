@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="ControlBarSpeed" parent="">
-        <!-- Spannable unit coloring is incompatible with autosize; a fixed 12sp base
-             keeps the worst "▼ 9.88 GB/s" case inside the narrow-320dp budget. -->
-        <item name="android:textSize">12sp</item>
+        <item name="android:textSize">13sp</item>
         <item name="android:includeFontPadding">false</item>
         <item name="android:maxLines">1</item>
         <item name="android:fontFeatureSettings">tnum</item>
+        <item name="autoSizeTextType">uniform</item>
+        <item name="autoSizeMinTextSize">8sp</item>
+        <item name="autoSizeMaxTextSize">13sp</item>
+        <item name="autoSizeStepGranularity">0.5sp</item>
     </style>
     <style name="ControlBarSpeed.Down" parent="ControlBarSpeed">
         <item name="android:fontFamily">sans-serif</item>

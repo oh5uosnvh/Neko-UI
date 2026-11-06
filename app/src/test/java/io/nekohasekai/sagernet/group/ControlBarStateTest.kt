@@ -448,13 +448,20 @@ class ControlBarStateTest {
             bar.dispatchTouchEvent(cancel); cancel.recycle()
             assertFalse(ripple.state.contains(android.R.attr.state_pressed))
         }
-        // Pixel-level guard: the capsule's theme fill is present and pressing changes no pixels.
+        // Pixel-level guard: the capsule's gradient fill is present and pressing changes no pixels.
         val capsuleBitmap = Bitmap.createBitmap(capsule.width, capsule.height, Bitmap.Config.ARGB_8888)
         capsule.draw(Canvas(capsuleBitmap))
         val beforePress = IntArray(capsule.width * capsule.height)
         capsuleBitmap.getPixels(beforePress, 0, capsule.width, 0, 0, capsule.width, capsule.height)
-        val expectedFill = (capsule.background as android.graphics.drawable.GradientDrawable).colors!![0]
-        assertEquals(expectedFill, capsuleBitmap.getPixel(capsule.width / 2, 3))
+        // Compare against the background drawable's OWN rendering: the gradient
+        // interpolates between its stops, so a single palette constant is not a
+        // valid expected pixel anywhere below the very first row.
+        val background = capsule.background as android.graphics.drawable.GradientDrawable
+        background.setBounds(0, 0, capsule.width, capsule.height)
+        val reference = Bitmap.createBitmap(capsule.width, capsule.height, Bitmap.Config.ARGB_8888)
+        background.draw(Canvas(reference))
+        assertEquals("capsule paints its gradient fill",
+            reference.getPixel(capsule.width / 2, 3), capsuleBitmap.getPixel(capsule.width / 2, 3))
         val down = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, cx.toFloat(), cy.toFloat(), 0)
         bar.dispatchTouchEvent(down); down.recycle()
         assertCapsuleHasNoTouchFill(bar)

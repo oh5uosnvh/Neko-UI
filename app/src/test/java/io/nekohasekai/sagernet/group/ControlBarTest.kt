@@ -386,8 +386,12 @@ class ControlBarTest {
         assertEquals(View.VISIBLE, text.visibility)
         val available = text.width - text.compoundPaddingLeft - text.compoundPaddingRight
         assertTrue("${text.text}: no horizontal room", available > 0)
-        assertTrue("${text.text}: measured=${text.paint.measureText(text.text.toString())} available=$available",
-            text.paint.measureText(text.text.toString()) <= available + 1f)
+        // The rendered line is the contract: unit spans render smaller than the
+        // plain string, so measuring the plain chars would overestimate (and the
+        // rendered width is what must never overlap or clip).
+        val rendered = text.layout.getLineWidth(0)
+        assertTrue("${text.text}: rendered=$rendered available=$available",
+            rendered <= available + 1f)
         assertTrue("${text.text}: layout contains more than one line", text.layout.lineCount <= 1)
         assertEquals(text.text.length, text.layout.getLineEnd(0))
         assertEquals(0, text.layout.getEllipsisCount(0))
@@ -506,7 +510,8 @@ class ControlBarTest {
         } else {
             // Disconnected: power icon only, no connection text (spec 7.3).
             assertEquals(View.GONE,label.visibility)
-            assertEquals(capsule.width/2f,(icon.left+icon.right)/2f,1f)
+            // Icon coordinates are pair-relative; the icon centers inside the pair.
+            assertEquals(pair.width/2f,(icon.left+icon.right)/2f,1f)
         }
         assertEquals(capsule.width/2f,(pair.left+pair.right)/2f,1f)
         assertEquals(capsule.height/2f,(pair.top+pair.bottom)/2f,1f)
