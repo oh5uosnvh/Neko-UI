@@ -3,8 +3,8 @@ package io.nekohasekai.sagernet.widget
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.view.View
+import android.widget.ListView
 import android.view.animation.DecelerateInterpolator
-import androidx.appcompat.view.menu.MenuPopup
 import androidx.appcompat.view.menu.MenuPopupHelper
 import androidx.appcompat.widget.ListPopupWindow
 
@@ -45,26 +45,30 @@ object PopupEntrance {
     /**
      * Framework menu popups (PopupMenu / MenuPopupHelper) join the same reveal: the
      * platform dropdown window animation is dropped and the shared alpha/scale entrance
-     * runs on the menu list once the window is visible. Best effort by design.
+     * runs on the menu list once the window is visible. Best effort by design — the
+     * popup/listView types are package-private, so everything goes through reflection.
      */
     fun applyTo(helper: MenuPopupHelper) {
         try {
-            listPopupWindowOf(helper.popup)?.animationStyle = 0
+            val popup = popupOf(helper) ?: return
+            val field = popup.javaClass.getDeclaredField("mPopup")
+            field.isAccessible = true
+            (field.get(popup) as? ListPopupWindow)?.animationStyle = 0
         } catch (_: Throwable) {
         }
     }
 
     fun reveal(helper: MenuPopupHelper) {
         try {
-            val list = helper.popup.listView ?: return
+            val popup = popupOf(helper) ?: return
+            val list = popup.javaClass.getMethod("getListView").invoke(popup) as? ListView
+                ?: return
             animate(list, false)
         } catch (_: Throwable) {
         }
     }
 
-    private fun listPopupWindowOf(popup: MenuPopup): ListPopupWindow? {
-        val field = popup.javaClass.getDeclaredField("mPopup")
-        field.isAccessible = true
-        return field.get(popup) as? ListPopupWindow
-    }
+    /** MenuPopupHelper.getPopup() is public but returns a package-private interface. */
+    private fun popupOf(helper: MenuPopupHelper): Any? =
+        helper.javaClass.getMethod("getPopup").invoke(helper)
 }
