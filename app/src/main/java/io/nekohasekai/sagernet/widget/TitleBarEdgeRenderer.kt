@@ -24,9 +24,9 @@ internal class TitleBarEdgeRenderer {
     fun draw(canvas: Canvas, width: Int, top: Float, bottom: Float, clearFrom: Float, density: Float,
         hardwareBlur: Boolean, drawContent: (Canvas) -> Boolean): Boolean {
         if (width <= 0 || bottom <= top) return false
-        // The first stationary row begins at clearFrom + its original padding, so
-        // blur/fade must be completely gone by the toolbar's bottom, not 48dp later.
-        val band = minOf(48f * density, bottom - top, (clearFrom - top).coerceAtLeast(0f))
+        // The band is exactly the title gap (ink bottom -> appbar bottom), never a fixed
+        // 48dp: a taller title bar must blur across its whole strip, a shorter one less.
+        val band = minOf(bottom - top, (clearFrom - top).coerceAtLeast(0f))
         if (band <= 0f) {
             val save = canvas.save()
             canvas.clipRect(0f, top, width.toFloat(), bottom)
