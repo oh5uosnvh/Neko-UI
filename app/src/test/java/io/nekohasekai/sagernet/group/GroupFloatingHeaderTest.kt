@@ -153,7 +153,7 @@ class GroupFloatingHeaderTest {
         GroupTabPill.bindTab(tab, "Bitz Net")
         tabs.addTab(tab)
         measure(root, 360)
-        assertEquals(tabs.height + 4, list.paddingTop)
+        assertEquals(titleGap + tabs.height + 4, list.paddingTop)
         assertEquals(0, tabs.top)
         assertEquals(0, pager.top)
         assertEquals((root as TitleBarLayout).titleGlyphBottom.toInt(), edge.top)
