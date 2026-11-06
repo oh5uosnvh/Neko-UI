@@ -4,4 +4,8 @@
     <color name="control_bar_text">#FFFFFFFF</color>
     <color name="control_bar_surface">#FF252628</color>
     <color name="control_bar_border">#80FFFFFF</color>
+    <color name="control_bar_unit">#FF8B93A1</color>
+    <color name="control_bar_speed_text">#FFE9EDF3</color>
+    <color name="control_bar_off_top">#FF3A4351</color>
+    <color name="control_bar_off_bottom">#FF2E3644</color>
 </resources>

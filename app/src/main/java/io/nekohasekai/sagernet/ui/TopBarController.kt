@@ -177,6 +177,7 @@ internal class TopBarController(
         dismissGroupPicker()
         searchExpanded = false
         searchField?.let { sv ->
+            io.nekohasekai.sagernet.widget.PopupEntrance.cancel(sv)
             (sv.parent as? ViewGroup)?.removeView(sv)
             sv.setQuery("", false)
         }
@@ -228,7 +229,6 @@ internal class TopBarController(
 
         // Neko（粗体）
         titleView = TextView(context).apply {
-            id = R.id.title_bar_title
             text = context.getString(R.string.app_name)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
             setTypeface(Typeface.DEFAULT, Typeface.BOLD)
@@ -331,6 +331,11 @@ internal class TopBarController(
     fun expandSearch() {
         if (searchExpanded) return
         val container = row ?: return
+        val point = IntArray(2)
+        val origin = searchIcon?.takeIf { it.isAttachedToWindow }?.let {
+            it.getLocationOnScreen(point)
+            (point[0] + it.width / 2) to (point[1] + it.height / 2)
+        }
         searchExpanded = true
 
         val sv = searchField ?: host.createSearchView().also { searchField = it }
@@ -353,6 +358,7 @@ internal class TopBarController(
         container.addView(closeSearchButton())
 
         container.requestLayout()
+        io.nekohasekai.sagernet.widget.PopupEntrance.animate(sv, anchorPoint = origin)
         sv.requestFocus()
         host.showKeyboard(sv)
         host.onSearchStateChanged(true)
@@ -363,6 +369,7 @@ internal class TopBarController(
         if (!searchExpanded) return
         searchExpanded = false
         searchField?.let { sv ->
+            io.nekohasekai.sagernet.widget.PopupEntrance.cancel(sv)
             (sv.parent as? ViewGroup)?.removeView(sv)
             sv.setQuery("", false)
         }
@@ -638,6 +645,9 @@ internal class TopBarController(
             elevation = dp(8).toFloat()
             inputMethodMode = PopupWindow.INPUT_METHOD_NOT_NEEDED
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            animationStyle = 0
+            enterTransition = null
+            exitTransition = null
         }
 
         init {
@@ -700,7 +710,7 @@ internal class TopBarController(
                 val position = adapter.ids.indexOf(selectedItemGroupId())
                 if (position >= 0) layout.scrollToPositionWithOffset(position, 0)
                 popup.showAsDropDown(anchor, pickerOffsetX(anchor, popup.width), gap)
-                io.nekohasekai.sagernet.widget.PopupEntrance.animate(container)
+                io.nekohasekai.sagernet.widget.PopupEntrance.animate(container, popup.isAboveAnchor, anchor = anchor)
                 // Reopening before a previous write's notification must not revive old order.
                 requestRefresh()
             } catch (e: Exception) {

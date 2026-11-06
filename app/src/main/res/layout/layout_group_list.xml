@@ -1,20 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Opaque toolbar above a full-height pager; transparent theme-pill tabs float
      in front. Only scrolling content near the toolbar baseline is softened. -->
-<io.nekohasekai.sagernet.widget.TitleBarLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:background="?attr/colorLayerLow"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     tools:context=".ui.ConfigurationFragment">
 
-    <!-- Pager owns the full area below the title glyph. The edge container keeps
-         its own pager-only blur so the floating group pills remain crisp. -->
+    <include
+        layout="@layout/layout_appbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+    <!-- Pager owns the full area below the opaque app bar. Only individual pills
+         are foreground surfaces; scrolling cards continue behind their gaps. -->
     <io.nekohasekai.sagernet.widget.GroupListEdgeLayout
         android:id="@+id/group_list_foreground"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:clipChildren="true"
         android:clipToPadding="false">
 
@@ -47,9 +54,4 @@
             app:tabUnboundedRipple="false" />
     </io.nekohasekai.sagernet.widget.GroupListEdgeLayout>
 
-    <include
-        layout="@layout/layout_appbar_group"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content" />
-
-</io.nekohasekai.sagernet.widget.TitleBarLayout>
+</LinearLayout>

@@ -5,21 +5,21 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.os.Looper
-import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.ColorFilter
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.PixelFormat
-import android.graphics.Rect
-import android.graphics.RectF
-import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.RippleDrawable
 import android.content.Context
 import android.os.SystemClock
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
+import android.text.style.ReplacementSpan
 import android.util.AttributeSet
+import android.view.animation.PathInterpolator
+import android.view.animation.DecelerateInterpolator
 import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.animation.LinearInterpolator
@@ -68,6 +68,7 @@ class ControlBar @JvmOverloads constructor(
     private val speedUp: TextView
     private val capsule: FrameLayout
     private val capsuleIcon: ImageView
+    private val capsulePower: ImageView
     private val capsuleLabel: TextView
     private val latency: TextView
     private val latencyProgress: ImageView
@@ -88,12 +89,6 @@ class ControlBar @JvmOverloads constructor(
     private val capsuleBackground = GradientDrawable().apply {
         cornerRadius = 999f * resources.displayMetrics.density
     }
-    private val sideMask = CapsuleExclusionMask(resources.displayMetrics.density)
-    private val sideRipple = RippleDrawable(
-        ColorStateList.valueOf(themeColor(android.R.attr.colorControlHighlight, R.color.control_bar_border)),
-        null, sideMask,
-    )
-    private var sidePressed = false
     private enum class Presentation { DISCONNECTED, CONNECTED }
     private fun presentation(state: BaseService.State = currentState) = when (state) {
         BaseService.State.Connected -> Presentation.CONNECTED
@@ -112,6 +107,7 @@ class ControlBar @JvmOverloads constructor(
         speedUp = findViewById(R.id.speed_up)
         capsule = findViewById(R.id.capsule)
         capsuleIcon = findViewById(R.id.capsule_icon)
+        capsulePower = findViewById(R.id.capsule_power)
         capsuleLabel = findViewById(R.id.capsule_label)
         latency = findViewById(R.id.latency)
         latencyProgress = findViewById(R.id.latency_progress)
@@ -126,12 +122,22 @@ class ControlBar @JvmOverloads constructor(
         speedBox.setOnClickListener { requestReadoutAction() }
         latencyBox.setOnClickListener { requestReadoutAction() }
         capsule.setOnClickListener { requestToggle() }
+        capsule.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> view.animate().scaleX(.9f).scaleY(.9f)
+                    .setDuration(120L).setInterpolator(DecelerateInterpolator()).start()
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> view.animate().scaleX(1f).scaleY(1f)
+                    .setDuration(300L).setInterpolator(PathInterpolator(.3f, 1.55f, .45f, 1f)).start()
+            }
+            false
+        }
         capsule.contentDescription = context.getString(R.string.control_bar_connect_action)
         // Keep the persistent THEME capsule; remove only transient press/focus feedback.
         capsule.background = capsuleBackground
         capsule.foreground = null
-        // Preserve the readouts' outer-frame feedback, but never paint the toggle target.
-        foreground = sideRipple
+        // The readout areas remain clickable without drawing an inset outline or capsule halo.
+        foreground = null
+        setOnClickListener { requestReadoutAction() }
         speedBox.background = null
         latencyBox.background = null
         ready = true
@@ -172,7 +178,24 @@ class ControlBar @JvmOverloads constructor(
     }
 
     private fun updateCapsuleSurface() {
-        capsuleBackground.setColor(themeColor(R.attr.colorMaterial300, R.color.brand_primary_light))
+        val connected = presentation() == Presentation.CONNECTED
+        val base = themeColor(R.attr.colorMaterial300, R.color.brand_primary_light)
+        fun mixWhite(color: Int): Int = Color.rgb(
+            (Color.red(color) + (255 - Color.red(color)) * .22f).toInt(),
+            (Color.green(color) + (255 - Color.green(color)) * .22f).toInt(),
+            (Color.blue(color) + (255 - Color.blue(color)) * .22f).toInt(),
+        )
+        val top = if (connected) mixWhite(base) else resources.getColor(R.color.control_bar_off_top, context.theme)
+        val bottom = if (connected) base else resources.getColor(R.color.control_bar_off_bottom, context.theme)
+        capsuleBackground.orientation = GradientDrawable.Orientation.TOP_BOTTOM
+        capsuleBackground.colors = intArrayOf(top, bottom)
+    }
+
+    private fun capsuleForeground(): Int {
+        if (presentation() != Presentation.CONNECTED) return Color.WHITE
+        val c = themeColor(R.attr.colorMaterial300, R.color.brand_primary_light)
+        val brightness = (0.299 * Color.red(c) + 0.587 * Color.green(c) + 0.114 * Color.blue(c)) / 255.0
+        return if (brightness > .62) Color.argb(199, 0, 0, 0) else Color.WHITE
     }
 
     private fun updateCapsuleIcon() {
@@ -183,11 +206,10 @@ class ControlBar @JvmOverloads constructor(
             Presentation.DISCONNECTED -> if (compactCapsule) R.string.control_bar_disconnected_compact
                 else R.string.control_bar_disconnected
         })
-        capsuleIcon.setColorFilter(resources.getColor(R.color.control_bar_text, context.theme))
-        capsuleIcon.setImageDrawable(AppCompatResources.getDrawable(context, when (presentation()) {
-            Presentation.CONNECTED -> R.drawable.ic_control_plane
-            Presentation.DISCONNECTED -> R.drawable.ic_control_power
-        }))
+        capsulePower.setColorFilter(Color.WHITE)
+        capsuleIcon.setColorFilter(capsuleForeground())
+        capsuleLabel.setTextColor(capsuleForeground())
+        capsuleIcon.setImageDrawable(AppCompatResources.getDrawable(context, R.drawable.ic_control_plane))
     }
 
     private fun shouldAnimateCapsule() = ready && canShowReadouts() &&
@@ -200,36 +222,62 @@ class ControlBar @JvmOverloads constructor(
         fadeAnimator = null
     }
 
+    private fun setIconProgress(progress: Float) {
+        val p = progress.coerceIn(0f, 1f)
+        val pair = findViewById<View>(R.id.capsule_pair)
+        capsulePower.alpha = 1f - p
+        capsulePower.scaleX = 1f - .6f * progress
+        capsulePower.scaleY = capsulePower.scaleX
+        capsulePower.rotation = -90f * progress
+        pair.alpha = p
+        pair.scaleX = .4f + .6f * progress
+        pair.scaleY = pair.scaleX
+        pair.rotation = 90f * (1f - progress)
+    }
+
     private fun settlePresentation() {
         cancelPresentationAnimations()
-        findViewById<View>(R.id.capsule_pair).alpha = 1f
+        capsuleIcon.animate().cancel()
+        capsuleIcon.translationX = 0f
+        capsuleIcon.translationY = 0f
+        capsuleIcon.rotation = 0f
         updateCapsuleIcon()
+        setIconProgress(if (presentation() == Presentation.CONNECTED) 1f else 0f)
     }
 
     private fun animatePresentation() {
         cancelPresentationAnimations()
-        val pair = findViewById<View>(R.id.capsule_pair)
-        val initialAlpha = pair.alpha
-        var swapped = false
+        capsuleIcon.animate().cancel()
+        capsuleIcon.translationX = 0f
+        capsuleIcon.translationY = 0f
+        capsuleIcon.rotation = 0f
+        updateCapsuleIcon()
+        val connected = presentation() == Presentation.CONNECTED
+        val initial = findViewById<View>(R.id.capsule_pair).alpha
+        val target = if (connected) 1f else 0f
+        val curve = PathInterpolator(.34f, 1.56f, .64f, 1f)
         val animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 150L // One 150ms fade-out/fade-in transition, not a delayed state change.
+            duration = 400L
             interpolator = LinearInterpolator()
             addUpdateListener { animation ->
                 val fraction = animation.animatedValue as Float
-                if (fraction >= .5f && !swapped) {
-                    swapped = true
-                    updateCapsuleIcon()
-                }
-                pair.alpha = if (fraction < .5f) initialAlpha * (1f - fraction * 2f)
-                    else (fraction - .5f) * 2f
+                setIconProgress(initial + (target - initial) * curve.getInterpolation(fraction))
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     fadeAnimator = null
-                    pair.alpha = 1f
-                    if (!swapped) updateCapsuleIcon()
+                    setIconProgress(target)
                 }
             })
+        }
+        if (connected) {
+            val dp = resources.displayMetrics.density
+            capsuleIcon.translationY = 4f * dp
+            capsuleIcon.animate().translationX(-2f * dp).translationY(-2f * dp).rotation(-9f)
+                .setDuration(247L).setInterpolator(DecelerateInterpolator()).withEndAction {
+                    capsuleIcon.animate().translationX(0f).translationY(0f).rotation(0f)
+                        .setDuration(303L).start()
+                }.start()
         }
         fadeAnimator = animator
         animator.start()
@@ -248,7 +296,6 @@ class ControlBar @JvmOverloads constructor(
             val capsulePadding = ((if (compact) 4 else 8) * density).toInt()
             capsule.setPaddingRelative(capsulePadding, capsule.paddingTop, capsulePadding, capsule.paddingBottom)
             (speedBox.layoutParams as LinearLayout.LayoutParams).weight = if (compact) 1.35f else 1f
-            (capsule.layoutParams as LinearLayout.LayoutParams).weight = if (compact) 1.05f else 1.4f
             (latencyBox.layoutParams as LinearLayout.LayoutParams).weight = 1f
             // Compact space budget still keeps the right label at exactly 18dp + 4dp from end.
             speedBox.setPaddingRelative(speedBox.paddingStart, speedBox.paddingTop,
@@ -264,10 +311,49 @@ class ControlBar @JvmOverloads constructor(
         if (Looper.myLooper() === Looper.getMainLooper()) block() else post(block)
     }
 
+    private class SpeedTriangle(private val down: Boolean, private val density: Float, private val color: Int) : ReplacementSpan() {
+        override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int =
+            (9f * density).toInt()
+        override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float,
+                          top: Int, y: Int, bottom: Int, paint: Paint) {
+            val triangle = Path()
+            val center = (top + bottom) / 2f
+            val half = 4.5f * density
+            val height = 7f * density
+            if (down) {
+                triangle.moveTo(x, center - height / 2)
+                triangle.lineTo(x + 2 * half, center - height / 2)
+                triangle.lineTo(x + half, center + height / 2)
+            } else {
+                triangle.moveTo(x, center + height / 2)
+                triangle.lineTo(x + 2 * half, center + height / 2)
+                triangle.lineTo(x + half, center - height / 2)
+            }
+            triangle.close()
+            val trianglePaint = Paint(paint).apply { this.color = this@SpeedTriangle.color; style = Paint.Style.FILL }
+            canvas.drawPath(triangle, trianglePaint)
+        }
+    }
+
+    private fun setSpeed(view: TextView, resource: Int, value: String) {
+        val content = SpannableString(context.getString(resource, value))
+        val density = resources.displayMetrics.density
+        content.setSpan(SpeedTriangle(resource == R.string.control_bar_speed_down, density,
+            resources.getColor(R.color.control_bar_text, context.theme)), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        val unitStart = content.lastIndexOf(' ') + 1
+        if (unitStart > 0 && unitStart < content.length) {
+            content.setSpan(ForegroundColorSpan(resources.getColor(R.color.control_bar_unit, context.theme)),
+                unitStart, content.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            content.setSpan(RelativeSizeSpan(.875f), unitStart, content.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        view.setTextColor(resources.getColor(R.color.control_bar_speed_text, context.theme))
+        view.text = content
+    }
+
     fun updateSpeed(txRate: Long, rxRate: Long) = onControlThread {
         if (!canReceiveMeasurements()) return@onControlThread
-        speedDown.text = context.getString(R.string.control_bar_speed_down, fmt(rxRate))
-        speedUp.text = context.getString(R.string.control_bar_speed_up, fmt(txRate))
+        setSpeed(speedDown, R.string.control_bar_speed_down, fmt(rxRate))
+        setSpeed(speedUp, R.string.control_bar_speed_up, fmt(txRate))
         updateSpeedDescription()
     }
 
@@ -331,7 +417,11 @@ class ControlBar @JvmOverloads constructor(
                 ?.takeIf { it.isNotEmpty() } ?: context.getString(R.string.control_bar_latency_unknown)
             else if (currentState != BaseService.State.Connected || ms < 0) context.getString(R.string.control_bar_latency_unknown)
             else context.getString(R.string.control_bar_latency_value, ms.toString())
-            latency.setTextColor(resources.getColor(if (failed) R.color.control_bar_failure else R.color.latency_green, context.theme))
+            latency.setTextColor(resources.getColor(when {
+                failed -> R.color.control_bar_failure
+                currentState == BaseService.State.Connected -> R.color.latency_green
+                else -> R.color.control_bar_text
+            }, context.theme))
             latencyAnimator?.cancel(); latencyAnimator = null
             latencyTransition?.removeAllUpdateListeners(); latencyTransition?.cancel()
             latencyTransition = null
@@ -450,10 +540,13 @@ class ControlBar @JvmOverloads constructor(
         cancelLatencyPresentation()
         testing = false
         failed = false
-        latency.setTextColor(resources.getColor(R.color.latency_green, context.theme))
+        latency.setTextColor(resources.getColor(
+            if (currentState == BaseService.State.Connected) R.color.latency_green else R.color.control_bar_text,
+            context.theme,
+        ))
         val unknown = context.getString(R.string.control_bar_speed_unknown)
-        speedDown.text = context.getString(R.string.control_bar_speed_down, unknown)
-        speedUp.text = context.getString(R.string.control_bar_speed_up, unknown)
+        setSpeed(speedDown, R.string.control_bar_speed_down, unknown)
+        setSpeed(speedUp, R.string.control_bar_speed_up, unknown)
         latency.setText(R.string.control_bar_latency_unknown)
         updateSpeedDescription()
         updateLatencyDescription()
@@ -481,11 +574,10 @@ class ControlBar @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         detached = true
-        cancelPresentationAnimations()
-        findViewById<View>(R.id.capsule_pair).alpha = 1f
-        sidePressed = false
-        sideRipple.state = intArrayOf()
-        sideRipple.jumpToCurrentState()
+        settlePresentation()
+        capsule.animate().cancel()
+        capsule.scaleX = 1f
+        capsule.scaleY = 1f
         reset() // No animation/test state survives removal/destruction.
         super.onDetachedFromWindow()
     }
@@ -503,93 +595,12 @@ class ControlBar @JvmOverloads constructor(
 
     private fun syncAnimationVisibility() {
         if (!canShowReadouts()) {
-            cancelPresentationAnimations()
-            findViewById<View>(R.id.capsule_pair).alpha = 1f
-            updateCapsuleIcon()
-            sidePressed = false
-            sideRipple.state = intArrayOf()
-            sideRipple.jumpToCurrentState()
+            settlePresentation()
             clearMeasurements() // Preserve permission togglePending; discard old test presentation.
         } else if (fadeAnimator == null) {
             updateCapsuleIcon()
         }
         updateEnabledState() // Becoming visible re-enables testing without a fake state report.
-    }
-
-    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
-        super.onLayout(changed, left, top, right, bottom)
-        if (!ready) return
-        val rect = Rect()
-        capsule.getDrawingRect(rect)
-        offsetDescendantRectToMyCoords(capsule, rect)
-        sideMask.setCapsuleBounds(rect)
-        sideRipple.invalidateSelf()
-    }
-
-    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (ready) {
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                val rect = Rect()
-                sidePressed = listOf(speedBox, latencyBox).any { box ->
-                    box.getDrawingRect(rect)
-                    offsetDescendantRectToMyCoords(box, rect)
-                    box.isEnabled && rect.contains(event.x.toInt(), event.y.toInt())
-                }
-            }
-            if (sidePressed) sideRipple.setHotspot(event.x, event.y)
-            updateSideRippleState()
-        }
-        val handled = super.dispatchTouchEvent(event)
-        if (ready && (event.actionMasked == MotionEvent.ACTION_UP ||
-                event.actionMasked == MotionEvent.ACTION_CANCEL)) {
-            sidePressed = false
-            speedBox.isPressed = false
-            latencyBox.isPressed = false
-            speedBox.cancelLongPress()
-            latencyBox.cancelLongPress()
-            updateSideRippleState()
-        }
-        return handled
-    }
-
-    override fun dispatchDraw(canvas: Canvas) {
-        if (ready) updateSideRippleState()
-        super.dispatchDraw(canvas)
-    }
-
-    private fun updateSideRippleState() {
-        val visible = canShowReadouts()
-        val pressed = visible && (sidePressed || (speedBox.isEnabled && speedBox.isPressed) ||
-            (latencyBox.isEnabled && latencyBox.isPressed))
-        val focused = visible && !isInTouchMode && ((speedBox.isEnabled && speedBox.isFocused) ||
-            (latencyBox.isEnabled && latencyBox.isFocused))
-        sideRipple.state = when {
-            pressed -> intArrayOf(android.R.attr.state_enabled, android.R.attr.state_pressed)
-            focused -> intArrayOf(android.R.attr.state_enabled, android.R.attr.state_focused)
-            else -> intArrayOf(android.R.attr.state_enabled)
-        }
-    }
-
-    /** One rounded outer path minus the actual rounded capsule INCLUDING its antialiased edge. */
-    private class CapsuleExclusionMask(private val density: Float) : Drawable() {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
-        private val path = Path()
-        private val capsuleBounds = RectF()
-        fun setCapsuleBounds(rect: Rect) { capsuleBounds.set(rect); invalidateSelf() }
-        override fun draw(canvas: Canvas) {
-            path.rewind()
-            val inset = density // Keep feedback inside the existing 1dp border.
-            path.addRoundRect(RectF(bounds).apply { inset(inset, inset) }, 23f * density,
-                23f * density, Path.Direction.CW)
-            val hole = RectF(capsuleBounds).apply { inset(-density, -density) }
-            path.addRoundRect(hole, hole.height() / 2f, hole.height() / 2f, Path.Direction.CW)
-            path.fillType = Path.FillType.EVEN_ODD
-            canvas.drawPath(path, paint)
-        }
-        override fun setAlpha(alpha: Int) { paint.alpha = alpha; invalidateSelf() }
-        override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter; invalidateSelf() }
-        @Deprecated("Deprecated in Android")
-        override fun getOpacity() = PixelFormat.TRANSLUCENT
     }
 
     companion object {

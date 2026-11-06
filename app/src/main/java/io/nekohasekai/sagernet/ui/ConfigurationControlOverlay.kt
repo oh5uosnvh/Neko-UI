@@ -40,7 +40,7 @@ internal class ConfigurationControlOverlay(
             bar.layoutParams = barParams
         }
         val content = holder.layoutParams as CoordinatorLayout.LayoutParams
-        // Only the actual system/IME safe area is excluded. The 76dp strip floats OVER the list.
+        // Only the actual system/IME safe area is excluded. The 84dp strip floats OVER the list.
         if (content.bottomMargin != bottom) {
             content.bottomMargin = bottom
             holder.layoutParams = content
@@ -51,7 +51,7 @@ internal class ConfigurationControlOverlay(
         // RecyclerView descendants contain hundreds of card children; stop at each
         // registered node viewport rather than walking every card on lifecycle callbacks.
         if (view is RecyclerView && view.id == R.id.configuration_list) {
-            val padding = dp(76 + 14 + 14)
+            val padding = dp(84 + 14 + 14)
             if (view.paddingBottom != padding) view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, padding)
             view.clipToPadding = false
             return // Stop at actual node lists, not ViewPager2's internal RecyclerView.

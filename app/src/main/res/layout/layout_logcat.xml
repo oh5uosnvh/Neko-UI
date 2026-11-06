@@ -6,16 +6,19 @@
     android:background="?attr/colorLayerLow"
     tools:context=".ui.ToolsFragment">
 
-    <LinearLayout
+    <!-- Padding belongs to the scroll surface, not an outer clipped container:
+         scrolled text can then reach the title's fade band. -->
+    <FrameLayout
         android:id="@id/title_bar_content"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:padding="8dp">
+        android:layout_height="match_parent">
 
         <ScrollView
             android:id="@+id/scroolview"
             android:layout_width="match_parent"
-            android:layout_height="match_parent">
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:padding="8dp">
 
             <TextView
                 android:id="@+id/textview"
@@ -28,7 +31,7 @@
                 android:textIsSelectable="true"
                 tools:ignore="LabelFor" />
         </ScrollView>
-    </LinearLayout>
+    </FrameLayout>
 
     <include
         layout="@layout/layout_appbar"

@@ -7,7 +7,7 @@
     <LinearLayout
         android:id="@+id/control_bar_content"
         android:layout_width="match_parent"
-        android:layout_height="76dp"
+        android:layout_height="match_parent"
         android:baselineAligned="false"
         android:gravity="center_vertical"
         android:orientation="horizontal"
@@ -50,12 +50,11 @@
                 tools:text="▲ 999.99 MB/s" />
         </LinearLayout>
 
-        <!-- The whole 48dp target is clickable; its wrap-content icon/label pair is centered. -->
+        <!-- The power and connected layers crossfade independently inside the capsule. -->
         <FrameLayout
             android:id="@+id/capsule"
-            android:layout_width="0dp"
-            android:layout_height="48dp"
-            android:layout_weight="1.4"
+            android:layout_width="118dp"
+            android:layout_height="44dp"
             android:background="@drawable/bg_capsule"
             android:clickable="true"
             android:descendantFocusability="blocksDescendants"
@@ -65,6 +64,14 @@
             android:minWidth="48dp"
             android:paddingStart="8dp"
             android:paddingEnd="8dp">
+
+            <androidx.appcompat.widget.AppCompatImageView
+                android:id="@+id/capsule_power"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_gravity="center"
+                android:importantForAccessibility="no"
+                app:srcCompat="@drawable/ic_control_power" />
 
             <LinearLayout
                 android:id="@+id/capsule_pair"
@@ -80,8 +87,8 @@
 
                 <androidx.appcompat.widget.AppCompatImageView
                     android:id="@+id/capsule_icon"
-                    android:layout_width="18dp"
-                    android:layout_height="18dp"
+                    android:layout_width="17dp"
+                    android:layout_height="17dp"
                     android:clickable="false"
                     android:focusable="false"
                     android:importantForAccessibility="no"
@@ -104,7 +111,7 @@
                     android:maxLines="1"
                     android:text="@string/control_bar_disconnected"
                     android:textColor="@color/control_bar_text"
-                    android:textSize="14sp"
+                    android:textSize="13sp"
                     android:textStyle="normal"
                     app:autoSizeTextType="uniform"
                     app:autoSizeMinTextSize="10sp"
@@ -137,8 +144,8 @@
                 android:includeFontPadding="false"
                 android:maxLines="1"
                 android:text="@string/control_bar_latency_unknown"
-                android:textColor="@color/latency_green"
-                android:textSize="16sp"
+                android:textColor="@color/control_bar_text"
+                android:textSize="13.5sp"
                 android:textStyle="normal"
                 app:autoSizeTextType="uniform"
                 app:autoSizeMinTextSize="8sp"

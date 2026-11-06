@@ -7,21 +7,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.appcompat.widget.Toolbar
-import io.nekohasekai.sagernet.R
 import kotlin.math.max
 
 /** Text ink, not TextView.bottom (font padding), fontMetrics.bottom, or toolbar.bottom. */
 internal object TitleGlyphMetrics {
     fun titleView(toolbar: Toolbar): TextView? {
-        // ConfigurationFragment hides the native Toolbar title and installs a custom
-        // TextView in the appbar row. Prefer that explicit marker when present.
-        var ancestor: View? = toolbar
-        while (ancestor != null) {
-            (ancestor as? ViewGroup)?.findViewById<TextView>(R.id.title_bar_title)?.let { marked ->
-                if (marked.visibility == View.VISIBLE && !marked.text.isNullOrEmpty()) return marked
-            }
-            ancestor = ancestor.parent as? View
-        }
         if (toolbar.title.isNullOrEmpty()) return null
         var result: TextView? = null
         for (index in 0 until toolbar.childCount) {

@@ -8,6 +8,7 @@ import androidx.appcompat.view.menu.MenuBuilder
 import androidx.appcompat.view.menu.MenuPopupHelper
 import androidx.appcompat.widget.PopupMenu
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.widget.PopupEntrance
 
 /**
  * 把菜单挂到任意锚点视图下方弹出。
@@ -34,25 +35,17 @@ object AppCompatPopupWindowHelper {
         }
 
         try {
-            val builder = menu as MenuBuilder
-            builder.setCallback(object : MenuBuilder.Callback {
-                override fun onMenuItemSelected(menu: MenuBuilder, item: MenuItem): Boolean =
-                    onClick(item)
-
-                override fun onMenuModeChange(menu: MenuBuilder) = Unit
-            })
-
-            val helper = MenuPopupHelper(anchor.context, builder, anchor)
-            helper.setForceShowIcon(true)
-            helper.setGravity(Gravity.END)
-            helper.show()
+            // Keep one PopupWindow alive while navigating into submenus. This mirrors
+            // FlClash pre2: the child page slides over the same surface and the
+            // surface height follows the page instead of opening a second window.
+            InlineMenuPopup.show(menu, anchor, onClick)
         } catch (e: Throwable) {
             Logs.w(e)
             try {
                 val pm = PopupMenu(anchor.context, anchor)
                 cloneMenu(menu, pm.menu)
                 pm.setOnMenuItemClickListener { onClick(it) }
-                pm.show()
+                PopupEntrance.show(pm)
             } catch (e2: Throwable) {
                 Logs.w(e2)
                 fallback()

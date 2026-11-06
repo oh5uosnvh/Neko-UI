@@ -377,6 +377,7 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     fun refreshAllGroupFragmentsCardStyle() {
+        updateDisplaySnapshots()
         adapter.groupFragments.values.forEach { fragment ->
             if (fragment.isAdded && fragment.view != null) {
                 fragment.adapter?.notifyDataSetChanged()
@@ -1760,10 +1761,13 @@ class ConfigurationFragment @JvmOverloads constructor(
             isOutsideTouchable = true
             elevation = dp(8).toFloat()
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0x00000000))
+            animationStyle = 0
+            enterTransition = null
+            exitTransition = null
         }
         popupRef = popup
         popup.showAsDropDown(anchor, 0, dp(4))
-        io.nekohasekai.sagernet.widget.PopupEntrance.animate(column)
+        io.nekohasekai.sagernet.widget.PopupEntrance.animate(column, popup.isAboveAnchor, anchor = anchor)
 
         // 面板超出屏幕右缘时整体左移（-1 = 宽高不变）
         val loc = IntArray(2)
@@ -3118,8 +3122,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     popup.menu.removeItem(R.id.action_group_configuration)
                 }
 
-                popup.setOnMenuItemClickListener(this)
-                popup.show()
+                InlineMenuPopup.show(popup.menu, anchor) { onMenuItemClick(it) }
             }
 
             val profileName: TextView = view.findViewById(R.id.profile_name)
@@ -3254,7 +3257,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val popup = PopupMenu(requireContext(), anchor)
                 popup.menuInflater.inflate(R.menu.double_column_item_menu, popup.menu)
                 if (select) popup.menu.removeItem(R.id.action_delete)
-                popup.setOnMenuItemClickListener { menuItem ->
+                val handleMenuItem: (MenuItem) -> Boolean = { menuItem ->
                     when (menuItem.itemId) {
                         R.id.action_edit -> {
                             anchor.context.startActivity(
@@ -3275,7 +3278,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                         else -> false
                     }
                 }
-                popup.show()
+                InlineMenuPopup.show(popup.menu, anchor, handleMenuItem)
             }
 
             private fun applySelected(selected: Boolean) {

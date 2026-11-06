@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 450ms approximation of FlClash pre2's damping-ratio 0.754 spring. -->
+<pathInterpolator xmlns:android="http://schemas.android.com/apk/res/android"
+    android:controlX1="0.22"
+    android:controlY1="1.35"
+    android:controlX2="0.35"
+    android:controlY2="1.0" />

@@ -107,7 +107,7 @@ internal class CompactNavigationMenu(
         val y = (location[1] + view.height).coerceIn(frame.top + marginY, maxOf(frame.top + marginY, frame.bottom - popup.height - marginY))
         popup.showAtLocation(host, Gravity.TOP or Gravity.LEFT, x, y)
         content.requestFocus()
-        animate(content, opening = true)
+        io.nekohasekai.sagernet.widget.PopupEntrance.animate(content, anchor = view)
     }
 
     private fun bounds(view: View) = Rect().also {
@@ -220,6 +220,7 @@ internal class CompactNavigationMenu(
         if (closing) return
         closing = true
         afterClose = action
+        io.nekohasekai.sagernet.widget.PopupEntrance.cancel(popup.contentView)
         animate(popup.contentView, opening = false)
     }
 

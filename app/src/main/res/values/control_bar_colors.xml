@@ -5,4 +5,8 @@
     <color name="control_bar_surface">#FFFFFFFF</color>
     <color name="control_bar_border">#59000000</color>
     <color name="control_bar_failure">#FFF44336</color>
+    <color name="control_bar_unit">#FF7C8390</color>
+    <color name="control_bar_speed_text">#FF20242B</color>
+    <color name="control_bar_off_top">#FFC7CFDB</color>
+    <color name="control_bar_off_bottom">#FFB5BFCE</color>
 </resources>
