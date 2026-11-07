@@ -333,6 +333,10 @@ class ControlBar @JvmOverloads constructor(
                 TextViewCompat.setAutoSizeTextTypeWithDefaults(
                     it, TextViewCompat.AUTO_SIZE_TEXT_TYPE_NONE)
             }
+            latency.setTextSize(TypedValue.COMPLEX_UNIT_SP, 8f)
+            latency.setTextScaleX(.85f)
+            TextViewCompat.setAutoSizeTextTypeWithDefaults(
+                latency, TextViewCompat.AUTO_SIZE_TEXT_TYPE_NONE)
         } else {
             listOf(speedDown, speedUp).forEach {
                 it.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
@@ -340,6 +344,10 @@ class ControlBar @JvmOverloads constructor(
                 TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
                     it, 8, 13, 1, TypedValue.COMPLEX_UNIT_SP)
             }
+            latency.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            latency.setTextScaleX(1f)
+            TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
+                latency, 8, 16, 1, TypedValue.COMPLEX_UNIT_SP)
         }
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
     }
