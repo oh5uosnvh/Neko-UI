@@ -458,15 +458,15 @@ class ControlBarStateTest {
         // Only the central capsule is excluded. The top/bottom bands around it
         // belong to the side control surface and must remain ripple-enabled.
         assertEquals(Color.WHITE, bitmap.getPixel(cx, 4))
-        val gutter = (2f * bar.resources.displayMetrics.density).toInt()
         val left = parent.left + capsule.left
         val right = parent.left + capsule.right - 1
-        for (x in (left - gutter)..(right + gutter)) {
-            for (y in parent.top + capsule.top..parent.top + capsule.bottom) {
-                if (x in left..right) {
-                    assertEquals("capsule x=$x y=$y", Color.TRANSPARENT, bitmap.getPixel(x, y))
-                }
-            }
+        // The hole follows the actual rounded capsule, so test its center
+        // columns/rows rather than treating rounded corner pixels as part of it.
+        for (y in parent.top + capsule.top until parent.top + capsule.bottom) {
+            assertEquals("capsule center y=$y", Color.TRANSPARENT, bitmap.getPixel(cx, y))
+        }
+        for (x in left + capsule.height / 2..right - capsule.height / 2) {
+            assertEquals("capsule middle x=$x", Color.TRANSPARENT, bitmap.getPixel(x, cy))
         }
         val ripple = bar.foreground
         for (id in listOf(R.id.speed_box, R.id.latency_box)) {
