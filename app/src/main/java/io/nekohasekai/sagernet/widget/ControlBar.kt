@@ -629,9 +629,11 @@ class ControlBar @JvmOverloads constructor(
         currentState == BaseService.State.Stopping
 
     private fun updateEnabledState() {
-        // A VPN transition is not a UI lock. The user may reverse the intent
-        // before the previous service acknowledgement arrives.
-        capsule.isEnabled = canShowReadouts()
+        // MainActivity opts into reversible rapid taps through onToggleIntent.
+        // Keep the legacy callback contract locked for embedders that have not
+        // adopted the intent API yet.
+        capsule.isEnabled = canShowReadouts() &&
+            (onToggleIntent != null || (!togglePending && !isTransitioning()))
         val canTest = canShowReadouts() && !testing &&
             (currentState == BaseService.State.Connected || (failed && onError != null))
         speedBox.isEnabled = canTest
