@@ -17,7 +17,9 @@ class EndpointTextView @JvmOverloads constructor(
 
     init {
         isSingleLine = true
-        ellipsize = TextUtils.TruncateAt.END
+        // Never let TextView ellipsize the complete endpoint after the host-only
+        // formatter has preserved the port suffix.
+        ellipsize = null
     }
 
     override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) {

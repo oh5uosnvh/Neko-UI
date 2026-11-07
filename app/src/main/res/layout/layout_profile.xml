@@ -44,7 +44,7 @@
                         android:layout_height="match_parent"
                         android:gravity="center_vertical"
                         android:maxLines="2"
-                        android:ellipsize="end"
+                        android:ellipsize="none"
                         android:breakStrategy="simple"
                         android:hyphenationFrequency="none"
                         android:lineBreakStyle="loose"

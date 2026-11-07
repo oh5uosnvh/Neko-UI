@@ -2090,7 +2090,24 @@ class ConfigurationFragment @JvmOverloads constructor(
                 notifyItemInserted(newIndex)
                 groupPager.setCurrentItem(newIndex, false)
                 tabLayout.getTabAt(newIndex)?.select()
+                // A newly-created group is appended and selected; keep the selected tab
+                // visible instead of leaving the strip at its previous (usually first) offset.
+                smoothTabTo(newIndex)
             }
+        }
+
+        /** Animate the strip without changing the pager selection or rebuilding tabs. */
+        private fun smoothTabTo(index: Int) {
+            if (index !in 0 until tabLayout.tabCount) {
+                // TabLayoutMediator may attach the newly inserted tab one frame later.
+                if (index >= 0) tabLayout.postOnAnimation { smoothTabTo(index) }
+                return
+            }
+            val tab = tabLayout.getTabAt(index)?.view ?: return
+            val strip = tabLayout.getChildAt(0) as? ViewGroup ?: return
+            val target = (tab.left + tab.right - tabLayout.width) / 2
+                .coerceIn(0, (strip.width - tabLayout.width).coerceAtLeast(0))
+            tabLayout.smoothScrollTo(target, 0)
         }
 
         private var removalGeneration = 0L
@@ -2123,7 +2140,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                     if (currentIndex >= 0) {
                         groupPager.setCurrentItem(currentIndex, false)
                         tabLayout.setScrollPosition(currentIndex, 0f, true)
-                        tabLayout.scrollTo(scrollX, 0)
+                        // Preserve the strip's pre-delete viewport, but animate the
+                        // correction so removal never flashes back to tab zero.
+                        tabLayout.smoothScrollTo(scrollX, 0)
                     }
                     tabLayout.post {
                         if (generation == removalGeneration && isCurrentGroupPagerAdapter(this@GroupPagerAdapter)) {
@@ -3445,8 +3464,11 @@ class ConfigurationFragment @JvmOverloads constructor(
                 // The setting controls visibility; zero values remain visible.
                 val showTraffic = !twoColumn && DataStore.profileTrafficStatistics
                 // Single-column statistics occupy title line two, never an additional row.
-                profileName.minLines = if (showTraffic) 1 else 2
-                profileName.maxLines = if (showTraffic) 1 else 2
+                // The title always has two physical lines. Traffic is right-aligned
+                // inside line two and must not reduce the name to one line.
+                profileName.minLines = 2
+                profileName.maxLines = 2
+                profileName.ellipsize = null
                 val nameContainer = view.findViewById<View>(R.id.title_text_container)
                 nameContainer.layoutParams = nameContainer.layoutParams.apply {
                     height = resources.getDimensionPixelSize(if (showTraffic) R.dimen.profile_card_title_text_height else R.dimen.profile_card_title_row_height)
