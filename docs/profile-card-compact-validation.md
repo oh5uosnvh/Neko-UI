@@ -12,6 +12,16 @@ Base: Build UI candidate #322, cde98105f2aa5d2f50db8c87c82e698f1f957ef8.
 - The traffic loop reads the preference per tick. Live rate counters are independent from profile counters, so disabled intervals do not inflate profile totals when enabled again.
 - Existing endpoint width fitting and status-priority rendering are preserved.
 
+## Follow-up visual acceptance after #323
+
+Device screenshots exposed three presentation defects not caught by the initial geometry test:
+
+- Single-column traffic must align to the card's right content edge, not the left name column. It stays on line two and remains absent in two-column mode.
+- The name's first text line must share the horizontal visual centerline of the edit/share/delete icons (single column) or overflow icon (two columns). Align actual glyph/font metrics, not just the center of the two-line name container.
+- Endpoint and final protocol/status text should be separated by a small normal interline gap, not a blank-line-sized gap from oversized address/status rows.
+
+Follow-up tests must measure absolute card-relative positions, right-edge alignment and first-line glyph center; merely asserting a positive name width or unchanged card height is insufficient.
+
 ## Local validation
 
 Environment: Android SDK /opt/android-sdk, JDK 17, Alpine aarch64.

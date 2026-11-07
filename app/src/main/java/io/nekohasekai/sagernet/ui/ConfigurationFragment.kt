@@ -3447,6 +3447,21 @@ class ConfigurationFragment @JvmOverloads constructor(
                 // Single-column statistics occupy title line two, never an additional row.
                 profileName.minLines = if (showTraffic) 1 else 2
                 profileName.maxLines = if (showTraffic) 1 else 2
+                val nameContainer = view.findViewById<View>(R.id.title_text_container)
+                nameContainer.layoutParams = nameContainer.layoutParams.apply {
+                    height = resources.getDimensionPixelSize(if (showTraffic) R.dimen.profile_card_title_text_height else R.dimen.profile_card_title_row_height)
+                }
+                nameContainer.setPaddingRelative(
+                    (12 * resources.displayMetrics.density).toInt(),
+                    0,
+                    resources.getDimensionPixelSize(if (twoColumn) R.dimen.profile_card_action_width else R.dimen.profile_card_actions_width),
+                    0
+                )
+                profileName.gravity = android.view.Gravity.TOP
+                val nameMetrics = profileName.paint.fontMetricsInt
+                // Align first-line font box with the 48dp action icons, not the two-line block.
+                val firstLineCenter = (nameMetrics.bottom - nameMetrics.top) / 2
+                profileName.setPadding(0, ((24 * resources.displayMetrics.density).toInt() - firstLineCenter).coerceAtLeast(0), 0, 0)
                 trafficText.isVisible = showTraffic
                 trafficText.setTextColor(secondary)
                 trafficText.text = if (showTraffic) view.context.getString(

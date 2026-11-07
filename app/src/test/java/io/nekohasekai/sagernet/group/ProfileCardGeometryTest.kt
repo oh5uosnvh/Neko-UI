@@ -32,6 +32,14 @@ class ProfileCardGeometryTest {
                         name.text = "日本04-IEPL-TX（备用线路）"
                         name.minLines = if (showTraffic) 1 else 2
                         name.maxLines = if (showTraffic) 1 else 2
+                        val nameContainer = card.findViewById<View>(R.id.title_text_container)
+                        nameContainer.layoutParams = nameContainer.layoutParams.apply {
+                            height = activity.resources.getDimensionPixelSize(if (showTraffic) R.dimen.profile_card_title_text_height else R.dimen.profile_card_title_row_height)
+                        }
+                        nameContainer.setPaddingRelative((12 * density).toInt(), 0, activity.resources.getDimensionPixelSize(if (twoColumn) R.dimen.profile_card_action_width else R.dimen.profile_card_actions_width), 0)
+                        name.gravity = android.view.Gravity.TOP
+                        val metrics = name.paint.fontMetricsInt
+                        name.setPadding(0, ((24 * density).toInt() - (metrics.bottom - metrics.top) / 2).coerceAtLeast(0), 0, 0)
                         traffic.text = "0 B ↓ 0 B ↑"
                         traffic.visibility = if (showTraffic) View.VISIBLE else View.GONE
                         menu.visibility = if (twoColumn) View.VISIBLE else View.GONE
@@ -45,8 +53,11 @@ class ProfileCardGeometryTest {
                         card.layout(0, 0, width, height)
                         assertEquals(height, card.measuredHeight)
                         assertTrue(name.width > 0)
-                        assertSame(name.parent, traffic.parent)
+                        assertEquals(R.id.title_row, (traffic.parent as View).id)
                         if (showTraffic) {
+                            assertTrue(traffic.left <= (traffic.parent as View).left)
+                            assertTrue(traffic.right >= (traffic.parent as View).right)
+                            assertEquals((traffic.parent as View).right, traffic.right)
                             assertTrue(traffic.top >= name.bottom)
                             assertTrue(traffic.bottom <= (traffic.parent as View).height)
                         }

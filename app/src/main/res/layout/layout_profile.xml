@@ -21,59 +21,60 @@
             android:focusable="true"
             android:orientation="vertical">
 
-            <LinearLayout
+            <FrameLayout
                 android:id="@+id/title_row"
                 android:layout_width="match_parent"
                 android:layout_height="@dimen/profile_card_title_row_height"
-                android:minHeight="@dimen/profile_card_title_row_height"
-                android:orientation="horizontal">
+                android:minHeight="@dimen/profile_card_title_row_height">
 
                 <LinearLayout
-                    android:layout_width="0dp"
+                    android:id="@+id/title_text_container"
+                    android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:layout_gravity="center_vertical"
-                    android:layout_weight="1"
+                    android:layout_gravity="top"
                     android:gravity="center_vertical"
                     android:orientation="vertical"
-                    android:paddingLeft="12dp"
-                    android:paddingTop="8dp"
-                    android:paddingRight="4dp"
-                    android:paddingBottom="8dp">
+                    android:paddingStart="12dp"
+                    android:paddingEnd="@dimen/profile_card_actions_width"
+                    android:includeFontPadding="true">
 
                     <io.nekohasekai.sagernet.widget.ProfileNameTextView
                         android:id="@+id/profile_name"
                         android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
+                        android:layout_height="match_parent"
+                        android:gravity="center_vertical"
                         android:maxLines="2"
                         android:ellipsize="end"
                         android:breakStrategy="simple"
                         android:hyphenationFrequency="none"
                         android:lineBreakStyle="loose"
                         android:lineBreakWordStyle="none"
+                        android:includeFontPadding="true"
                         android:textAppearance="?android:attr/textAppearanceSmall"
                         android:textColor="?android:attr/textColorPrimary"
                         android:textStyle="bold"
                         tools:text="@string/profile_name" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/traffic_text"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center_vertical"
-                    android:layout_marginEnd="4dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/profile_card_traffic_row_height"
+                    android:layout_gravity="bottom"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
                     android:gravity="end|center_vertical"
                     android:maxLines="1"
                     android:ellipsize="none"
                     android:textAppearance="?android:attr/textAppearanceSmall"
                     android:textColor="?android:attr/textColorSecondary"
                     android:visibility="gone" />
-                </LinearLayout>
 
                 <androidx.appcompat.widget.AppCompatImageView
                     android:id="@+id/edit"
                     android:layout_width="@dimen/profile_card_action_width"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="top"
+                    android:layout_height="48dp"
+                    android:layout_gravity="top|end"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/edit"
                     android:focusable="true"
@@ -84,7 +85,7 @@
                     android:id="@+id/double_column_menu"
                     android:layout_width="@dimen/profile_card_action_width"
                     android:layout_height="48dp"
-                    android:layout_gravity="top"
+                    android:layout_gravity="top|end"
                     android:layout_marginEnd="4dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/topbar_more_desc"
@@ -97,41 +98,41 @@
                 <LinearLayout
                     android:id="@+id/share"
                     android:layout_width="@dimen/profile_card_action_width"
-                    android:layout_height="match_parent"
-                    android:layout_gravity="top"
+                    android:layout_height="48dp"
+                    android:layout_gravity="top|end"
+                    android:layout_marginEnd="@dimen/profile_card_action_width"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/share"
                     android:focusable="true"
+                    android:gravity="center"
                     android:nextFocusLeft="@+id/title_row">
-
                     <LinearLayout
                         android:id="@+id/share_layer"
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
+                        android:gravity="center"
                         android:padding="12dp">
-
                         <androidx.appcompat.widget.AppCompatImageView
                             android:id="@+id/shareIcon"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             app:srcCompat="@drawable/ic_social_share" />
                     </LinearLayout>
-
                 </LinearLayout>
 
                 <androidx.appcompat.widget.AppCompatImageView
                     android:id="@+id/remove"
                     android:layout_width="@dimen/profile_card_action_width"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="top"
+                    android:layout_height="48dp"
+                    android:layout_gravity="top|end"
+                    android:layout_marginEnd="@dimen/profile_card_actions_width_minus_one"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/delete"
                     android:focusable="true"
                     android:padding="12dp"
                     android:visibility="gone"
                     app:srcCompat="@drawable/ic_action_delete" />
-
-            </LinearLayout>
+            </FrameLayout>
 
             <!-- Optional row 3: endpoint. -->
             <LinearLayout
