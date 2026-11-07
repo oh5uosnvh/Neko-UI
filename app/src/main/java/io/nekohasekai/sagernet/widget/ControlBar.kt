@@ -70,7 +70,13 @@ class ControlBar @JvmOverloads constructor(
     private val speedDown: TextView
     private val speedUp: TextView
     private val capsule: FrameLayout
+    /** Persistent power layer; the legacy capsule_icon id intentionally remains on this view. */
+    private val capsulePowerLayer: View
     private val capsuleIcon: ImageView
+    /** Persistent plane + label layer, independent from the power layer. */
+    private val capsulePlaneLayer: View
+    private val capsulePlaneContent: View
+    private val capsulePlaneIcon: ImageView
     private val capsuleLabel: TextView
     private val latency: TextView
     private val latencyProgress: ImageView
@@ -131,7 +137,11 @@ class ControlBar @JvmOverloads constructor(
             it.setHorizontallyScrolling(true)
         }
         capsule = findViewById(R.id.capsule)
+        capsulePowerLayer = findViewById(R.id.capsule_power_layer)
         capsuleIcon = findViewById(R.id.capsule_icon)
+        capsulePlaneLayer = findViewById(R.id.capsule_plane_layer)
+        capsulePlaneContent = findViewById(R.id.capsule_plane_content)
+        capsulePlaneIcon = findViewById(R.id.capsule_plane_icon)
         capsuleLabel = findViewById(R.id.capsule_label)
         latency = findViewById(R.id.latency)
         latencyProgress = findViewById(R.id.latency_progress)
@@ -207,22 +217,23 @@ class ControlBar @JvmOverloads constructor(
         if (capsule.background !== capsuleBackground) capsule.background = capsuleBackground
     }
 
-    private fun updateCapsuleIcon() {
+    /** Update the two persistent layer contents without changing their animation state. */
+    private fun updateCapsuleIcon(connected: Boolean = presentation() == Presentation.CONNECTED,
+        keepPlaneLabel: Boolean = fadeAnimator != null) {
         updateCapsuleSurface()
-        val connected = presentation() == Presentation.CONNECTED
-        capsuleLabel.setText(when (presentation()) {
-            Presentation.CONNECTED -> if (compactCapsule) R.string.control_bar_connected_compact
-                else R.string.control_bar_connected
-            Presentation.DISCONNECTED -> if (compactCapsule) R.string.control_bar_disconnected_compact
-                else R.string.control_bar_disconnected
+        capsuleLabel.setText(if (compactCapsule) {
+            if (connected || keepPlaneLabel) R.string.control_bar_connected_compact else R.string.control_bar_disconnected_compact
+        } else {
+            if (connected || keepPlaneLabel) R.string.control_bar_connected else R.string.control_bar_disconnected
         })
-        // HTML 关闭态只有电源图标；连接态才出现飞机 + 「已连接」文字。
-        capsuleLabel.visibility = if (connected) View.VISIBLE else View.GONE
-        capsuleIcon.setColorFilter(resources.getColor(R.color.control_bar_text, context.theme))
-        capsuleIcon.setImageDrawable(AppCompatResources.getDrawable(context, when (presentation()) {
-            Presentation.CONNECTED -> R.drawable.ic_control_plane
-            Presentation.DISCONNECTED -> R.drawable.ic_control_power
-        }))
+        // Both drawables stay resident. Visibility is controlled by the layer animation;
+        // retaining the plane label during a disconnect prevents a mid-flight content pop.
+        capsuleLabel.visibility = if (connected || keepPlaneLabel) View.VISIBLE else View.GONE
+        val tint = resources.getColor(R.color.control_bar_text, context.theme)
+        capsuleIcon.setColorFilter(tint)
+        capsulePlaneIcon.setColorFilter(tint)
+        capsuleIcon.setImageDrawable(AppCompatResources.getDrawable(context, R.drawable.ic_control_power))
+        capsulePlaneIcon.setImageDrawable(AppCompatResources.getDrawable(context, R.drawable.ic_control_plane))
     }
 
     private fun shouldAnimateCapsule() = ready && canShowReadouts() &&
@@ -235,66 +246,99 @@ class ControlBar @JvmOverloads constructor(
         fadeAnimator = null
     }
 
-    private fun settlePresentation() {
-        cancelPresentationAnimations()
-        val pair = findViewById<View>(R.id.capsule_pair)
-        pair.alpha = 1f
-        pair.scaleX = 1f
-        pair.scaleY = 1f
-        pair.rotation = 0f
-        capsuleIcon.translationY = 0f
-        updateCapsuleIcon()
+    private fun setLayer(view: View, alpha: Float, scale: Float, rotation: Float) {
+        view.alpha = alpha
+        view.scaleX = scale
+        view.scaleY = scale
+        view.rotation = rotation
     }
 
-    /** 连接/断开切换：电源层与飞机层交叉过渡（spec 7.3，总时长 ~450ms）。 */
-    private fun animatePresentation() {
+    private fun settlePresentation() {
         cancelPresentationAnimations()
+        val connected = presentation() == Presentation.CONNECTED
+        setLayer(capsulePowerLayer, if (connected) 0f else 1f,
+            if (connected) .4f else 1f, if (connected) -90f else 0f)
+        setLayer(capsulePlaneLayer, if (connected) 1f else 0f,
+            if (connected) 1f else .4f, if (connected) 0f else 90f)
+        capsulePowerLayer.visibility = View.VISIBLE
+        capsulePlaneLayer.visibility = View.VISIBLE
+        capsulePlaneIcon.translationY = 0f
+        capsulePlaneIcon.rotation = 0f
+        findViewById<View>(R.id.capsule_pair).alpha = 1f
+        updateCapsuleIcon(connected)
+    }
+
+    private fun overshoot(t: Float): Float =
+        android.view.animation.OvershootInterpolator(1.56f).getInterpolation(t.coerceIn(0f, 1f))
+
+    /**
+     * HTML .toggle presentation: power and plane are independent persistent layers.
+     * Alpha reaches its target in .3s, transforms in .4s, and the plane takeoff settles
+     * over .55s.  Starting values are sampled after cancelling the previous animator, so
+     * reversing at any point continues from the rendered attributes rather than resetting.
+     */
+    private fun animatePresentation() {
+        val connected = presentation() == Presentation.CONNECTED
         val pair = findViewById<View>(R.id.capsule_pair)
-        val icon = capsuleIcon
-        val initialAlpha = pair.alpha
-        val takeoff = 4f * resources.displayMetrics.density
-        var swapped = false
+        val density = resources.displayMetrics.density
+        val takeoff = 4f * density
+        val startPower = floatArrayOf(capsulePowerLayer.alpha, capsulePowerLayer.scaleX, capsulePowerLayer.rotation)
+        val startPlane = floatArrayOf(capsulePlaneLayer.alpha, capsulePlaneLayer.scaleX, capsulePlaneLayer.rotation)
+        val startY = capsulePlaneIcon.translationY
+        val startTakeoffRotation = capsulePlaneIcon.rotation
+        cancelPresentationAnimations()
+        // A fresh connection starts the same takeoff path as the HTML keyframe.  On a
+        // reversal, startY is retained from the old flight instead.
+        val planeStartY = if (connected && startPlane[0] < .001f && startY == 0f) takeoff else startY
+        // A disconnect/Connecting target must not present a connected label, even while
+        // the plane layer is finishing its independent fade-out.
+        // Keep plane content resident through either direction; only the settled
+        // disconnect hides its label. This prevents a content pop while the layer fades.
+        updateCapsuleIcon(connected, keepPlaneLabel = true)
+        val powerTarget = floatArrayOf(if (connected) 0f else 1f, if (connected) .4f else 1f,
+            if (connected) -90f else 0f)
+        val planeTarget = floatArrayOf(if (connected) 1f else 0f, if (connected) 1f else .4f,
+            if (connected) 0f else 90f)
         val animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 450L
-            // Linear play time: the two phases are driven by exact fractions, so the
-            // swap happens precisely at the midpoint (contract tested at 225ms).
+            duration = 550L
             interpolator = LinearInterpolator()
             addUpdateListener { animation ->
-                val fraction = animation.animatedValue as Float
-                if (fraction < .5f) {
-                    // power: alpha 1 -> 0, scale 1 -> .4, rotation 0 -> -90°
-                    val t = fraction * 2f
-                    pair.alpha = initialAlpha * (1f - t)
-                    pair.scaleX = 1f - .6f * t
-                    pair.scaleY = pair.scaleX
-                    pair.rotation = -90f * t
+                val progress = animation.animatedValue as Float
+                val alphaT = (progress / (.3f / .55f)).coerceIn(0f, 1f)
+                val transformT = overshoot((progress / (.4f / .55f)).coerceIn(0f, 1f))
+                fun lerp(from: Float, to: Float, t: Float) = from + (to - from) * t
+                setLayer(capsulePowerLayer,
+                    lerp(startPower[0], powerTarget[0], alphaT),
+                    lerp(startPower[1], powerTarget[1], transformT),
+                    lerp(startPower[2], powerTarget[2], transformT))
+                setLayer(capsulePlaneLayer,
+                    lerp(startPlane[0], planeTarget[0], alphaT),
+                    lerp(startPlane[1], planeTarget[1], transformT),
+                    lerp(startPlane[2], planeTarget[2], transformT))
+                val takeoffT = (progress / 1f).coerceIn(0f, 1f)
+                if (connected) {
+                    // 4dp -> -2dp at 45%, then -> 0dp, matching @keyframes takeoff.
+                    capsulePlaneIcon.translationY = if (takeoffT < .45f)
+                        lerp(planeStartY, -2f * density, takeoffT / .45f)
+                    else lerp(-2f * density, 0f, (takeoffT - .45f) / .55f)
+                    capsulePlaneIcon.rotation = if (takeoffT < .45f)
+                        lerp(startTakeoffRotation, -9f, takeoffT / .45f)
+                    else lerp(-9f, 0f, (takeoffT - .45f) / .55f)
                 } else {
-                    if (!swapped) {
-                        swapped = true
-                        updateCapsuleIcon()
-                        pair.pivotX = pair.width / 2f
-                        pair.pivotY = pair.height / 2f
-                    }
-                    // plane: alpha 0 -> 1, scale .4 -> 1, rotation 90° -> 0°
-                    val t = (fraction - .5f) * 2f
-                    pair.alpha = t
-                    pair.scaleX = .4f + .6f * t
-                    pair.scaleY = pair.scaleX
-                    pair.rotation = 90f * (1f - t)
-                    // 起飞：translateY 4dp -> -2dp -> 0
-                    icon.translationY = if (t < .45f) takeoff - (takeoff + 2f * resources.displayMetrics.density) * (t / .45f)
-                        else -2f * resources.displayMetrics.density * (1f - (t - .45f) / .55f)
+                    capsulePlaneIcon.translationY = lerp(startY, 0f, takeoffT)
+                    capsulePlaneIcon.rotation = lerp(startTakeoffRotation, 0f, takeoffT)
                 }
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
+                    if (fadeAnimator !== animation) return
                     fadeAnimator = null
+                    setLayer(capsulePowerLayer, powerTarget[0], powerTarget[1], powerTarget[2])
+                    setLayer(capsulePlaneLayer, planeTarget[0], planeTarget[1], planeTarget[2])
+                    capsulePlaneIcon.translationY = 0f
+                    capsulePlaneIcon.rotation = 0f
+                    updateCapsuleIcon(connected)
                     pair.alpha = 1f
-                    pair.scaleX = 1f
-                    pair.scaleY = 1f
-                    pair.rotation = 0f
-                    icon.translationY = 0f
-                    if (!swapped) updateCapsuleIcon()
                 }
             })
         }
@@ -603,10 +647,14 @@ class ControlBar @JvmOverloads constructor(
         pressTarget = false
         val pair = findViewById<View>(R.id.capsule_pair)
         pair.alpha = 1f
-        pair.scaleX = 1f
-        pair.scaleY = 1f
-        pair.rotation = 0f
-        capsuleIcon.translationY = 0f
+        setLayer(capsulePowerLayer, if (presentation() == Presentation.CONNECTED) 0f else 1f,
+            if (presentation() == Presentation.CONNECTED) .4f else 1f,
+            if (presentation() == Presentation.CONNECTED) -90f else 0f)
+        setLayer(capsulePlaneLayer, if (presentation() == Presentation.CONNECTED) 1f else 0f,
+            if (presentation() == Presentation.CONNECTED) 1f else .4f,
+            if (presentation() == Presentation.CONNECTED) 0f else 90f)
+        capsulePlaneIcon.translationY = 0f
+        capsulePlaneIcon.rotation = 0f
         sidePressed = false
         sideRipple.state = intArrayOf()
         sideRipple.jumpToCurrentState()

@@ -51,7 +51,7 @@ class ControlBarThreadSafetyTest {
         a.setContentView(host)
         host.measure(View.MeasureSpec.makeMeasureSpec(360, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(76, View.MeasureSpec.EXACTLY))
         host.layout(0, 0, 360, 76); advance(32)
-        try { bar.changeState(BaseService.State.Connected); advance(500); block(bar) } finally { c.pause().stop().destroy() }
+        try { bar.changeState(BaseService.State.Connected); advance(650); block(bar) } finally { c.pause().stop().destroy() }
     }
     private fun onWorker(bar: ControlBar, action: (ControlBar) -> Unit) {
         val failure = arrayOfNulls<Throwable>(1)
@@ -80,25 +80,31 @@ class ControlBarThreadSafetyTest {
         onWorker(bar) { it.changeState(BaseService.State.Connecting) }
         advance(16)
         assertSame(stoppingFade, fade(bar))
-        advance(500)
+        advance(650)
         assertFalse(stoppingFade.isRunning)
         assertNull(fade(bar))
         assertEquals(bar.context.getString(R.string.control_bar_disconnected),
             bar.findViewById<TextView>(R.id.capsule_label).text.toString())
-        assertEquals(1f, bar.findViewById<View>(R.id.capsule_pair).alpha, 0f)
-        assertEquals(0f, bar.findViewById<View>(R.id.capsule_icon).rotation, 0f)
+        val powerOff = bar.findViewById<View>(R.id.capsule_power_layer)
+        val planeOff = bar.findViewById<View>(R.id.capsule_plane_layer)
+        assertEquals(1f, powerOff.alpha, 0f); assertEquals(0f, planeOff.alpha, 0f)
+        assertEquals(1f, powerOff.scaleX, 0f); assertEquals(.4f, planeOff.scaleX, .001f)
+        assertEquals(0f, powerOff.rotation, 0f); assertEquals(90f, planeOff.rotation, 0f)
         assertThemedCapsuleWithoutPressFill(bar)
         assertNull(capsule.foreground)
         onWorker(bar) { it.changeState(BaseService.State.Connected) }
         assertFalse(capsule.isSelected)
-        advance(500)
+        advance(650)
         assertTrue(capsule.isSelected)
         assertTrue(capsule.isEnabled)
         assertNull(fade(bar))
         assertEquals(bar.context.getString(R.string.control_bar_connected),
             bar.findViewById<TextView>(R.id.capsule_label).text.toString())
-        assertEquals(1f, bar.findViewById<View>(R.id.capsule_pair).alpha, 0f)
-        assertEquals(0f, bar.findViewById<View>(R.id.capsule_icon).rotation, 0f)
+        val powerOn = bar.findViewById<View>(R.id.capsule_power_layer)
+        val planeOn = bar.findViewById<View>(R.id.capsule_plane_layer)
+        assertEquals(0f, powerOn.alpha, 0f); assertEquals(1f, planeOn.alpha, 0f)
+        assertEquals(.4f, powerOn.scaleX, .001f); assertEquals(1f, planeOn.scaleX, 0f)
+        assertEquals(-90f, powerOn.rotation, 0f); assertEquals(0f, planeOn.rotation, 0f)
         assertThemedCapsuleWithoutPressFill(bar)
         assertNull(capsule.foreground)
     }

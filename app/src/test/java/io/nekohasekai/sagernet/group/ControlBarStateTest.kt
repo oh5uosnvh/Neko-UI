@@ -93,30 +93,41 @@ class ControlBarStateTest {
     }
     private fun assertNoTransform(bar: ControlBar) {
         for (view in listOf(bar, bar.box(R.id.capsule), bar.box(R.id.capsule_pair),
-            bar.box(R.id.capsule_icon), bar.box(R.id.capsule_label))) {
+            bar.box(R.id.capsule_power_layer), bar.box(R.id.capsule_plane_layer),
+            bar.box(R.id.capsule_icon), bar.box(R.id.capsule_plane_icon),
+            bar.box(R.id.capsule_label))) {
             assertNull(view.animation)
-            assertEquals(0f, view.rotation, 0f)
+            if (view.id != R.id.capsule_power_layer && view.id != R.id.capsule_plane_layer) {
+                assertEquals(0f, view.rotation, 0f)
+                assertEquals(1f, view.scaleX, 0f); assertEquals(1f, view.scaleY, 0f)
+            }
             assertEquals(0f, view.rotationX, 0f)
             assertEquals(0f, view.rotationY, 0f)
             assertEquals(0f, view.translationX, 0f)
             assertEquals(0f, view.translationY, 0f)
             assertEquals(0f, view.translationZ, 0f)
-            assertEquals(1f, view.scaleX, 0f)
-            assertEquals(1f, view.scaleY, 0f)
-            if (view.id != R.id.capsule_pair) assertEquals(1f, view.alpha, 0f)
         }
+        val connected = field(bar, "currentState") == BaseService.State.Connected
+        val power = bar.box(R.id.capsule_power_layer)
+        val plane = bar.box(R.id.capsule_plane_layer)
+        assertEquals(if (connected) 0f else 1f, power.alpha, .001f)
+        assertEquals(if (connected) 1f else 0f, plane.alpha, .001f)
+        assertEquals(if (connected) .4f else 1f, power.scaleX, .001f)
+        assertEquals(if (connected) 1f else .4f, plane.scaleX, .001f)
+        assertEquals(if (connected) -90f else 0f, power.rotation, .001f)
+        assertEquals(if (connected) 0f else 90f, plane.rotation, .001f)
+        assertEquals(0f, bar.box(R.id.capsule_plane_content).rotation, .001f)
     }
     private fun assertVisual(bar: ControlBar, connected: Boolean) {
         assertCapsuleHasNoTouchFill(bar)
-        // The 450ms presentation crossfade (spec 7.3) legitimately rotates/scales the
-        // pair mid-flight; transform contracts still hold once the fade settles.
         if (field(bar, "fadeAnimator") == null) assertNoTransform(bar)
-        assertEquals(bar.context.getString(if (connected) R.string.control_bar_connected
+        val labelHasConnectedContent = connected || field(bar, "fadeAnimator") != null
+        assertEquals(bar.context.getString(if (labelHasConnectedContent) R.string.control_bar_connected
             else R.string.control_bar_disconnected), bar.text(R.id.capsule_label).text.toString())
-        val icon = bar.findViewById<ImageView>(R.id.capsule_icon).drawable
-        assertNotNull(icon)
-        assertEquals(if (connected) R.drawable.ic_control_plane else R.drawable.ic_control_power,
-            shadowOf(requireNotNull(icon)).createdFromResId)
+        assertEquals(R.drawable.ic_control_power,
+            shadowOf(requireNotNull(bar.findViewById<ImageView>(R.id.capsule_icon).drawable)).createdFromResId)
+        assertEquals(R.drawable.ic_control_plane,
+            shadowOf(requireNotNull(bar.findViewById<ImageView>(R.id.capsule_plane_icon).drawable)).createdFromResId)
     }
     private fun assertNoAnimation(bar: ControlBar) {
         assertNull(field(bar, "fadeAnimator"))
@@ -152,40 +163,47 @@ class ControlBarStateTest {
         assertNoAnimation(bar)
     }
 
-    @Test fun eachDirectionFadesOnlyThePairWhileThemeCapsuleStaysFixedAndDuplicatesDoNotRestart() = withBar { bar, _, _ ->
-        // Crossfade contract (spec 7.3): 450ms, icon swap at the midpoint.
-        fun expectedAlpha(playTimeMs: Long): Float {
-            val fraction = playTimeMs / 450f
-            return if (fraction < .5f) 1f - fraction * 2f else (fraction - .5f) * 2f
+    @Test fun eachDirectionSynchronizesPersistentPowerAndPlaneLayers() = withBar { bar, _, _ ->
+        fun lerp(from: Float, to: Float, t: Float) = from + (to - from) * t
+        fun alphaAt(ms: Long, from: Float, to: Float): Float =
+            lerp(from, to, (ms / 300f).coerceIn(0f, 1f))
+        fun transformAt(ms: Long, from: Float, to: Float): Float {
+            val t = (ms / 400f).coerceIn(0f, 1f)
+            val overshoot = android.view.animation.OvershootInterpolator(1.56f).getInterpolation(t)
+            return lerp(from, to, overshoot)
         }
         for (connected in listOf(true, false)) {
             val state = if (connected) BaseService.State.Connected else BaseService.State.Stopped
             bar.changeState(state)
             val fade = field(bar, "fadeAnimator") as ValueAnimator
-            val pair = bar.box(R.id.capsule_pair)
-            assertEquals(450L, fade.duration)
+            val power = bar.box(R.id.capsule_power_layer)
+            val plane = bar.box(R.id.capsule_plane_layer)
+            assertEquals(550L, fade.duration)
             assertEquals(0, fade.repeatCount)
-            assertVisual(bar, !connected)
-            fade.currentPlayTime = 37
-            assertEquals(expectedAlpha(37), pair.alpha, .001f)
-            assertVisual(bar, !connected)
+            fade.currentPlayTime = 150
+            val powerFrom = if (connected) 1f else 0f
+            val powerTo = if (connected) 0f else 1f
+            val planeFrom = if (connected) 0f else 1f
+            val planeTo = if (connected) 1f else 0f
+            assertEquals(alphaAt(150, powerFrom, powerTo), power.alpha, .02f)
+            assertEquals(alphaAt(150, planeFrom, planeTo), plane.alpha, .02f)
+            assertEquals(transformAt(150, if (connected) 1f else .4f,
+                if (connected) .4f else 1f), power.scaleX, .03f)
+            assertEquals(transformAt(150, if (connected) .4f else 1f,
+                if (connected) 1f else .4f), plane.scaleX, .03f)
+            assertEquals(transformAt(150, if (connected) 0f else -90f,
+                if (connected) -90f else 0f), power.rotation, 3f)
+            assertEquals(transformAt(150, if (connected) 90f else 0f,
+                if (connected) 0f else 90f), plane.rotation, 3f)
+            assertEquals(power.scaleX, power.scaleY, .001f)
+            assertEquals(plane.scaleX, plane.scaleY, .001f)
             bar.changeState(state)
             assertSame(fade, field(bar, "fadeAnimator"))
-            assertEquals(expectedAlpha(37), pair.alpha, .001f)
-            fade.currentPlayTime = 225
-            assertEquals(0f, pair.alpha, .001f)
-            assertVisual(bar, connected)
-            fade.currentPlayTime = 337
-            assertEquals(expectedAlpha(337), pair.alpha, .001f)
-            assertVisual(bar, connected)
-            bar.changeState(state)
-            assertSame(fade, field(bar, "fadeAnimator"))
-            advance(500)
+            advance(650)
             assertFalse(fade.isRunning)
             assertVisual(bar, connected)
             assertNoAnimation(bar)
-            bar.changeState(state) // A settled duplicate must not start a second fade.
-            assertVisual(bar, connected)
+            bar.changeState(state)
             assertNoAnimation(bar)
         }
     }
@@ -198,7 +216,7 @@ class ControlBarStateTest {
                 for (state in BaseService.State.values()) {
                     bar.changeState(state)
                     assertCapsuleHasNoTouchFill(bar)
-                    advance(500)
+                    advance(650)
                     assertVisual(bar, state == BaseService.State.Connected)
                     assertNoAnimation(bar)
                     val capsule = bar.box(R.id.capsule)
@@ -208,7 +226,7 @@ class ControlBarStateTest {
                 }
                 context.theme.applyStyle(R.style.Theme_SagerNet_Amber, true)
                 bar.changeState(BaseService.State.Stopped)
-                advance(500)
+                advance(650)
                 assertVisual(bar, connected = false)
                 assertNoAnimation(bar)
             }
@@ -335,7 +353,7 @@ class ControlBarStateTest {
             bar.changeState(BaseService.State.Stopped)
             bar.changeState(BaseService.State.Idle)
             assertSame(reverseFade, field(bar, "fadeAnimator")) // Same disconnected visual, no restart.
-            advance(500)
+            advance(650)
             assertFalse(reverseFade.isRunning)
             assertNoAnimation(bar)
             assertVisual(bar, connected = false)

@@ -37,6 +37,7 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.ktx.snackbar
+import io.nekohasekai.sagernet.widget.AnimatedPopupWindow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 
@@ -112,7 +113,7 @@ internal class TopBarController(
 
     private var callbacks: Callbacks = Noop
 
-    private var groupPopup: PopupWindow? = null
+    private var groupPopup: AnimatedPopupWindow? = null
     private var groupPickerSession: PickerSession? = null
 
     /** ⊙ 点击循环进度：false=下次去选定节点分组，true=下次去第一个分组 */
@@ -566,11 +567,11 @@ internal class TopBarController(
 
     // ------------------------------------------------------------ 分组快速列表
 
-    fun dismissGroupPicker() {
-        // Close before PopupWindow starts its exit animation; clearView may arrive much later.
+    fun dismissGroupPicker(immediate: Boolean = false) {
+        // Close the model immediately, but let ordinary window dismissals animate.
         groupPickerSession?.close()
         groupPickerSession = null
-        groupPopup?.dismiss()
+        groupPopup?.let { if (immediate) it.cancelImmediately() else it.dismiss() }
         groupPopup = null
     }
 
@@ -650,7 +651,7 @@ internal class TopBarController(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
             ))
         }
-        private val popup = PopupWindow(container, pickerWidth(), 1, true).apply {
+        private val popup = AnimatedPopupWindow(container, pickerWidth(), 1, true, anchor).apply {
             isOutsideTouchable = true
             elevation = dp(8).toFloat()
             inputMethodMode = PopupWindow.INPUT_METHOD_NOT_NEEDED

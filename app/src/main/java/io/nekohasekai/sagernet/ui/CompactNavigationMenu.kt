@@ -1,8 +1,5 @@
 package io.nekohasekai.sagernet.ui
 
-import android.animation.Animator
-import android.animation.AnimatorListenerAdapter
-import android.animation.ValueAnimator
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
@@ -18,7 +15,8 @@ import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
-import android.view.animation.DecelerateInterpolator
+import io.nekohasekai.sagernet.widget.AnimatedPopupWindow
+import io.nekohasekai.sagernet.widget.PopupEntrance
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupWindow
@@ -40,10 +38,9 @@ internal class CompactNavigationMenu(
         // MenuItemImpl.setChecked(false) still selects itself when exclusive-checkable is set.
         for (i in 0 until size()) setGroupCheckable(getItem(i).groupId, true, false)
     }
-    internal var window: PopupWindow? = null
+    internal var window: AnimatedPopupWindow? = null
         private set
     private var anchor: View? = null
-    private var animation: ValueAnimator? = null
     private var closing = false
     private var afterClose: (() -> Unit)? = null
     val isShowing: Boolean get() = window?.isShowing == true
@@ -73,7 +70,7 @@ internal class CompactNavigationMenu(
         if (!view.isAttachedToWindow) return
         anchor = view
         val content = buildContent()
-        val popup = PopupWindow(content, 1, 1, true).apply {
+        val popup = AnimatedPopupWindow(content, 1, 1, true, view).apply {
             // The whole rounded surface, not just its rows, participates in the exit fade.
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             elevation = dp(8).toFloat()
@@ -85,14 +82,14 @@ internal class CompactNavigationMenu(
         }
         window = popup
         popup.setOnDismissListener {
-            cancelAnimation()
+            PopupEntrance.cancel(content)
             content.alpha = 1f
             content.translationY = 0f
             content.scaleX = 1f
             content.scaleY = 1f
             if (window === popup) { window = null; anchor = null }
             closing = false
-            afterClose = null // External dismissal must never execute a queued navigation.
+            if (!popup.isShowing) afterClose = null // External dismissal must never execute a queued navigation.
         }
         val frame = bounds(view)
         size(popup, content, frame)
@@ -107,7 +104,7 @@ internal class CompactNavigationMenu(
         val y = (location[1] + view.height).coerceIn(frame.top + marginY, maxOf(frame.top + marginY, frame.bottom - popup.height - marginY))
         popup.showAtLocation(host, Gravity.TOP or Gravity.LEFT, x, y)
         content.requestFocus()
-        animate(content, opening = true)
+        PopupEntrance.animate(content, false, view)
     }
 
     private fun bounds(view: View) = Rect().also {
@@ -208,7 +205,7 @@ internal class CompactNavigationMenu(
         val popup = window ?: return
         val view = anchor ?: return
         if (closing) return
-        cancelAnimation()
+        PopupEntrance.cancel(popup.contentView)
         // PopupWindow cannot replace attached content; dismiss/reopen at the same anchor.
         cancel()
         show(view)
@@ -219,63 +216,23 @@ internal class CompactNavigationMenu(
         if (popup == null || !popup.isShowing) { action?.invoke(); return }
         if (closing) return
         closing = true
-        afterClose = action
-        animate(popup.contentView, opening = false)
-    }
-
-    private fun animate(content: View, opening: Boolean) {
-        cancelAnimation()
-        val start = if (opening) 0f else content.alpha
-        if (opening) {
-            content.alpha = 0f
-            content.translationY = -dp(6).toFloat()
-            content.scaleX = .95f
-            content.scaleY = .95f
+        afterClose = null
+        popup.dismissAnimated {
+            closing = false
+            // Commit only after the popup window has gone, including cold inflation.
+            action?.invoke()
         }
-        animation = ValueAnimator.ofFloat(start, if (opening) 1f else 0f).apply {
-            duration = if (opening) 140L else CLOSE_DURATION_MS
-            interpolator = DecelerateInterpolator()
-            addUpdateListener {
-                val progress = it.animatedValue as Float
-                content.alpha = progress
-                content.translationY = -dp(6) * (1f - progress)
-                content.scaleX = .95f + .05f * progress
-                content.scaleY = content.scaleX
-            }
-            addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    animation.removeAllListeners()
-                    (animation as? ValueAnimator)?.removeAllUpdateListeners()
-                    this@CompactNavigationMenu.animation = null
-                    if (!opening) {
-                        val action = afterClose
-                        afterClose = null
-                        window?.dismiss()
-                        // Commit only after the popup window has gone, including cold inflation.
-                        action?.invoke()
-                    }
-                }
-            })
-            start()
-        }
-    }
-
-    private fun cancelAnimation() {
-        animation?.removeAllUpdateListeners()
-        animation?.removeAllListeners()
-        animation?.cancel()
-        animation = null
     }
 
     /** Lifecycle cancellation: never navigate after onStop/onSaveInstanceState. */
     fun cancel() {
         afterClose = null
-        cancelAnimation()
-        window?.dismiss()
+        window?.contentView?.let(PopupEntrance::cancel)
+        window?.cancelImmediately()
         window = null
         anchor = null
         closing = false
     }
 
-    companion object { internal const val CLOSE_DURATION_MS = 120L }
+    companion object { internal const val CLOSE_DURATION_MS = PopupEntrance.CLOSE_DURATION_MS }
 }

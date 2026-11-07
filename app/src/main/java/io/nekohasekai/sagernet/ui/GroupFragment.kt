@@ -35,6 +35,7 @@ import io.nekohasekai.sagernet.databinding.LayoutGroupItemBinding
 import io.nekohasekai.sagernet.fmt.toUniversalLink
 import io.nekohasekai.sagernet.group.GroupUpdater
 import io.nekohasekai.sagernet.ktx.*
+import io.nekohasekai.sagernet.widget.AnimatedPopupWindow
 import io.nekohasekai.sagernet.widget.ListListener
 import io.nekohasekai.sagernet.widget.QRCodeDialog
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
@@ -54,7 +55,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     lateinit var undoManager: UndoSnackbarManager<ProxyGroup>
 
     private lateinit var itemTouchHelper: ItemTouchHelper
-    private var filterPopup: PopupWindow? = null
+    private var filterPopup: AnimatedPopupWindow? = null
     private var filterSubscription: Boolean? = null
     private var sortMode = SORT_DEFAULT
 
@@ -376,15 +377,20 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             addView(content)
         }
 
-        filterPopup = PopupWindow(
+        filterPopup = AnimatedPopupWindow(
             card,
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
             true,
+            anchor,
         ).apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             elevation = dp2px(8).toFloat()
             isOutsideTouchable = true
+            setOnDismissListener {
+                if (filterPopup === this) filterPopup = null
+                if (filterCard === card) filterCard = null
+            }
             showAsDropDown(anchor, 0, dp2px(4))
             io.nekohasekai.sagernet.widget.PopupEntrance.animate(card, isAboveAnchor, anchor)
         }
@@ -393,16 +399,11 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
     private var filterCard: View? = null
 
-    private fun dismissFilterPicker() {
+    private fun dismissFilterPicker(immediate: Boolean = false) {
         val popup = filterPopup ?: return
+        if (immediate) popup.cancelImmediately() else popup.dismiss()
         filterPopup = null
-        val surface = filterCard
         filterCard = null
-        if (surface != null && popup.isShowing) {
-            io.nekohasekai.sagernet.widget.PopupEntrance.exit(surface, popup.isAboveAnchor, null) {
-                popup.dismiss()
-            }
-        } else popup.dismiss()
     }
 
     private fun filterRow(label: String, selected: Boolean): TextView = TextView(requireContext()).apply {

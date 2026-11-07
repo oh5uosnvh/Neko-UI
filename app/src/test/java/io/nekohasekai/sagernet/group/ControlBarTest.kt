@@ -104,16 +104,21 @@ class ControlBarTest {
     private fun assertCapsuleHasNoTouchFill(bar: ControlBar) {
         assertThemedCapsuleWithoutPressFill(bar)
         assertEquals(0f, bar.box(R.id.capsule_icon).rotation, 0f)
+        assertEquals(0f, bar.box(R.id.capsule_plane_icon).rotation, 0f)
     }
 
     private fun assertCapsuleVisual(bar: ControlBar, connected: Boolean) {
         assertCapsuleHasNoTouchFill(bar)
         assertEquals(bar.context.getString(if (connected) R.string.control_bar_connected
             else R.string.control_bar_disconnected), bar.text(R.id.capsule_label).text.toString())
-        val drawable = bar.findViewById<ImageView>(R.id.capsule_icon).drawable
-        assertNotNull(drawable)
-        assertEquals(if (connected) R.drawable.ic_control_plane else R.drawable.ic_control_power,
-            shadowOf(requireNotNull(drawable)).createdFromResId)
+        val power = bar.findViewById<ImageView>(R.id.capsule_icon).drawable
+        val plane = bar.findViewById<ImageView>(R.id.capsule_plane_icon).drawable
+        assertEquals(R.drawable.ic_control_power, shadowOf(requireNotNull(power)).createdFromResId)
+        assertEquals(R.drawable.ic_control_plane, shadowOf(requireNotNull(plane)).createdFromResId)
+        val powerLayer = bar.box(R.id.capsule_power_layer)
+        val planeLayer = bar.box(R.id.capsule_plane_layer)
+        assertEquals(if (connected) 0f else 1f, powerLayer.alpha, .001f)
+        assertEquals(if (connected) 1f else 0f, planeLayer.alpha, .001f)
         assertEquals(1f, bar.box(R.id.capsule_pair).alpha, 0f)
     }
 
@@ -136,7 +141,7 @@ class ControlBarTest {
         for (state in BaseService.State.values()) {
             bar.changeState(state)
             assertCapsuleHasNoTouchFill(bar) // Persistent theme fill stays; pressed overlays never appear.
-            advance(500)
+            advance(650)
             val connected = state == BaseService.State.Connected
             val capsule = bar.box(R.id.capsule)
             assertEquals("state=$state", connected, capsule.isSelected)
@@ -180,12 +185,12 @@ class ControlBarTest {
         assertCapsuleVisual(bar, connected = false)
         capsule.performClick()
         bar.changeState(BaseService.State.Stopping)
-        advance(500)
+        advance(650)
         assertCapsuleVisual(bar, connected = false)
         capsule.performClick()
         assertEquals(2, toggles)
         bar.changeState(BaseService.State.Connected)
-        advance(500)
+        advance(650)
         assertCapsuleVisual(bar, connected = true)
         capsule.performClick()
         capsule.performClick()
@@ -488,7 +493,7 @@ class ControlBarTest {
             withBar(locale = locale) { bar, _ ->
                 assertEquals(disconnected, bar.text(R.id.capsule_label).text.toString())
                 bar.changeState(BaseService.State.Connected)
-                advance(500)
+                advance(650)
                 assertEquals(connected, bar.text(R.id.capsule_label).text.toString())
                 for (id in listOf(R.id.speed_box, R.id.capsule, R.id.latency_box)) {
                     val view = bar.box(id)
@@ -500,28 +505,36 @@ class ControlBarTest {
             }
         }
     }
-    private fun assertCapsulePair(bar:ControlBar) {
-        val capsule=bar.box(R.id.capsule)
-        val pair=bar.box(R.id.capsule_pair)
-        val icon=bar.findViewById<ImageView>(R.id.capsule_icon)
-        val label=bar.text(R.id.capsule_label)
+    private fun assertCapsulePair(bar: ControlBar) {
+        val capsule = bar.box(R.id.capsule)
+        val pair = bar.box(R.id.capsule_pair)
+        val powerLayer = bar.box(R.id.capsule_power_layer)
+        val planeLayer = bar.box(R.id.capsule_plane_layer)
+        val planeContent = bar.box(R.id.capsule_plane_content)
+        val power = bar.findViewById<ImageView>(R.id.capsule_icon)
+        val plane = bar.findViewById<ImageView>(R.id.capsule_plane_icon)
+        val label = bar.text(R.id.capsule_label)
+        assertTrue(pair is FrameLayout)
+        assertEquals(capsule.width - capsule.paddingLeft - capsule.paddingRight, pair.width)
+        assertEquals(capsule.height - capsule.paddingTop - capsule.paddingBottom, pair.height)
+        // Pair bounds are capsule-local, including the capsule's horizontal padding.
+        assertEquals(capsule.width / 2f, (pair.left + pair.right) / 2f, 1f)
+        assertEquals(capsule.height / 2f, (pair.top + pair.bottom) / 2f, 1f)
+        assertEquals(dp(bar, 18), power.width); assertEquals(dp(bar, 18), power.height)
+        assertEquals(dp(bar, 18), plane.width); assertEquals(dp(bar, 18), plane.height)
+        assertNotNull(power.drawable); assertNotNull(plane.drawable)
+        assertFalse(pair.isClickable); assertFalse(power.isClickable); assertFalse(plane.isClickable)
+        assertFalse(label.isClickable)
+        assertEquals(pair.width, powerLayer.width); assertEquals(pair.height, powerLayer.height)
+        assertEquals(pair.width, planeLayer.width); assertEquals(pair.height, planeLayer.height)
+        assertEquals(LinearLayout.HORIZONTAL, (planeContent as LinearLayout).orientation)
         if (label.visibility == View.VISIBLE) {
-            assertEquals(dp(bar,6),label.left-icon.right)
+            assertEquals(dp(bar, 6), label.left - plane.right)
+            assertTextFits(label)
         } else {
-            // Disconnected: power icon only, no connection text (spec 7.3).
-            assertEquals(View.GONE,label.visibility)
-            // Icon coordinates are pair-relative; the icon centers inside the pair.
-            assertEquals(pair.width/2f,(icon.left+icon.right)/2f,1f)
+            assertEquals(View.GONE, label.visibility)
+            assertEquals(pair.width / 2f, (power.left + power.right) / 2f, 1f)
         }
-        assertEquals(capsule.width/2f,(pair.left+pair.right)/2f,1f)
-        assertEquals(capsule.height/2f,(pair.top+pair.bottom)/2f,1f)
-        assertEquals(dp(bar,18),icon.width)
-        assertEquals(dp(bar,18),icon.height)
-        assertEquals(LinearLayout.HORIZONTAL,(pair as LinearLayout).orientation)
-        assertTrue(pair.width<=capsule.width-capsule.paddingLeft-capsule.paddingRight)
-        assertNotNull(icon.drawable)
-        assertFalse(pair.isClickable);assertFalse(icon.isClickable);assertFalse(label.isClickable)
-        if (label.visibility == View.VISIBLE) assertTextFits(label)
     }
     @Test
     @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)

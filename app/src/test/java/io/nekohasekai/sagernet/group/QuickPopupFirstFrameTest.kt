@@ -233,7 +233,9 @@ class QuickPopupFirstFrameTest {
             assertNull(f.list.findViewHolderForItemId(f.groups[0].id))
             assertEquals(View.VISIBLE, f.list.visibility)
             assertEquals(1f, f.list.alpha, 0f)
-            assertEquals(1f, f.popup.contentView.alpha, 0f)
+            // Rows are already at the selected stable ID, but the shared 450ms
+            // surface entrance deliberately starts transparent, never one-frame.
+            assertEquals(0f, f.popup.contentView.alpha, 0f)
             val animator = f.list.itemAnimator as DefaultItemAnimator
             assertEquals(250L, animator.moveDuration)
             assertFalse(animator.supportsChangeAnimations)

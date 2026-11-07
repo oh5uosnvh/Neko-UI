@@ -66,6 +66,7 @@ class RouteQuickOutboundTest {
             shadowOf(Looper.getMainLooper()).idle()
             var chosen=-1
             val popup=RouteOutboundMenu.show(anchor,-1L){chosen=it}
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(600))
             val list=popup.listView!!
             assertEquals(activity.resources.getStringArray(R.array.outbound_entry).toList(),(0 until list.adapter.count).map{list.adapter.getItem(it).toString()})
             assertEquals(1,list.selectedItemPosition)

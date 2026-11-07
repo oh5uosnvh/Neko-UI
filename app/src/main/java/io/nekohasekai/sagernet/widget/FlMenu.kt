@@ -45,8 +45,9 @@ import kotlin.math.min
  *   only presentation and motion are owned here.
  */
 object FlMenu {
-    fun show(anchor: View, menu: Menu, onItem: (MenuItem) -> Boolean) {
-        FlMenuPopup(anchor, menu, onItem).show()
+    /** Show one window for the whole menu tree and return it for lifecycle owners/tests. */
+    fun show(anchor: View, menu: Menu, onItem: (MenuItem) -> Boolean): PopupWindow {
+        return FlMenuPopup(anchor, menu, onItem).also { it.show() }
     }
 }
 
@@ -77,12 +78,20 @@ internal class FlMenuPopup(
     }
     private val pager = FrameLayout(anchor.context)
     private var current: Page? = null
+    private val pageStack = ArrayDeque<Page>()
     private var transitioning = false
     private var exiting = false
     private var pendingItem: MenuItem? = null
+    private var exitCompleted = false
     private var lastX = 0
     private var lastY = 0
     private var aboveAnchor = false
+    private var pageAnimator: ValueAnimator? = null
+    private var removed = false
+    private val anchorAttach = object : View.OnAttachStateChangeListener {
+        override fun onViewAttachedToWindow(v: View) = Unit
+        override fun onViewDetachedFromWindow(v: View) = cancelImmediately()
+    }
 
     private class Page(
         val view: ScrollView,
@@ -101,6 +110,20 @@ internal class FlMenuPopup(
         animationStyle = 0
         enterTransition = null
         exitTransition = null
+        setOnDismissListener {
+            // Only our animated exit owns a pending selection. A window can also
+            // be dismissed by PopupWindow itself (outside touch, anchor detach,
+            // lifecycle); those paths must cancel rather than invoke business
+            // callbacks on a stale card/fragment.
+            val item = if (exitCompleted) pendingItem else null
+            removed = true
+            pendingItem = null
+            exitCompleted = false
+            stopPageAnimation()
+            PopupEntrance.cancel(surface)
+            anchor.removeOnAttachStateChangeListener(anchorAttach)
+            if (item != null) dispatchItem(item)
+        }
     }
 
     private fun themeColor(attr: Int, fallback: Int = titleColor): Int {
@@ -111,7 +134,9 @@ internal class FlMenuPopup(
     }
 
     fun show() {
-        if (!anchor.isAttachedToWindow || anchor.windowToken == null) return
+        check(anchor.isAttachedToWindow && anchor.windowToken != null) {
+            "FlMenu anchor must be attached to a window before showing"
+        }
         val page = buildPage(menu, null)
         current = page
         surface.addView(pager, FrameLayout.LayoutParams(
@@ -127,12 +152,20 @@ internal class FlMenuPopup(
         anchor.getLocationOnScreen(location)
         width = width.coerceAtMost(screen.width() - dp(16))
 
-        val height = pageHeight(page, width, screen)
+        // Measure against the real anchor room. At this point the popup has no
+        // y yet, so using lastY here makes the first page height depend on 0.
+        page.view.measure(
+            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        val contentHeight = max(page.view.measuredHeight, dp(48))
+        val below = screen.bottom - location[1] - anchor.height
+        val above = location[1] - screen.top
+        val room = max(below, above) - dp(16)
+        val height = contentHeight.coerceAtMost(room.coerceAtLeast(dp(96)))
         val rtl = anchor.layoutDirection == View.LAYOUT_DIRECTION_RTL
         var x = if (rtl) location[0] else location[0] + anchor.width - width - surface.paddingLeft
         x = x.coerceIn(screen.left + dp(8), max(screen.left + dp(8), screen.right - width - dp(8)))
-        val below = screen.bottom - location[1] - anchor.height
-        val above = location[1] - screen.top
         val y: Int
         if (below >= height + dp(8) || below >= above) {
             y = min(location[1] + anchor.height + dp(2), screen.bottom - height - dp(8))
@@ -145,11 +178,14 @@ internal class FlMenuPopup(
         lastY = y
 
         setWindowSize(width, height)
+        anchor.addOnAttachStateChangeListener(anchorAttach)
         try {
-            showAtLocation(anchor.rootView, Gravity.TOP or Gravity.START, x, y)
-        } catch (_: Exception) {
-            return
+            showAtLocation(anchor.rootView, Gravity.TOP or Gravity.LEFT, x, y)
+        } catch (e: RuntimeException) {
+            anchor.removeOnAttachStateChangeListener(anchorAttach)
+            throw e
         }
+        surface.isFocusableInTouchMode = true
         surface.requestFocus()
         PopupEntrance.animate(surface, aboveAnchor, anchor)
     }
@@ -158,11 +194,16 @@ internal class FlMenuPopup(
     private fun measureWidth(): Int {
         val probe = LinearLayout(anchor.context)
         var widest = 0
-        val menus = ArrayList<Menu>()
-        menus.add(menu)
-        for (i in 0 until menu.size()) menu.getItem(i).subMenu?.let { menus.add(it) }
-        for (m in menus) {
-            val page = buildPage(m, null)
+        val pages = ArrayList<Pair<Menu, CharSequence?>>()
+        fun collect(level: Menu, title: CharSequence?) {
+            pages += level to title
+            for (i in 0 until level.size()) level.getItem(i).subMenu?.let {
+                collect(it, level.getItem(i).title)
+            }
+        }
+        collect(menu, null)
+        for ((m, title) in pages) {
+            val page = buildPage(m, title)
             pager.addView(page.view, FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             page.view.measure(
@@ -184,7 +225,8 @@ internal class FlMenuPopup(
         val bottomRoom = screen.bottom - lastY - dp(8)
         val topRoom = lastY - screen.top - dp(8)
         val available = if (aboveAnchor) topRoom else bottomRoom
-        return content.coerceAtMost(available.coerceAtLeast(dp(96)))
+        return (content + surface.paddingTop + surface.paddingBottom)
+            .coerceAtMost(bottomRoom.coerceAtLeast(dp(96)))
     }
 
     private fun setWindowSize(width: Int, height: Int) {
@@ -233,7 +275,14 @@ internal class FlMenuPopup(
             addView(rows, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT))
         }
-        return Page(scroll, scroll.layoutParams.height, title, level)
+        // ScrollView has no useful layoutParams until attached to a parent.
+        // Keep the page height derived from an actual measurement instead of
+        // dereferencing its (normally null) pre-attachment params.
+        scroll.measure(
+            View.MeasureSpec.makeMeasureSpec(anchor.resources.displayMetrics.widthPixels, View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        return Page(scroll, scroll.measuredHeight, title, level)
     }
 
     private fun rowPlaceholder(): View = TextView(anchor.context).apply {
@@ -348,6 +397,7 @@ internal class FlMenuPopup(
 
     private fun pushPage(item: MenuItem) {
         val sub = item.subMenu ?: return
+        pageStack.addLast(current ?: return)
         switchPages(buildPage(sub, item.title), forward = true)
     }
 
@@ -355,8 +405,10 @@ internal class FlMenuPopup(
         // Only submenu pages carry a title; the root page never slides back.
         val current = current ?: return
         if (current.title == null) return
-        // Returning re-reads the CURRENT MenuItem states (spec 4.2.6).
-        switchPages(buildPage(menu, null), forward = false)
+        // Return to the actual parent, not always the root. Rebuilding the
+        // parent page also re-reads live checked/enabled/visible states.
+        val parent = pageStack.removeLastOrNull() ?: return
+        switchPages(buildPage(parent.menu, parent.title), forward = false)
     }
 
     private fun switchPages(next: Page, forward: Boolean) {
@@ -366,30 +418,36 @@ internal class FlMenuPopup(
         current = next
         val width = surfaceWidth().coerceAtLeast(dp(144))
         val rtl = anchor.layoutDirection == View.LAYOUT_DIRECTION_RTL
-        val sign = if (forward != rtl) 1f else -1f
-
-        // Measure the target height under the CURRENT surface width first.
+        val direction = if (rtl) -1f else 1f
         val screen = Rect().also(anchor::getWindowVisibleDisplayFrame)
         if (screen.width() <= 0 || screen.height() <= 0) screen.set(0, 0,
             anchor.resources.displayMetrics.widthPixels, anchor.resources.displayMetrics.heightPixels)
         val targetHeight = pageHeight(next, width - surface.paddingLeft - surface.paddingRight, screen)
         val startHeight = height
-
-        next.view.translationX = sign * width
-        pager.addView(next.view, FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        // The old page stays exactly where it is and is covered by the incoming page.
-        ValueAnimator.ofFloat(0f, 1f).apply {
+        next.view.setBackgroundColor(surfaceColor)
+        val params = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT)
+        if (forward) {
+            next.view.translationX = direction * width
+            pager.addView(next.view, params)
+        } else {
+            // Parent stays stationary under the departing child, exactly as in
+            // the manual. Only the child page ever moves horizontally.
+            pager.addView(next.view, 0, params)
+        }
+        pageAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = PAGE_DURATION_MS
-            interpolator = DecelerateInterpolator(1.6f)
+            interpolator = DecelerateInterpolator(1.5f)
             addUpdateListener {
                 val f = it.animatedValue as Float
-                next.view.translationX = sign * width * (1f - f)
+                if (forward) next.view.translationX = direction * width * (1f - f)
+                else from.view.translationX = direction * width * f
                 val h = (startHeight + (targetHeight - startHeight) * f).toInt()
                 if (h != height) setWindowSize(width, h)
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
+                    pageAnimator = null
                     pager.removeView(from.view)
                     next.view.translationX = 0f
                     setWindowSize(width, targetHeight)
@@ -400,31 +458,59 @@ internal class FlMenuPopup(
         }
     }
 
-    // ------------------------------------------------------------- dismiss path
-
-    fun dismissAnimated() {
-        if (exiting) return
-        exiting = true
-        PopupEntrance.exit(surface, aboveAnchor, anchor) {
-            dismiss()
-        }
+    private fun stopPageAnimation() {
+        pageAnimator?.removeAllListeners()
+        pageAnimator?.removeAllUpdateListeners()
+        pageAnimator?.cancel()
+        pageAnimator = null
+        transitioning = false
     }
+
+    // Selection closes after the visible exit; platform Back/outside cancellation
+    // clears a staged choice instead of executing a stale action.
+    fun dismissAnimated() = beginClose(true)
 
     override fun dismiss() {
-        // The caller's action runs after the window is REALLY gone (spec: own the
-        // visible exit first, then remove the window before delivering a choice).
-        val deliver = !exiting
-        super.setOnDismissListener {
-            if (isConfirmedDismiss()) {
-                val item = pendingItem
-                pendingItem = null
-                if (deliver && item != null) onItem(item)
-            }
+        if (exiting) {
+            pendingItem = null
+            return
         }
-        super.dismiss()
+        beginClose(false)
     }
 
-    private fun isConfirmedDismiss() = true
+    private fun beginClose(deliverSelection: Boolean) {
+        if (removed || exiting) return
+        if (!deliverSelection) pendingItem = null
+        exiting = true
+        stopPageAnimation()
+        if (!isShowing) {
+            cancelImmediately()
+            return
+        }
+        PopupEntrance.exit(surface, aboveAnchor, anchor) {
+            exitCompleted = deliverSelection
+            super.dismiss()
+        }
+    }
+
+    fun cancelImmediately() {
+        pendingItem = null
+        exitCompleted = false
+        exiting = true
+        stopPageAnimation()
+        PopupEntrance.cancel(surface)
+        anchor.removeOnAttachStateChangeListener(anchorAttach)
+        super.dismiss()
+        removed = true
+    }
+
+    private fun dispatchItem(item: MenuItem) {
+        // MenuBuilder's normal dispatch preserves item listeners, menu-level
+        // callbacks, intents and checked/exclusive-group semantics. Only when
+        // that dispatch is unhandled do we invoke this popup's business hook.
+        val handled = current?.menu?.performIdentifierAction(item.itemId, 0) == true
+        if (!handled) onItem(item)
+    }
 
     companion object {
         const val PAGE_DURATION_MS = 300L

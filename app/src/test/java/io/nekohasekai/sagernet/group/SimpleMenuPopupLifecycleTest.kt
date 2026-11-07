@@ -129,6 +129,9 @@ class SimpleMenuPopupLifecycleTest {
     @Test fun entireSurfaceExitsBeforeSelectionAndPersistenceAreDeliveredExactlyOnce() {
         Fixture().use { f ->
             val popup = f.open()
+            // Test the visible, settled surface's exit. The 450ms entrance now
+            // correctly waits for attachment/layout instead of being skipped.
+            frames(32)
             val surface = popup.contentView
             assertEquals(Color.TRANSPARENT, (popup.background as ColorDrawable).color)
             assertTrue("Fill and border must fade WITH the rows", surface.background is GradientDrawable)

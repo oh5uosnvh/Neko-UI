@@ -1,8 +1,5 @@
 package io.nekohasekai.sagernet.widget
 
-import android.animation.Animator
-import android.animation.AnimatorListenerAdapter
-import android.animation.ValueAnimator
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
@@ -10,7 +7,6 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.ListView
 import android.widget.PopupWindow
@@ -38,7 +34,6 @@ internal class ChoiceMenuPopup(
     private var pending: Int? = null
     private var exiting = false
     private var finished = false
-    private var animator: ValueAnimator? = null
 
     init {
         surface.addView(listView, FrameLayout.LayoutParams(
@@ -56,7 +51,7 @@ internal class ChoiceMenuPopup(
         setOnDismissListener {
             if (!finished) {
                 finished = true
-                stopAnimation()
+                PopupEntrance.cancel(surface)
                 anchor.removeOnAttachStateChangeListener(this)
                 listView.onItemClickListener = null
                 listView.adapter = null
@@ -130,33 +125,15 @@ internal class ChoiceMenuPopup(
         }
         exiting = true
         listView.isEnabled = false
-        surface.pivotX = surface.width / 2f
-        surface.pivotY = if (isAboveAnchor) surface.height.toFloat() else 0f
-        animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            // FlClash close: easeOut shrink 1.0 -> 0.8 plus fade (spec 3.3), completion
-            // is an animation event, never a timed post.
-            duration = PopupEntrance.CLOSE_DURATION_MS
-            interpolator = AccelerateDecelerateInterpolator()
-            addUpdateListener {
-                val fraction = it.animatedValue as Float
-                surface.alpha = 1f - fraction
-                surface.scaleX = 1f - .2f * fraction
-                surface.scaleY = surface.scaleX
-            }
-            addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    animator = null
-                    removeWindow()
-                }
-            })
-            start()
-        }
+        // PopupEntrance owns both the spring and the close session.  Starting a second
+        // animator here races the entrance and can commit a stale selection on cancel.
+        PopupEntrance.exit(surface, isAboveAnchor, anchor) { removeWindow() }
     }
 
     /** Rebind/detach is cancellation, including a selection still in its exit animation. */
     fun cancelImmediately() {
         pending = null
-        stopAnimation()
+        PopupEntrance.cancel(surface)
         if (isShowing) removeWindow() else if (!finished) {
             finished = true
             anchor.removeOnAttachStateChangeListener(this)
@@ -166,15 +143,6 @@ internal class ChoiceMenuPopup(
             onClosed = null
             callback?.invoke(null)
         }
-    }
-
-    private fun stopAnimation() {
-        animator?.let {
-            it.removeAllListeners()
-            it.removeAllUpdateListeners()
-            it.cancel()
-        }
-        animator = null
     }
 
     private fun removeWindow() = super.dismiss()

@@ -71,51 +71,86 @@
             android:paddingStart="8dp"
             android:paddingEnd="8dp">
 
-            <LinearLayout
+            <!-- Keep power and plane as independent, full-size persistent layers.  The
+                 presentation code animates these layers separately, never an icon/label
+                 pair that is replaced halfway through a transition. -->
+            <FrameLayout
                 android:id="@+id/capsule_pair"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center"
-                android:baselineAligned="false"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
                 android:clickable="false"
                 android:focusable="false"
-                android:gravity="center_vertical"
-                android:importantForAccessibility="no"
-                android:orientation="horizontal">
+                android:importantForAccessibility="no">
 
-                <androidx.appcompat.widget.AppCompatImageView
-                    android:id="@+id/capsule_icon"
-                    android:layout_width="18dp"
-                    android:layout_height="18dp"
-                    android:clickable="false"
-                    android:focusable="false"
-                    android:importantForAccessibility="no"
-                    android:scaleType="fitCenter"
-                    app:tint="@color/control_bar_text"
-                    app:srcCompat="@drawable/ic_control_power" />
+                <FrameLayout
+                    android:id="@+id/capsule_power_layer"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:importantForAccessibility="no">
 
-                <androidx.appcompat.widget.AppCompatTextView
-                    android:id="@+id/capsule_label"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:clickable="false"
-                    android:focusable="false"
-                    android:fontFamily="sans-serif"
-                android:fontFeatureSettings="tnum"
-                    android:gravity="center"
-                    android:includeFontPadding="false"
-                    android:importantForAccessibility="no"
-                    android:maxLines="1"
-                    android:text="@string/control_bar_disconnected"
-                    android:textColor="@color/control_bar_text"
-                    android:textSize="14sp"
-                    android:textStyle="normal"
-                    app:autoSizeTextType="uniform"
-                    app:autoSizeMinTextSize="10sp"
-                    app:autoSizeMaxTextSize="14sp"
-                    app:autoSizeStepGranularity="0.5sp" />
-            </LinearLayout>
+                    <androidx.appcompat.widget.AppCompatImageView
+                        android:id="@+id/capsule_icon"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_gravity="center"
+                        android:clickable="false"
+                        android:focusable="false"
+                        android:importantForAccessibility="no"
+                        android:scaleType="fitCenter"
+                        app:tint="@color/control_bar_text"
+                        app:srcCompat="@drawable/ic_control_power" />
+                </FrameLayout>
+
+                <FrameLayout
+                    android:id="@+id/capsule_plane_layer"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:importantForAccessibility="no">
+
+                    <LinearLayout
+                        android:id="@+id/capsule_plane_content"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:baselineAligned="false"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <androidx.appcompat.widget.AppCompatImageView
+                            android:id="@+id/capsule_plane_icon"
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:clickable="false"
+                            android:focusable="false"
+                            android:importantForAccessibility="no"
+                            android:scaleType="fitCenter"
+                            app:tint="@color/control_bar_text"
+                            app:srcCompat="@drawable/ic_control_plane" />
+
+                        <androidx.appcompat.widget.AppCompatTextView
+                            android:id="@+id/capsule_label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:clickable="false"
+                            android:focusable="false"
+                            android:fontFamily="sans-serif"
+                            android:fontFeatureSettings="tnum"
+                            android:gravity="center"
+                            android:includeFontPadding="false"
+                            android:importantForAccessibility="no"
+                            android:maxLines="1"
+                            android:text="@string/control_bar_connected"
+                            android:textColor="@color/control_bar_text"
+                            android:textSize="14sp"
+                            android:textStyle="normal"
+                            app:autoSizeTextType="uniform"
+                            app:autoSizeMinTextSize="10sp"
+                            app:autoSizeMaxTextSize="14sp"
+                            app:autoSizeStepGranularity="0.5sp" />
+                    </LinearLayout>
+                </FrameLayout>
+            </FrameLayout>
         </FrameLayout>
 
         <FrameLayout

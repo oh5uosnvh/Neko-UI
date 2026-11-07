@@ -107,6 +107,7 @@ import io.nekohasekai.sagernet.ui.profile.TrojanSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.TuicSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.VMessSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.WireGuardSettingsActivity
+import io.nekohasekai.sagernet.widget.AnimatedPopupWindow
 import io.nekohasekai.sagernet.widget.QRCodeDialog
 import io.nekohasekai.sagernet.widget.QuickLongPress
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
@@ -1634,19 +1635,17 @@ class ConfigurationFragment @JvmOverloads constructor(
             return c
         }
 
-        var popupRef: android.widget.PopupWindow? = null
-        var popupContentRef: View? = null
+        var popupRef: AnimatedPopupWindow? = null
 
         fun closeGroupMenu(action: () -> Unit) {
             val popup = popupRef
-            val content = popupContentRef
-            if (popup == null || !popup.isShowing || content == null) {
-                popup?.dismiss(); action(); return
-            }
-            io.nekohasekai.sagernet.widget.PopupEntrance.exit(content, popup.isAboveAnchor) {
-                popup.dismiss()
+            if (popup == null || !popup.isShowing) {
+                popup?.dismiss()
                 action()
+                return
             }
+            // Selection is delivered only after the animated window has detached.
+            popup.dismissAnimated(action)
         }
 
         fun menuItem(label: String, action: () -> Unit): TextView {
@@ -1763,18 +1762,21 @@ class ConfigurationFragment @JvmOverloads constructor(
             row.layoutParams = lp
         }
 
-        val popup = android.widget.PopupWindow(
+        val popup = AnimatedPopupWindow(
             column,
             android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
             android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
             true,
+            anchor,
         ).apply {
             isOutsideTouchable = true
             elevation = dp(8).toFloat()
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0x00000000))
         }
         popupRef = popup
-        popupContentRef = column
+        popup.setOnDismissListener {
+            if (popupRef === popup) popupRef = null
+        }
         popup.showAsDropDown(anchor, 0, dp(4))
         io.nekohasekai.sagernet.widget.PopupEntrance.animate(column, popup.isAboveAnchor, anchor)
 
@@ -3271,8 +3273,16 @@ class ConfigurationFragment @JvmOverloads constructor(
                 // 「分享 ▶」合并进同一窗口：其子项成为二级页，不再弹第二个菜单。
                 val share = popup.menu.findItem(R.id.action_share)
                 if (share != null) {
-                    val sub = share.subMenu
-                        ?: popup.menu.addSubMenu(share.groupId, share.itemId, share.order, share.title)
+                    // The base item is a leaf. Adding a second sub-menu item with
+                    // the same id leaves both rows in MenuBuilder (and the first
+                    // one wins hit testing), which made the share entry appear
+                    // twice and made its callback look like it was dropped.
+                    val groupId = share.groupId
+                    val itemId = share.itemId
+                    val order = share.order
+                    val title = share.title
+                    popup.menu.removeItem(itemId)
+                    val sub = popup.menu.addSubMenu(groupId, itemId, order, title)
                     popup.menuInflater.inflate(R.menu.profile_share_menu, sub)
                     when {
                         !proxyEntity.haveStandardLink() -> {
