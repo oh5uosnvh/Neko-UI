@@ -107,7 +107,8 @@ class ControlBarStateTest {
             assertEquals(0f, view.translationY, 0f)
             assertEquals(0f, view.translationZ, 0f)
         }
-        val connected = field(bar, "currentState") == BaseService.State.Connected
+        val requested = field(bar, "requestedConnected") as Boolean?
+        val connected = requested ?: (field(bar, "currentState") == BaseService.State.Connected)
         val power = bar.box(R.id.capsule_power_layer)
         val plane = bar.box(R.id.capsule_plane_layer)
         assertEquals(if (connected) 0f else 1f, power.alpha, .001f)
@@ -121,7 +122,9 @@ class ControlBarStateTest {
     private fun assertVisual(bar: ControlBar, connected: Boolean) {
         assertCapsuleHasNoTouchFill(bar)
         if (field(bar, "fadeAnimator") == null) assertNoTransform(bar)
-        val labelHasConnectedContent = connected || field(bar, "fadeAnimator") != null
+        val requested = field(bar, "requestedConnected") as Boolean?
+        val visualConnected = requested ?: (field(bar, "currentState") == BaseService.State.Connected)
+        val labelHasConnectedContent = visualConnected || field(bar, "fadeAnimator") != null
         assertEquals(bar.context.getString(if (labelHasConnectedContent) R.string.control_bar_connected
             else R.string.control_bar_disconnected), bar.text(R.id.capsule_label).text.toString())
         assertEquals(R.drawable.ic_control_power,
@@ -368,7 +371,7 @@ class ControlBarStateTest {
         bar.box(R.id.capsule).performClick()
         assertEquals(1, toggles)
         assertFalse(bar.box(R.id.capsule).isEnabled)
-        assertVisual(bar, connected = false)
+        assertVisual(bar, connected = true) // requestedConnected drives the pending presentation.
         assertNoAnimation(bar)
         bar.changeState(BaseService.State.Idle)
         bar.box(R.id.capsule).performClick()
@@ -452,7 +455,17 @@ class ControlBarStateTest {
         assertEquals(Color.TRANSPARENT, bitmap.getPixel(cx, cy))
         assertEquals(Color.WHITE, bitmap.getPixel(4, bar.height / 2)) // Includes padding, not just boxes.
         assertEquals(Color.WHITE, bitmap.getPixel(bar.width - 5, bar.height / 2))
-        assertEquals(Color.WHITE, bitmap.getPixel(cx, 4)) // Full frame above/below capsule also participates.
+        // The capsule exclusion is now a full-height vertical gutter: no rounded-hole
+        // edge or top/bottom capsule-adjacent pixels may receive the side ripple.
+        assertEquals(Color.TRANSPARENT, bitmap.getPixel(cx, 4))
+        val gutter = (2f * bar.resources.displayMetrics.density).toInt()
+        val left = parent.left + capsule.left
+        val right = parent.left + capsule.right - 1
+        for (x in (left - gutter)..(right + gutter)) {
+            for (y in 0 until bar.height) {
+                assertEquals("gutter x=$x y=$y", Color.TRANSPARENT, bitmap.getPixel(x, y))
+            }
+        }
         val ripple = bar.foreground
         for (id in listOf(R.id.speed_box, R.id.latency_box)) {
             val side = bar.box(id)

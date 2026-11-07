@@ -11,6 +11,8 @@ object AppCompatPopupWindowHelper {
         menu: Menu?,
         anchor: View,
         onClick: (MenuItem) -> Boolean,
+        onBeforeItem: ((MenuItem) -> Boolean)? = null,
+        onCancelled: (() -> Unit)? = null,
         fallback: () -> Unit = {},
     ) {
         if (menu == null) {
@@ -19,6 +21,6 @@ object AppCompatPopupWindowHelper {
         }
         // Rendering/attachment failures are programming errors. Do not silently
         // replace a broken single-window menu with a second PopupMenu.
-        FlMenu.show(anchor, menu, onClick)
+        FlMenu.showReserved(anchor, menu, onClick, onBeforeItem, onCancelled)
     }
 }

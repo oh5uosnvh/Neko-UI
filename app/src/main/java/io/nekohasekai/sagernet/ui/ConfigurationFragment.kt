@@ -118,6 +118,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
@@ -556,6 +557,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                     AppCompatPopupWindowHelper.show(
                         toolbar.menu.findItem(R.id.action_misc)?.subMenu, anchor,
                         onClick = { onMenuItemClick(it) },
+                        onBeforeItem = { reserveLatencyTestRequest(it) },
+                        onCancelled = { cancelLatencyTestReservation() },
                     ) { popupToolbarOverflow() }
                 }
             })
@@ -672,6 +675,7 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     internal fun prepareConfigurationMenu(menu: Menu) {
+        LatencyTestMenuPolicy.apply(menu, DataStore.runningTest || pendingLatencyRequest != null)
         menu.findItem(R.id.action_global_mode)?.isChecked = DataStore.globalMode
         menu.findItem(R.id.action_always_show_address)?.isChecked = DataStore.alwaysShowAddress
     }
@@ -714,6 +718,17 @@ class ConfigurationFragment @JvmOverloads constructor(
         searchResultsAdapter?.cancelSearch()
         searchResultsAdapter = null
         searchQueryText = ""
+        val ownedLatencyTask = activeLatencyCancel != null || pendingLatencyRequest != null
+        activeLatencyCancel?.invoke()
+        latencyGeneration.incrementAndGet()
+        activeLatencyGeneration = 0L
+        activeLatencyCancel = null
+        activeLatencyMinimize = null
+        activeLatencyIds.clear()
+        if (ownedLatencyTask) DataStore.runningTest = false
+        pendingLatencyRequest = null
+        latencyOverlay?.release()
+        latencyOverlay = null
         topBar.detach()
         searchScope.detach()
         DataStore.profileCacheStore.unregisterChangeListener(this)
@@ -752,7 +767,9 @@ class ConfigurationFragment @JvmOverloads constructor(
         // 被抽屉切走（hide）时收起搜索，避免返回键拦截器在其它页面残留
         if (hidden) {
             topBar.collapseSearch()
+            minimizeActiveLatencyTest()
         } else if (::groupPager.isInitialized && ::tabLayout.isInitialized && ::adapter.isInitialized) {
+            activeLatencyResume?.invoke()
             // 显示修复：从分组管理页返回时，把顶部标签栏同步到当前选中的分组。
             // 新建分组等操作发生在页面隐藏期间，标签栏在 GONE 状态下算不出滚动位置，
             // 回来后停在旧位置（要触摸才纠正）；这里照 reload() 的既有同步方式补一次。
@@ -1108,41 +1125,47 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             R.id.action_connection_test_clear_results -> {
+                if (DataStore.runningTest || pendingLatencyRequest != null || latencyCleanupInProgress) return true
+                val clearGroupId = DataStore.currentGroupId()
+                latencyCleanupInProgress = true
                 runOnDefaultDispatcher {
-                    val profiles = PendingProfileDeletes.loadGroup(DataStore.currentGroupId())
-                    val toClear = mutableListOf<ProxyEntity>()
-                    if (profiles.isNotEmpty()) for (profile in profiles) {
-                        if (profile.status != 0) {
-                            profile.status = 0
-                            profile.ping = 0
-                            profile.error = null
-                            toClear.add(profile)
+                    try {
+                        if (DataStore.runningTest) return@runOnDefaultDispatcher
+                        val profiles = PendingProfileDeletes.loadGroup(clearGroupId)
+                        val toClear = profiles.filter { it.status != 0 }.onEach {
+                            it.status = 0; it.ping = 0; it.error = null
                         }
-                    }
-                    if (toClear.isNotEmpty()) {
-                        ProfileManager.updateProfile(toClear)
-                    }
-                    onMainDispatcher {
-                        getCurrentGroupFragment()?.adapter?.clearTestResults()
+                        if (toClear.isNotEmpty()) ProfileManager.updateProfile(toClear)
+                        onMainDispatcher {
+                            if (DataStore.currentGroupId() == clearGroupId) {
+                                getCurrentGroupFragment()?.adapter?.clearTestResults()
+                            }
+                        }
+                    } finally {
+                        latencyCleanupInProgress = false
                     }
                 }
             }
 
             R.id.action_connection_test_delete_unavailable -> {
-                if (duplicateCleanupInProgress) return true
+                if (DataStore.runningTest || pendingLatencyRequest != null || duplicateCleanupInProgress || latencyCleanupInProgress) return true
                 duplicateCleanupInProgress = true
                 val groupId = DataStore.currentGroupId()
                 runOnDefaultDispatcher {
                     try {
                         val nodes = PendingProfileDeletes.loadGroup(groupId).filter { it.status != 0 && it.status != 1 }
                         onMainDispatcher {
-                            if (!isAdded || nodes.isEmpty()) duplicateCleanupInProgress = false
+                            if (!isAdded || nodes.isEmpty() || DataStore.runningTest) duplicateCleanupInProgress = false
                             else MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
                                 .setMessage("您确认要删除这些重复配置吗？\n一共 ${nodes.size} 个重复配置。\n\n" + nodes.take(50).joinToString("\n") { node ->
                                     val name = node.displayName().orEmpty().replace("\n", " ")
                                     if (name.length > 42) name.take(41) + "…" else name
                                 } + if (nodes.size > 50) "\n……" else "")
                                 .setPositiveButton(R.string.yes) { _, _ ->
+                                    if (DataStore.runningTest || pendingLatencyRequest != null) {
+                                        duplicateCleanupInProgress = false
+                                        return@setPositiveButton
+                                    }
                                     val page = adapter.groupFragments[groupId]
                                     val list = page?.adapter
                                     if (list != null && page?.isUndoReady() == true) page.undoManager.remove(list.stageBatchRemoval(nodes))
@@ -1205,12 +1228,14 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
             }
 
-            R.id.action_connection_tcp_ping -> {
-                pingTest(false)
+            R.id.action_connection_tcp_ping, R.id.action_connection_url_test -> {
+                // Parent rows only navigate; FlMenu renders their submenu.
+                return true
             }
 
-            R.id.action_connection_url_test -> {
-                urlTest()
+            R.id.action_tcp_ping_all, R.id.action_tcp_ping_failed, R.id.action_tcp_ping_untested,
+            R.id.action_url_test_all, R.id.action_url_test_failed, R.id.action_url_test_untested -> {
+                startReservedLatencyTest(item)
             }
 
             R.id.action_always_show_address -> {
@@ -1257,35 +1282,80 @@ class ConfigurationFragment @JvmOverloads constructor(
         return false
     }
 
-    inner class TestDialog {
-        val binding = LayoutProgressListBinding.inflate(layoutInflater)
-        val builder = MaterialAlertDialogBuilder(requireContext()).setView(binding.root)
-            .setPositiveButton(R.string.minimize) { _, _ ->
-                minimize()
-            }
-            .setNegativeButton(android.R.string.cancel) { _, _ ->
-                cancel()
-            }
-            .setCancelable(false)
+    private var latencyOverlay: LatencyTestOverlay? = null
+    private var pendingLatencyRequest: LatencyTestRequest? = null
+    @Volatile private var latencyCleanupInProgress = false
+    private val latencyGeneration = AtomicLong(0L)
 
+    private fun latencyOverlay(): LatencyTestOverlay? {
+        val root = (view as? ViewGroup) ?: return null
+        return latencyOverlay ?: LatencyTestOverlay(root) { cancelActiveLatencyTest() }.also { latencyOverlay = it }
+    }
+
+    private fun reserveLatencyTestRequest(item: MenuItem): Boolean {
+        if (LatencyTestMenuPolicy.isCleanup(item.itemId) &&
+            (DataStore.runningTest || pendingLatencyRequest != null)) return false
+        val request = when (item.itemId) {
+            R.id.action_tcp_ping_all -> LatencyTestRequest(DataStore.currentGroupId(), LatencyTestMethod.TCP, LatencyTestScope.ALL)
+            R.id.action_tcp_ping_failed -> LatencyTestRequest(DataStore.currentGroupId(), LatencyTestMethod.TCP, LatencyTestScope.FAILED)
+            R.id.action_tcp_ping_untested -> LatencyTestRequest(DataStore.currentGroupId(), LatencyTestMethod.TCP, LatencyTestScope.UNTESTED)
+            R.id.action_url_test_all -> LatencyTestRequest(DataStore.currentGroupId(), LatencyTestMethod.URL, LatencyTestScope.ALL)
+            R.id.action_url_test_failed -> LatencyTestRequest(DataStore.currentGroupId(), LatencyTestMethod.URL, LatencyTestScope.FAILED)
+            R.id.action_url_test_untested -> LatencyTestRequest(DataStore.currentGroupId(), LatencyTestMethod.URL, LatencyTestScope.UNTESTED)
+            else -> return true
+        }
+        if (DataStore.runningTest || pendingLatencyRequest != null || duplicateCleanupInProgress || latencyCleanupInProgress) return false
+        DataStore.runningTest = true
+        pendingLatencyRequest = request
+        return true
+    }
+
+    private fun cancelLatencyTestReservation() {
+        if (pendingLatencyRequest != null) {
+            pendingLatencyRequest = null
+            DataStore.runningTest = false
+        }
+    }
+
+    private fun startReservedLatencyTest(item: MenuItem): Boolean {
+        val request = pendingLatencyRequest ?: return false
+        pendingLatencyRequest = null
+        when (request.method) {
+            LatencyTestMethod.TCP -> pingTest(false, request, true)
+            LatencyTestMethod.URL -> urlTest(request, true)
+        }
+        return true
+    }
+
+    private fun cancelActiveLatencyTest() {
+        activeLatencyCancel?.invoke()
+    }
+
+    private var activeLatencyCancel: (() -> Unit)? = null
+    private var activeLatencyResume: (() -> Unit)? = null
+    private var activeLatencyMinimize: (() -> Unit)? = null
+
+    fun minimizeActiveLatencyTest() { activeLatencyMinimize?.invoke() }
+
+    inner class TestDialog(private val request: LatencyTestRequest, var proxyN: Int, private val generation: Long) {
         lateinit var cancel: () -> Unit
         lateinit var minimize: () -> Unit
-
-        val dialogStatus = AtomicInteger(0) // 1: hidden 2: cancelled
+        val dialogStatus = AtomicInteger(0) // 1 minimized, 2 interrupted
         var notification: ConnectionTestNotification? = null
-
         val results: MutableSet<ProxyEntity> = ConcurrentHashMap.newKeySet()
+        val targetIds: MutableSet<Long> = ConcurrentHashMap.newKeySet()
         private val flushScheduled = AtomicBoolean(false)
         private val resultsLock = Any()
-        var proxyN = 0
         val finishedN = AtomicInteger(0)
+        val successN = AtomicInteger(0)
+        val failedN = AtomicInteger(0)
+        private val terminal = AtomicBoolean(false)
+        private val flushLock = Mutex()
+        private val renderScheduled = AtomicBoolean(false)
+        fun ownsSession() = generation == activeLatencyGeneration && generation == latencyGeneration.get()
 
-        // 012: 单个节点测完即防抖批量回写（250ms 合并窗口）。
-        // 行延迟经 ProfileManager.onUpdated 定点刷新，实时变化；
-        // 不再等全部测完/取消后串行回写（旧实现 180 节点要等 2~3 秒才变化）。
         fun scheduleFlush() {
-            if (dialogStatus.get() == 2) return
-            if (!flushScheduled.compareAndSet(false, true)) return
+            if (dialogStatus.get() == 2 || !flushScheduled.compareAndSet(false, true)) return
             runOnDefaultDispatcher {
                 delay(250)
                 flushScheduled.set(false)
@@ -1293,312 +1363,291 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
         }
 
-        // 取出当前累积结果一次性批量落库；cancel 收尾也复用同一入口。
         suspend fun flushPending() {
-            val snapshot = synchronized(resultsLock) {
-                val copy = ArrayList(results)
-                results.clear()
-                copy
-            }
-            if (snapshot.isEmpty()) return
-            try {
-                ProfileManager.updateProfile(snapshot)
-            } catch (e: Exception) {
-                Logs.w(e)
+            flushLock.withLock {
+                val snapshot = synchronized(resultsLock) { ArrayList(results).also { results.clear() } }
+                if (snapshot.isEmpty() || !ownsSession()) return@withLock
+                // Merge only measurement fields onto the latest row. Never overwrite
+                // a node name/bean edited while testing, or recreate a deleted row.
+                val alive = snapshot.mapNotNull { measured ->
+                    if (measured.id !in targetIds) null
+                    else SagerDatabase.proxyDao.getById(measured.id)?.apply {
+                        status = measured.status
+                        ping = measured.ping
+                        error = measured.error
+                    }
+                }
+                if (alive.isNotEmpty() && ownsSession()) {
+                    try { ProfileManager.updateProfile(alive) } catch (e: Exception) { Logs.w(e) }
+                }
             }
         }
 
         fun update(profile: ProxyEntity) {
-            if (dialogStatus.get() != 2) {
-                synchronized(resultsLock) { results.add(profile) }
-                scheduleFlush()
+            synchronized(resultsLock) {
+                if (dialogStatus.get() == 2 || !ownsSession() || terminal.get()) return
+                results.add(profile)
+                if (profile.status == 1) successN.incrementAndGet() else failedN.incrementAndGet()
+                finishedN.incrementAndGet()
             }
-            runOnMainDispatcher {
-                val context = context ?: return@runOnMainDispatcher
-                val progress = finishedN.addAndGet(1)
-                val status = dialogStatus.get()
-                notification?.updateNotification(
-                    progress,
-                    proxyN,
-                    progress >= proxyN || status == 2
-                )
-                if (status >= 1) return@runOnMainDispatcher
-                if (!isAdded) return@runOnMainDispatcher
-
-                // refresh dialog
-
-                var profileStatusText: String? = null
-                var profileStatusColor = 0
-
-                when (profile.status) {
-                    -1 -> {
-                        profileStatusText = profile.error
-                        profileStatusColor = context.getColorAttr(android.R.attr.textColorSecondary)
-                    }
-
-                    0 -> {
-                        profileStatusText = getString(R.string.connection_test_testing)
-                        profileStatusColor = context.getColorAttr(android.R.attr.textColorSecondary)
-                    }
-
-                    1 -> {
-                        profileStatusText = getString(R.string.available, profile.ping)
-                        profileStatusColor = context.getColour(R.color.material_green_500)
-                    }
-
-                    2 -> {
-                        profileStatusText = profile.error
-                        profileStatusColor = context.getColour(R.color.material_red_500)
-                    }
-
-                    3 -> {
-                        val err = profile.error ?: ""
-                        val msg = Protocols.genFriendlyMsg(err)
-                        profileStatusText = if (msg != err) msg else getString(R.string.unavailable)
-                        profileStatusColor = context.getColour(R.color.material_red_500)
-                    }
-                }
-
-                val text = SpannableStringBuilder().apply {
-                    append("\n" + profile.displayName())
-                    append("\n")
-                    append(
-                        profile.displayType(),
-                        ForegroundColorSpan(context.getProtocolColor(profile.type)),
-                        SPAN_EXCLUSIVE_EXCLUSIVE
-                    )
-                    append(" ")
-                    append(
-                        profileStatusText,
-                        ForegroundColorSpan(profileStatusColor),
-                        SPAN_EXCLUSIVE_EXCLUSIVE
-                    )
-                    append("\n")
-                }
-
-                binding.nowTesting.text = text
-                binding.progress.text = "$progress / $proxyN"
+            scheduleFlush()
+            // Merge bursts from the worker pool into a small local UI update.
+            if (renderScheduled.compareAndSet(false, true)) runOnMainDispatcher {
+                delay(32)
+                renderScheduled.set(false)
+                if (!ownsSession() || terminal.get() || dialogStatus.get() == 2) return@runOnMainDispatcher
+                val progress = finishedN.get()
+                if (dialogStatus.get() == 0) latencyOverlay()?.running(progress, proxyN, failedN.get())
+                notification?.updateNotification(progress, proxyN, progress >= proxyN)
             }
         }
 
+        fun finish(interrupted: Boolean) {
+            synchronized(resultsLock) {
+                if (!terminal.compareAndSet(false, true)) return
+            }
+            runOnMainDispatcher {
+                if (!ownsSession()) return@runOnMainDispatcher
+                latencyOverlay()?.completed(successN.get(), failedN.get(), interrupted)
+                notification?.updateNotification(finishedN.get(), proxyN, true)
+            }
+        }
     }
+
+    @Volatile private var activeLatencyGeneration = 0L
 
     @OptIn(DelicateCoroutinesApi::class)
     @Suppress("EXPERIMENTAL_API_USAGE")
-    fun pingTest(icmpPing: Boolean) {
-        if (DataStore.runningTest) return else DataStore.runningTest = true
-        val test = TestDialog()
-        val dialog = test.builder.show()
+    fun pingTest(icmpPing: Boolean, requested: LatencyTestRequest? = null, reserved: Boolean = false) {
+        val request = requested ?: LatencyTestRequest(DataStore.currentGroupId(),
+            LatencyTestMethod.TCP, LatencyTestScope.ALL)
+        if (!reserved && (DataStore.runningTest || pendingLatencyRequest != null || latencyCleanupInProgress || duplicateCleanupInProgress)) return
+        if (!reserved) DataStore.runningTest = true
+        val generation = latencyGeneration.incrementAndGet()
+        activeLatencyGeneration = generation
         val testJobs = mutableListOf<Job>()
-        val group = DataStore.currentGroup()
-
-        val mainJob = runOnDefaultDispatcher {
-            val profilesList = SagerDatabase.proxyDao.getByGroup(group.id).filter {
-                if (icmpPing) {
-                    if (it.requireBean().canICMPing()) {
-                        return@filter true
-                    }
-                } else {
-                    if (it.requireBean().canTCPing()) {
-                        return@filter true
-                    }
-                }
-                return@filter false
+        val groupId = request.groupId
+        val test = TestDialog(request, 0, generation)
+        // Lazy start guarantees the UI cancel/minimize hooks exist before even
+        // an empty/fast target set can finish. Unexpected worker/DB failures are
+        // logged and still run the completion cleanup; no uncaught main crash.
+        val mainJob = kotlinx.coroutines.GlobalScope.launch(
+            Dispatchers.Default + kotlinx.coroutines.CoroutineExceptionHandler { _, error -> Logs.w(error) },
+            start = kotlinx.coroutines.CoroutineStart.LAZY,
+        ) {
+            val all = SagerDatabase.proxyDao.getByGroup(groupId)
+            val profilesList = LatencyTestSelector.select(all, request, activeLatencyIds) {
+                if (icmpPing) it.requireBean().canICMPing() else it.requireBean().canTCPing()
+            }
+            if (profilesList.isEmpty()) {
+                runOnMainDispatcher { if (test.ownsSession()) latencyOverlay()?.empty(emptyLatencyMessage(request.scope)) }
+                return@launch
             }
             test.proxyN = profilesList.size
+            test.targetIds.addAll(profilesList.map { it.id })
             val profiles = ConcurrentLinkedQueue(profilesList)
+            activeLatencyIds.addAll(profilesList.map { it.id })
+            profilesList.forEach { it.status = 0 }
+            runOnMainDispatcher { if (test.ownsSession()) latencyOverlay()?.running(0, profilesList.size, 0) }
             repeat(DataStore.connectionTestConcurrent) {
                 testJobs.add(launch(Dispatchers.IO) {
                     while (isActive) {
                         val profile = profiles.poll() ?: break
-
-                        profile.status = 0
+                        if (!isActive) break
                         var address = profile.requireBean().serverAddress
-                        if (!address.isIpAddress()) {
-                            try {
-                                SagerNet.underlyingNetwork!!.getAllByName(address).apply {
-                                    if (isNotEmpty()) {
-                                        address = this[0].hostAddress
-                                    }
-                                }
-                            } catch (ignored: UnknownHostException) {
-                            }
-                        }
+                        if (!address.isIpAddress()) try {
+                            SagerNet.underlyingNetwork!!.getAllByName(address).firstOrNull()?.hostAddress?.let { address = it }
+                        } catch (_: UnknownHostException) {}
                         if (!isActive) break
                         if (!address.isIpAddress()) {
-                            profile.status = 2
-                            profile.error = app.getString(R.string.connection_test_domain_not_found)
-                            test.update(profile)
-                            continue
+                            profile.status = 2; profile.error = app.getString(R.string.connection_test_domain_not_found); test.update(profile); continue
                         }
                         try {
-                            if (icmpPing) {
-                                // removed
-                            } else {
-                                val socket =
-                                    SagerNet.underlyingNetwork?.socketFactory?.createSocket()
-                                        ?: Socket()
+                            if (icmpPing) { /* historical ICMP executor intentionally unchanged */ }
+                            else {
+                                val socket = SagerNet.underlyingNetwork?.socketFactory?.createSocket() ?: Socket()
                                 try {
-                                    socket.soTimeout = 3000
-                                    socket.bind(InetSocketAddress(0))
+                                    socket.soTimeout = 3000; socket.bind(InetSocketAddress(0))
                                     val start = SystemClock.elapsedRealtime()
-                                    socket.connect(
-                                        InetSocketAddress(
-                                            address, profile.requireBean().serverPort
-                                        ), 3000
-                                    )
+                                    socket.connect(InetSocketAddress(address, profile.requireBean().serverPort), 3000)
                                     if (!isActive) break
-                                    profile.status = 1
-                                    profile.ping = (SystemClock.elapsedRealtime() - start).toInt()
-                                    test.update(profile)
-                                } finally {
-                                    socket.closeQuietly()
-                                }
+                                    profile.status = 1; profile.ping = (SystemClock.elapsedRealtime() - start).toInt(); test.update(profile)
+                                } finally { socket.closeQuietly() }
                             }
                         } catch (e: Exception) {
                             if (!isActive) break
                             val message = e.readableMessage
-
                             if (icmpPing) {
                                 profile.status = 2
                                 profile.error = getString(R.string.connection_test_unreachable)
                             } else {
-                                profile.status = 2
-                                when {
-                                    !message.contains("failed:") -> profile.error =
-                                        getString(R.string.connection_test_timeout_error)
-
-                                    else -> when {
-                                        message.contains("ECONNREFUSED") -> {
-                                            profile.error =
-                                                getString(R.string.connection_test_refused)
-                                        }
-
-                                        message.contains("ENETUNREACH") -> {
-                                            profile.error =
-                                                getString(R.string.connection_test_unreachable)
-                                        }
-
-                                        else -> {
-                                            profile.status = 3
-                                            profile.error = message
-                                        }
-                                    }
-                                }
+                            profile.status = 2
+                            when {
+                                !message.contains("failed:") -> profile.error = getString(R.string.connection_test_timeout_error)
+                                message.contains("ECONNREFUSED") -> profile.error = getString(R.string.connection_test_refused)
+                                message.contains("ENETUNREACH") -> profile.error = getString(R.string.connection_test_unreachable)
+                                else -> { profile.status = 3; profile.error = message }
+                            }
                             }
                             test.update(profile)
                         }
                     }
                 })
             }
-
             testJobs.joinAll()
-
-            runOnMainDispatcher {
-                test.cancel()
+            test.finish(false)
+            test.flushPending()
+            if (test.ownsSession()) {
+                activeLatencyIds.removeAll(profilesList.map { it.id }.toSet())
+                DataStore.runningTest = false
+                activeLatencyCancel = null
+                activeLatencyMinimize = null
+                GroupManager.postReload(groupId)
             }
         }
-        test.cancel = {
-            test.dialogStatus.set(2)
-            dialog.dismiss()
-            // 012: 先放行下一次测试（空档期≈0）；取消与回写全部后台收尾。
-            // 进行中的 urlTest 实例最多再跑自身超时（默认 3s）后自行关闭，不阻塞新测试。
-            DataStore.runningTest = false
+        activeLatencyCancel = {
+            if (test.dialogStatus.getAndSet(2) != 2) {
+            test.finish(true)
             runOnDefaultDispatcher {
-                mainJob.cancel()
-                testJobs.forEach { it.cancel() }
-                // update() 已在测试过程中实时批量落库；这里只补冲最后一批收尾结果。
+                mainJob.cancelAndJoin()
+                testJobs.forEach { it.cancelAndJoin() }
                 test.flushPending()
-                GroupManager.postReload(DataStore.currentGroupId())
+                if (test.ownsSession()) {
+                    activeLatencyIds.removeAll(test.targetIds)
+                    activeLatencyCancel = null
+                    GroupManager.postReload(groupId)
+                }
+                if (test.ownsSession()) DataStore.runningTest = false
+            }
             }
         }
-        test.minimize = {
-            test.dialogStatus.set(1)
-            test.notification = ConnectionTestNotification(
-                dialog.context,
-                "[${group.displayName()}] ${getString(R.string.connection_test)}"
-            )
-            dialog.hide()
+        activeLatencyMinimize = {
+            if (test.ownsSession() && test.dialogStatus.get() != 2) {
+                test.dialogStatus.set(1)
+                context?.let { ctx ->
+                    test.notification = ConnectionTestNotification(ctx,
+                        "[${request.groupId}] ${getString(R.string.connection_test)}")
+                }
+            }
         }
+        activeLatencyResume = {
+            if (test.ownsSession() && test.dialogStatus.compareAndSet(1, 0)) {
+                test.notification?.updateNotification(test.finishedN.get(), test.proxyN, true)
+                latencyOverlay()?.running(test.finishedN.get(), test.proxyN, test.failedN.get())
+            }
+        }
+        mainJob.invokeOnCompletion { failure ->
+            if (failure != null && test.dialogStatus.get() != 2) test.finish(true)
+            if (test.ownsSession() && test.dialogStatus.get() != 2 && DataStore.runningTest) {
+                DataStore.runningTest = false
+                activeLatencyIds.removeAll(test.targetIds)
+                activeLatencyCancel = null
+                activeLatencyResume = null
+                activeLatencyMinimize = null
+            }
+        }
+        mainJob.start()
     }
 
     @OptIn(DelicateCoroutinesApi::class)
-    fun urlTest() {
-        if (DataStore.runningTest) return else DataStore.runningTest = true
-        val test = TestDialog()
-        val dialog = test.builder.show()
+    fun urlTest(requested: LatencyTestRequest? = null, reserved: Boolean = false) {
+        val request = requested ?: LatencyTestRequest(DataStore.currentGroupId(), LatencyTestMethod.URL, LatencyTestScope.ALL)
+        if (!reserved && (DataStore.runningTest || pendingLatencyRequest != null || latencyCleanupInProgress || duplicateCleanupInProgress)) return
+        if (!reserved) DataStore.runningTest = true
+        val generation = latencyGeneration.incrementAndGet()
+        activeLatencyGeneration = generation
         val testJobs = mutableListOf<Job>()
-        val group = DataStore.currentGroup()
-        // 013: 单实例测试的 init/launch/Libcore.urlTest 全程占用一个线程；旧实现把
-        // 这条阻塞链跑在 Dispatchers.Default 上，有效并发被 CPU 核数封顶（并发设置
-        // 开再高也快不起来），且取消后的僵尸实例霸占全部 Default 线程直到超时
-        // （取消后重测 2~3 秒空档的根因）。改为专用阻塞池：测试实例为无入站轻量
-        // 配置，16 路（≈2×CPU 核数）内存安全；真实 HTTP 延迟测量路径零改动。
-        // 两条收尾路径（自然测完 / 用户取消）都会经 test.cancel 关闭池子。
-        val testPool = Executors.newFixedThreadPool(
-            DataStore.connectionTestConcurrent.coerceIn(1, 16)
-        ).asCoroutineDispatcher()
-
-        val mainJob = runOnDefaultDispatcher {
-            val profilesList = SagerDatabase.proxyDao.getByGroup(group.id)
+        var testPool: kotlinx.coroutines.ExecutorCoroutineDispatcher? = null
+        val groupId = request.groupId
+        val test = TestDialog(request, 0, generation)
+        // Lazy start guarantees the UI cancel/minimize hooks exist before even
+        // an empty/fast target set can finish. Unexpected worker/DB failures are
+        // logged and still run the completion cleanup; no uncaught main crash.
+        val mainJob = kotlinx.coroutines.GlobalScope.launch(
+            Dispatchers.Default + kotlinx.coroutines.CoroutineExceptionHandler { _, error -> Logs.w(error) },
+            start = kotlinx.coroutines.CoroutineStart.LAZY,
+        ) {
+            val all = SagerDatabase.proxyDao.getByGroup(groupId)
+            val profilesList = LatencyTestSelector.select(all, request, activeLatencyIds) { true }
+            if (profilesList.isEmpty()) {
+                runOnMainDispatcher { if (test.ownsSession()) latencyOverlay()?.empty(emptyLatencyMessage(request.scope)) }
+                return@launch
+            }
+            testPool = Executors.newFixedThreadPool(DataStore.connectionTestConcurrent.coerceIn(1, 16)).asCoroutineDispatcher()
             test.proxyN = profilesList.size
+            test.targetIds.addAll(profilesList.map { it.id })
             val profiles = ConcurrentLinkedQueue(profilesList)
+            activeLatencyIds.addAll(profilesList.map { it.id }); profilesList.forEach { it.status = 0 }
+            runOnMainDispatcher { if (test.ownsSession()) latencyOverlay()?.running(0, profilesList.size, 0) }
             repeat(DataStore.connectionTestConcurrent) {
                 testJobs.add(launch(Dispatchers.IO) {
-                    val urlTest = UrlTest(testPool) // note: this is NOT in bg process
+                    val urlTest = UrlTest(testPool!!)
                     while (isActive) {
                         val profile = profiles.poll() ?: break
-                        profile.status = 0
-
-                        try {
-                            val result = urlTest.doTest(profile)
-                            profile.status = 1
-                            profile.ping = result
-                        } catch (e: PluginManager.PluginNotFoundException) {
-                            profile.status = 2
-                            profile.error = e.readableMessage
-                        } catch (e: Exception) {
-                            profile.status = 3
-                            profile.error = e.readableMessage
-                        }
-
+                        if (!isActive) break
+                        try { profile.status = 1; profile.ping = urlTest.doTest(profile) }
+                        catch (e: PluginManager.PluginNotFoundException) { profile.status = 2; profile.error = e.readableMessage }
+                        catch (e: Exception) { profile.status = 3; profile.error = e.readableMessage }
                         test.update(profile)
                     }
                 })
             }
-
-            testJobs.joinAll()
-
-            runOnMainDispatcher {
-                test.cancel()
+            testJobs.joinAll(); testPool?.close(); test.finish(false); test.flushPending()
+            if (test.ownsSession()) {
+                activeLatencyIds.removeAll(profilesList.map { it.id }.toSet()); DataStore.runningTest = false; activeLatencyCancel = null; activeLatencyMinimize = null
+                GroupManager.postReload(groupId)
             }
         }
-        test.cancel = {
-            test.dialogStatus.set(2)
-            dialog.dismiss()
-            // 012: 先放行下一次测试（空档期≈0）；取消与回写全部后台收尾。
-            // 013: 僵尸实例已由 TestInstance.invokeOnCancellation 即时关闭，
-            // 这里同步关闭专用测试池；Default 线程不再被占坑，postReload 的
-            // 后台 DiffUtil 不再被饿死。
-            DataStore.runningTest = false
-            runCatching { testPool.close() }
+        activeLatencyCancel = {
+            if (test.dialogStatus.getAndSet(2) != 2) {
+            test.finish(true)
+            runCatching { testPool?.close() }
             runOnDefaultDispatcher {
-                mainJob.cancel()
-                testJobs.forEach { it.cancel() }
-                // update() 已在测试过程中实时批量落库；这里只补冲最后一批收尾结果。
+                mainJob.cancelAndJoin()
+                testJobs.forEach { it.cancelAndJoin() }
                 test.flushPending()
-                GroupManager.postReload(DataStore.currentGroupId())
+                if (test.ownsSession()) {
+                    activeLatencyIds.removeAll(test.targetIds); activeLatencyCancel = null; activeLatencyMinimize = null; DataStore.runningTest = false
+                    GroupManager.postReload(groupId)
+                }
+            }
             }
         }
-        test.minimize = {
-            test.dialogStatus.set(1)
-            test.notification = ConnectionTestNotification(
-                dialog.context,
-                "[${group.displayName()}] ${getString(R.string.connection_test)}"
-            )
-            dialog.hide()
+        activeLatencyMinimize = {
+            if (test.ownsSession() && test.dialogStatus.get() != 2) {
+                test.dialogStatus.set(1)
+                context?.let { ctx ->
+                    test.notification = ConnectionTestNotification(ctx,
+                        "[${request.groupId}] ${getString(R.string.connection_test)}")
+                }
+            }
         }
+        activeLatencyResume = {
+            if (test.ownsSession() && test.dialogStatus.compareAndSet(1, 0)) {
+                test.notification?.updateNotification(test.finishedN.get(), test.proxyN, true)
+                latencyOverlay()?.running(test.finishedN.get(), test.proxyN, test.failedN.get())
+            }
+        }
+        mainJob.invokeOnCompletion { failure ->
+            runCatching { testPool?.close() }
+            if (failure != null && test.dialogStatus.get() != 2) test.finish(true)
+            if (test.ownsSession() && test.dialogStatus.get() != 2 && DataStore.runningTest) {
+                DataStore.runningTest = false
+                activeLatencyIds.removeAll(test.targetIds)
+                activeLatencyCancel = null
+                activeLatencyResume = null
+                activeLatencyMinimize = null
+            }
+        }
+        mainJob.start()
     }
+
+    private val activeLatencyIds = ConcurrentHashMap.newKeySet<Long>()
+    private fun emptyLatencyMessage(scope: LatencyTestScope): CharSequence = getString(when (scope) {
+        LatencyTestScope.ALL -> R.string.latency_test_empty_all
+        LatencyTestScope.FAILED -> R.string.latency_test_empty_failed
+        LatencyTestScope.UNTESTED -> R.string.latency_test_empty_untested
+    })
 
     private val groupDeleteAccess = Mutex()
     private val deletingGroupIds = mutableSetOf<Long>()

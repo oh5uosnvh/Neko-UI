@@ -72,9 +72,14 @@ class FlMenuRealBehaviorTest {
             activity.menuInflater.inflate(resource, it)
         }
 
-        fun open(menu: Menu, onItem: (android.view.MenuItem) -> Boolean = { true }): android.widget.PopupWindow {
+        fun open(menu: Menu, onItem: (android.view.MenuItem) -> Boolean = { true }): android.widget.PopupWindow =
+            reserved(menu, onItem, null, null)
+
+        fun reserved(menu: Menu, onItem: (android.view.MenuItem) -> Boolean,
+            before: ((android.view.MenuItem) -> Boolean)?,
+            cancelled: (() -> Unit)?): android.widget.PopupWindow {
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(32))
-            val popup = FlMenu.show(anchor, menu, onItem)
+            val popup = FlMenu.showReserved(anchor, menu, onItem, before, cancelled)
             assertTrue(popup.isShowing)
             // WindowManager attachment is asynchronous; exercise a real attached
             // PopupWindow before advancing its first content layout.
@@ -201,6 +206,36 @@ class FlMenuRealBehaviorTest {
             popup.contentView.findViewById<View>(12345).performClick(); frames()
             assertEquals(1, chosen)
             assertFalse(popup.isShowing)
+        }
+    }
+
+    @Test fun reservesSynchronouslyBeforeExitAndReleasesOnlyOnCancellation() {
+        Fixture().use { f ->
+            val menu = MenuBuilder(f.activity).apply { add(0, 91991, 0, "test") }
+            var reserved = 0
+            var started = 0
+            var released = 0
+            val popup = f.reserved(menu, { started++; true }, { reserved++; true }, { released++ })
+            frames(32)
+            popup.contentView.findViewById<View>(91991).performClick()
+            assertEquals(1, reserved)
+            assertEquals(0, started)
+            assertTrue(popup.isShowing)
+            popup.contentView.findViewById<View>(91991).performClick()
+            assertEquals(1, reserved)
+            frames()
+            assertEquals(1, started)
+            assertEquals(0, released)
+
+            val other = f.reserved(menu, { started++; true }, { reserved++; true }, { released++ })
+            frames(32)
+            other.contentView.findViewById<View>(91991).performClick()
+            assertEquals(2, reserved)
+            f.host.removeView(f.anchor)
+            frames()
+            assertEquals(1, started)
+            assertEquals(1, released)
+            assertFalse(other.isShowing)
         }
     }
 

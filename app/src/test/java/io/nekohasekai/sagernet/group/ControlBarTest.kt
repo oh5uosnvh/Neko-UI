@@ -164,25 +164,44 @@ class ControlBarTest {
         }
     }
 
-    @Test fun repeatedToggleCannotStartPermissionTwiceAndNeverOptimisticallyConnects() = withBar { bar, _ ->
+    @Test fun repeatedToggleStartsImmediatePresentationButNeverFakesServiceState() = withBar { bar, _ ->
         var toggles = 0
         bar.onToggle = { toggles++ }
         val capsule = bar.box(R.id.capsule)
         repeat(3) { capsule.performClick() }
         assertEquals(1, toggles)
+        // The request is visually immediate, while selected/readouts remain authoritative.
         assertFalse(capsule.isSelected)
         assertFalse(capsule.isEnabled)
         assertUnknown(bar)
-        assertCapsuleVisual(bar, connected = false)
-        advance(1000) // Waiting for permission/service startup cannot paint an optimistic connection.
-        assertCapsuleVisual(bar, connected = false)
-        // Permission cancelled: an authoritative same-state report explicitly re-arms.
+        assertEquals(bar.context.getString(R.string.control_bar_connected),
+            bar.text(R.id.capsule_label).text.toString())
+        assertNotNull(ControlBar::class.java.getDeclaredField("fadeAnimator").apply {
+            isAccessible = true
+        }.get(bar))
+        advance(1000)
+        assertFalse(capsule.isSelected)
+        assertUnknown(bar)
+        // Permission cancelled: an authoritative same-state report rolls the presentation back.
         bar.changeState(BaseService.State.Idle)
+        advance(650)
+        assertCapsuleVisual(bar, connected = false)
         capsule.performClick()
         assertEquals(2, toggles)
+        // Connecting keeps the tap-started connected presentation and does not restart it.
+        val startupFade = ControlBar::class.java.getDeclaredField("fadeAnimator").apply {
+            isAccessible = true
+        }.get(bar)
         bar.changeState(BaseService.State.Connecting)
+        assertSame(startupFade, ControlBar::class.java.getDeclaredField("fadeAnimator").apply {
+            isAccessible = true
+        }.get(bar))
+        assertFalse(capsule.isSelected)
+        assertFalse(bar.box(R.id.speed_box).isEnabled)
+        assertFalse(bar.box(R.id.latency_box).isEnabled)
         advance(1000)
-        assertCapsuleVisual(bar, connected = false)
+        assertFalse(capsule.isSelected)
+        assertUnknown(bar)
         capsule.performClick()
         bar.changeState(BaseService.State.Stopping)
         advance(650)
@@ -193,10 +212,24 @@ class ControlBarTest {
         advance(650)
         assertCapsuleVisual(bar, connected = true)
         capsule.performClick()
+        val stopFade = ControlBar::class.java.getDeclaredField("fadeAnimator").apply {
+            isAccessible = true
+        }.get(bar)
         capsule.performClick()
-        assertEquals(3, toggles) // Connected can stop, but only once per state acknowledgement.
-        assertTrue(capsule.isSelected) // The click did not fake a disconnected state either.
-        assertCapsuleVisual(bar, connected = true)
+        assertEquals(3, toggles) // Repeated taps cannot issue a second stop request.
+        assertTrue(capsule.isSelected) // Actual service state is still Connected.
+        assertFalse(capsule.isEnabled)
+        // A duplicate Connected report must not undo the pending stop presentation.
+        bar.changeState(BaseService.State.Connected)
+        assertSame(stopFade, ControlBar::class.java.getDeclaredField("fadeAnimator").apply {
+            isAccessible = true
+        }.get(bar))
+        assertTrue(capsule.isSelected)
+        assertFalse(capsule.isEnabled)
+        advance(650)
+        assertTrue(capsule.isSelected)
+        assertFalse(capsule.isEnabled)
+        assertUnknown(bar)
     }
 
     @Test fun clickLocksBeforeCallbackEvenIfHostDelaysCallingShowTesting() = withBar { bar, _ ->

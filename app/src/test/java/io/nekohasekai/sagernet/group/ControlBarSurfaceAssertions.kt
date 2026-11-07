@@ -20,7 +20,11 @@ internal fun assertThemedCapsuleWithoutPressFill(bar: ControlBar) {
     val colors = background.colors
     assertNotNull("capsule uses the two-stop HTML gradient", colors)
     assertEquals(2, colors!!.size)
-    if (capsule.isSelected) { // Connected: theme gradient (highlight top, theme bottom).
+    val requested = ControlBar::class.java.getDeclaredField("requestedConnected").apply {
+        isAccessible = true
+    }.get(bar) as Boolean?
+    val visualConnected = requested ?: capsule.isSelected
+    if (visualConnected) { // Connected presentation may lead the authoritative service state.
         val theme = TypedValue()
         assertTrue(bar.context.theme.resolveAttribute(androidx.appcompat.R.attr.colorPrimary, theme, true))
         val primary = if (theme.resourceId != 0)

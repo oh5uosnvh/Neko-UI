@@ -88,6 +88,9 @@ class ControlBar @JvmOverloads constructor(
     private var currentState = BaseService.State.Idle
     private var testing = false
     private var togglePending = false
+    // UI intent only. Service state still gates measurements, errors and locks.
+    // This starts the HTML transition on the tap, independent of node latency.
+    private var requestedConnected: Boolean? = null
     private var detached = false
     private var compactCapsule = false
     private var ready = false
@@ -113,10 +116,8 @@ class ControlBar @JvmOverloads constructor(
     )
     private var sidePressed = false
     private enum class Presentation { DISCONNECTED, CONNECTED }
-    private fun presentation(state: BaseService.State = currentState) = when (state) {
-        BaseService.State.Connected -> Presentation.CONNECTED
-        else -> Presentation.DISCONNECTED
-    }
+    private fun presentation() = if (requestedConnected ?: (currentState == BaseService.State.Connected))
+        Presentation.CONNECTED else Presentation.DISCONNECTED
 
     init {
         // This layout has a merge root containing ordinary views, NOT another ControlBar.
@@ -177,10 +178,31 @@ class ControlBar @JvmOverloads constructor(
     fun changeState(state: BaseService.State) {
         if (Looper.myLooper() != Looper.getMainLooper()) { post { changeState(state) }; return }
         val previous = currentState
-        val changedPresentation = presentation(previous) != presentation(state)
+        val previousPresentation = presentation()
+        val wasPending = togglePending
+        val requested = requestedConnected
         currentState = state
+        // Connecting preserves the already-started visual. Permission cancellation,
+        // failures and a final stop roll it back. A duplicate Connected report while
+        // a stop request is pending must not undo the immediate stop feedback.
+        when (state) {
+            BaseService.State.Connecting -> {
+                if (requested != true) requestedConnected = null
+                togglePending = false
+            }
+            BaseService.State.Connected -> {
+                if (!(requested == false && wasPending && previous == state)) {
+                    requestedConnected = null
+                    togglePending = false
+                }
+            }
+            else -> {
+                requestedConnected = null
+                togglePending = false
+            }
+        }
+        val changedPresentation = previousPresentation != presentation()
         updateCapsuleSurface()
-        togglePending = false
         capsule.isSelected = state == BaseService.State.Connected
         capsule.contentDescription = context.getString(when {
             state == BaseService.State.Connecting -> R.string.control_bar_connecting
@@ -544,6 +566,8 @@ class ControlBar @JvmOverloads constructor(
     /** Clears measurements and all request locks, without inventing a new service state. */
     fun reset() = onControlThread {
         togglePending = false
+        requestedConnected = null
+        settlePresentation()
         resetMeasurements()
         updateEnabledState()
     }
@@ -563,13 +587,18 @@ class ControlBar @JvmOverloads constructor(
     private fun requestToggle() {
         if (!canShowReadouts() || togglePending || isTransitioning()) return
         val callback = onToggle ?: return
-        // No optimistic state/icon/latency changes. Lock until the host reports its real state.
+        // Reserve once and start the visual BEFORE invoking the host. Do not
+        // invent a Connected service report, a successful probe, or green latency.
+        requestedConnected = currentState != BaseService.State.Connected
         togglePending = true
+        if (shouldAnimateCapsule()) animatePresentation() else settlePresentation()
         updateEnabledState()
         try {
             callback()
         } catch (error: Exception) {
             togglePending = false
+            requestedConnected = null
+            if (shouldAnimateCapsule()) animatePresentation() else settlePresentation()
             updateEnabledState()
             throw error
         }
@@ -792,9 +821,13 @@ class ControlBar @JvmOverloads constructor(
             val inset = density * .5f
             path.addRoundRect(RectF(bounds).apply { inset(inset, inset) }, 29.5f * density,
                 29.5f * density, Path.Direction.CW)
-            val hole = RectF(capsuleBounds).apply { inset(-density, -density) }
-            path.addRoundRect(hole, hole.height() / 2f, hole.height() / 2f, Path.Direction.CW)
-            path.fillType = Path.FillType.EVEN_ODD
+            // A rounded punched-out hole leaves a second antialiased contour
+            // hugging the capsule (visible as a dark outline during side testing).
+            // Exclude a full vertical gutter instead: feedback belongs strictly
+            // to the speed and latency sides, never to any capsule edge pixel.
+            val hole = RectF(capsuleBounds.left - 2f * density, bounds.top - density,
+                capsuleBounds.right + 2f * density, bounds.bottom + density)
+            path.op(Path().apply { addRect(hole, Path.Direction.CW) }, Path.Op.DIFFERENCE)
             canvas.drawPath(path, paint)
         }
         override fun setAlpha(alpha: Int) { paint.alpha = alpha; invalidateSelf() }

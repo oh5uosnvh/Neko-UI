@@ -46,8 +46,13 @@ import kotlin.math.min
  */
 object FlMenu {
     /** Show one window for the whole menu tree and return it for lifecycle owners/tests. */
-    fun show(anchor: View, menu: Menu, onItem: (MenuItem) -> Boolean): PopupWindow {
-        return FlMenuPopup(anchor, menu, onItem).also { it.show() }
+    fun show(anchor: View, menu: Menu, onItem: (MenuItem) -> Boolean): PopupWindow =
+        showReserved(anchor, menu, onItem, null, null)
+
+    fun showReserved(anchor: View, menu: Menu, onItem: (MenuItem) -> Boolean,
+        onBeforeItem: ((MenuItem) -> Boolean)?,
+        onCancelled: (() -> Unit)?): PopupWindow {
+        return FlMenuPopup(anchor, menu, onItem, onBeforeItem, onCancelled).also { it.show() }
     }
 }
 
@@ -55,6 +60,8 @@ internal class FlMenuPopup(
     private val anchor: View,
     private val menu: Menu,
     private val onItem: (MenuItem) -> Boolean,
+    private val onBeforeItem: ((MenuItem) -> Boolean)?,
+    private val onCancelled: (() -> Unit)?,
 ) : PopupWindow(anchor.context) {
     private val density = anchor.context.resources.displayMetrics.density
     private fun dp(value: Int) = (value * density + .5f).toInt()
@@ -70,7 +77,13 @@ internal class FlMenuPopup(
     private val selectedColor = ColorUtils.blendARGB(surfaceColor, accentColor, .10f)
     
     private val surface = FrameLayout(anchor.context).apply {
-        background = GradientDrawable().apply { setColor(surfaceColor); cornerRadius = dp(16).toFloat() }
+        background = GradientDrawable().apply {
+            setColor(surfaceColor)
+            cornerRadius = dp(16).toFloat()
+            // One complete perimeter belongs to the surface, never to each page.
+            setStroke(resources.getDimensionPixelSize(R.dimen.card_stroke_width),
+                resources.getColor(R.color.card_stroke, context.theme))
+        }
         clipToOutline = true
         outlineProvider = ViewOutlineProvider.BACKGROUND
         setPadding(dp(6), dp(6), dp(6), dp(6))
@@ -82,6 +95,12 @@ internal class FlMenuPopup(
     private var transitioning = false
     private var exiting = false
     private var pendingItem: MenuItem? = null
+    private var reservationActive = false
+    private fun cancelReservation() {
+        if (!reservationActive) return
+        reservationActive = false
+        onCancelled?.invoke()
+    }
     private var exitCompleted = false
     private var lastX = 0
     private var lastY = 0
@@ -122,7 +141,10 @@ internal class FlMenuPopup(
             stopPageAnimation()
             PopupEntrance.cancel(surface)
             anchor.removeOnAttachStateChangeListener(anchorAttach)
-            if (item != null) dispatchItem(item)
+            if (item != null) {
+                reservationActive = false
+                dispatchItem(item)
+            } else cancelReservation()
         }
     }
 
@@ -380,6 +402,10 @@ internal class FlMenuPopup(
                 when {
                     hasChildren -> pushPage(item)
                     else -> {
+                        // Reserve test requests NOW, before the visible 200ms exit,
+                        // so a second popup cannot launch another test in that gap.
+                        if (onBeforeItem?.invoke(item) == false) return@setOnClickListener
+                        reservationActive = onBeforeItem != null
                         pendingItem = item
                         dismissAnimated()
                     }
@@ -473,6 +499,7 @@ internal class FlMenuPopup(
     override fun dismiss() {
         if (exiting) {
             pendingItem = null
+            cancelReservation()
             return
         }
         beginClose(false)
@@ -480,7 +507,10 @@ internal class FlMenuPopup(
 
     private fun beginClose(deliverSelection: Boolean) {
         if (removed || exiting) return
-        if (!deliverSelection) pendingItem = null
+        if (!deliverSelection) {
+            pendingItem = null
+            cancelReservation()
+        }
         exiting = true
         stopPageAnimation()
         if (!isShowing) {
@@ -495,6 +525,7 @@ internal class FlMenuPopup(
 
     fun cancelImmediately() {
         pendingItem = null
+        cancelReservation()
         exitCompleted = false
         exiting = true
         stopPageAnimation()
