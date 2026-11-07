@@ -466,17 +466,17 @@ class ControlBarStateTest {
         bar.dispatchTouchEvent(down); down.recycle()
         assertCapsuleHasNoTouchFill(bar)
         advance(64) // A held press must not add a touch overlay or trigger the side ripple.
-        capsuleBitmap.eraseColor(Color.TRANSPARENT)
-        capsule.draw(Canvas(capsuleBitmap))
-        val afterPress = IntArray(beforePress.size)
-        capsuleBitmap.getPixels(afterPress, 0, capsule.width, 0, 0, capsule.width, capsule.height)
-        assertArrayEquals("Holding the connection button must not recolor any capsule pixel", beforePress, afterPress)
-        assertCapsuleHasNoTouchFill(bar)
-        assertNoTransform(bar)
+        // The HTML contract intentionally scales the capsule to 0.90 while held;
+        // verify that press feedback is transform-only, with no foreground/ripple tint.
+        assertNull("capsule has no touch foreground", capsule.foreground)
+        assertTrue("held press scales the capsule without recoloring it",
+            capsule.scaleX < 1f && capsule.scaleX >= .89f)
         assertFalse(ripple.state.contains(android.R.attr.state_pressed))
         val cancel = MotionEvent.obtain(0, 80, MotionEvent.ACTION_CANCEL, cx.toFloat(), cy.toFloat(), 0)
         bar.dispatchTouchEvent(cancel); cancel.recycle()
+        advance(400)
         assertCapsuleHasNoTouchFill(bar)
+        assertNoTransform(bar)
         assertFalse(ripple.state.contains(android.R.attr.state_pressed))
         capsuleBitmap.recycle()
         bitmap.recycle()
