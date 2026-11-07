@@ -244,6 +244,8 @@ class ConfigurationFragment @JvmOverloads constructor(
     val alwaysShowAddress get() = addressDisplaySnapshot
     private var lastAppliedAlwaysShowAddress = addressDisplaySnapshot
     private var lastAppliedTrafficStatistics = DataStore.profileTrafficStatistics
+    @Volatile
+    private var openingGroupSettings = false
 
     private fun updateDisplaySnapshots() {
         addressDisplaySnapshot = DataStore.alwaysShowAddress
@@ -995,7 +997,10 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             R.id.action_new_group -> {
+                if (openingGroupSettings) return true
+                openingGroupSettings = true
                 startActivity(Intent(requireContext(), GroupSettingsActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
                     putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, 0L)
                 })
             }
@@ -1932,6 +1937,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     override fun onResume() {
         super.onResume()
+        openingGroupSettings = false
         updateDisplaySnapshots()
         if (lastAppliedAlwaysShowAddress != addressDisplaySnapshot ||
             lastAppliedTrafficStatistics != DataStore.profileTrafficStatistics
@@ -3463,6 +3469,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 // Traffic is inline with the title and is never a structural row.
                 // The setting controls visibility; zero values remain visible.
                 val showTraffic = !twoColumn && DataStore.profileTrafficStatistics
+                trafficText.translationY = if (showTraffic) 1f * resources.displayMetrics.density else 0f
                 // Single-column statistics occupy title line two, never an additional row.
                 // The title always has two physical lines. Traffic is right-aligned
                 // inside line two and must not reduce the name to one line.
@@ -3470,8 +3477,10 @@ class ConfigurationFragment @JvmOverloads constructor(
                 profileName.maxLines = 2
                 profileName.ellipsize = null
                 val nameContainer = view.findViewById<View>(R.id.title_text_container)
+                // Keep the full two-line title height even when traffic is visible;
+                // traffic overlays line two on the right instead of clipping the name.
                 nameContainer.layoutParams = nameContainer.layoutParams.apply {
-                    height = resources.getDimensionPixelSize(if (showTraffic) R.dimen.profile_card_title_text_height else R.dimen.profile_card_title_row_height)
+                    height = resources.getDimensionPixelSize(R.dimen.profile_card_title_row_height)
                 }
                 nameContainer.setPaddingRelative(
                     (12 * resources.displayMetrics.density).toInt(),

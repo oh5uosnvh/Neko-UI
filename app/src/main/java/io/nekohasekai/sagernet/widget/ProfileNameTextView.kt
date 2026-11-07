@@ -62,6 +62,12 @@ class ProfileNameTextView @JvmOverloads constructor(
             val manager = ancestor.layoutManager as? GridLayoutManager
             twoColumnDisplay = manager != null && manager.spanCount > 1
         }
+        // Long ASCII node names must wrap in single-column cards too. The
+        // transformation inserts zero-width break opportunities while keeping
+        // the raw TextView text unchanged for accessibility/export.
+        if (transformationMethod !== nameTransformation) {
+            transformationMethod = nameTransformation
+        }
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
     }
 
