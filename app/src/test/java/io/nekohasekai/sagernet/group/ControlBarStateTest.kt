@@ -455,15 +455,17 @@ class ControlBarStateTest {
         assertEquals(Color.TRANSPARENT, bitmap.getPixel(cx, cy))
         assertEquals(Color.WHITE, bitmap.getPixel(4, bar.height / 2)) // Includes padding, not just boxes.
         assertEquals(Color.WHITE, bitmap.getPixel(bar.width - 5, bar.height / 2))
-        // The capsule exclusion is now a full-height vertical gutter: no rounded-hole
-        // edge or top/bottom capsule-adjacent pixels may receive the side ripple.
-        assertEquals(Color.TRANSPARENT, bitmap.getPixel(cx, 4))
+        // Only the central capsule is excluded. The top/bottom bands around it
+        // belong to the side control surface and must remain ripple-enabled.
+        assertEquals(Color.WHITE, bitmap.getPixel(cx, 4))
         val gutter = (2f * bar.resources.displayMetrics.density).toInt()
         val left = parent.left + capsule.left
         val right = parent.left + capsule.right - 1
         for (x in (left - gutter)..(right + gutter)) {
-            for (y in 0 until bar.height) {
-                assertEquals("gutter x=$x y=$y", Color.TRANSPARENT, bitmap.getPixel(x, y))
+            for (y in parent.top + capsule.top..parent.top + capsule.bottom) {
+                if (x in left..right) {
+                    assertEquals("capsule x=$x y=$y", Color.TRANSPARENT, bitmap.getPixel(x, y))
+                }
             }
         }
         val ripple = bar.foreground

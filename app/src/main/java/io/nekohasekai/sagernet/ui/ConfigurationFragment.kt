@@ -2651,14 +2651,8 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             private fun getItemAt(index: Int) = getItem(configurationIdList[index])
 
-            private fun hasMiddleRow(p: ProxyEntity): Boolean {
-                val showTraffic = p.rx + p.tx != 0L
-                val bean = p.requireBean()
-                val address = if (alwaysShowAddress && bean.name.isNotBlank()) {
-                    bean.displayAddress()
-                } else ""
-                return !((!showTraffic || p.status <= 0) && address.isBlank())
-            }
+            // The traffic placeholder row is structural, never content-driven.
+            private fun hasMiddleRow(p: ProxyEntity): Boolean = true
 
             fun neighbourHasMiddleRow(position: Int): Boolean {
                 if (position == RecyclerView.NO_POSITION) return false
@@ -3196,6 +3190,8 @@ class ConfigurationFragment @JvmOverloads constructor(
             val profileType: TextView = view.findViewById(R.id.profile_type)
             val profileAddress: TextView = view.findViewById(R.id.profile_address)
             val profileStatus: TextView = view.findViewById(R.id.profile_status)
+            val trafficRow: View = view.findViewById(R.id.traffic_row)
+            val addressRow: View = view.findViewById(R.id.address_row)
 
             val trafficText: TextView = view.findViewById(R.id.traffic_text)
             private val card = view as MaterialCardView
@@ -3433,70 +3429,74 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                 val rx = proxyEntity.rx
                 val tx = proxyEntity.tx
+                val secondary = requireContext().getColorAttr(android.R.attr.textColorSecondary)
 
-                val showTraffic = rx + tx != 0L
+                // Row ownership is fixed: traffic is always row 2. The setting
+                // controls only its content; it never moves into status/address.
+                val showTraffic = DataStore.profileTrafficStatistics
+                trafficRow.isVisible = true
                 trafficText.isVisible = showTraffic
-                if (showTraffic) {
-                    trafficText.text = view.context.getString(
-                        R.string.traffic,
-                        Formatter.formatFileSize(view.context, tx),
-                        Formatter.formatFileSize(view.context, rx)
+                trafficText.setTextColor(secondary)
+                trafficText.text = if (showTraffic) view.context.getString(
+                    R.string.traffic,
+                    Formatter.formatFileSize(view.context, rx),
+                    Formatter.formatFileSize(view.context, tx)
+                ) else ""
+
+                val showAddress = pf.alwaysShowAddress
+                val address = if (showAddress) bean.displayAddress() else ""
+                profileAddress.text = address
+                addressRow.isVisible = showAddress
+                card.layoutParams = card.layoutParams.apply {
+                    height = resources.getDimensionPixelSize(
+                        if (showAddress) R.dimen.profile_card_height
+                        else R.dimen.profile_card_height_without_address
                     )
                 }
+                lastSelfHasMiddleRow = true
 
-                var address = if (pf.alwaysShowAddress && bean.name.isNotBlank()) {
-                    bean.displayAddress()
-                } else ""
-                // EndpointTextView performs width-aware host truncation while retaining :port.
-                profileAddress.text = address
-                val trafficRowEmpty =
-                    (!showTraffic || proxyEntity.status <= 0) && address.isBlank()
-                (trafficText.parent as View).visibility = when {
-                    !trafficRowEmpty -> View.VISIBLE
-                    adapter?.neighbourHasMiddleRow(bindingAdapterPosition) == true -> View.INVISIBLE
-                    else -> View.GONE
-                }
-                lastSelfHasMiddleRow = !trafficRowEmpty
-
-                if (proxyEntity.status <= 0) {
-                    if (showTraffic) {
-                        profileStatus.text = trafficText.text
-                        profileStatus.setTextColor(requireContext().getColorAttr(android.R.attr.textColorSecondary))
-                        trafficText.text = ""
-                    } else {
-                        profileStatus.text = ""
+                // Row 4 is exclusively protocol + latency/error status.
+                profileStatus.text = ""
+                profileStatus.setTextColor(secondary)
+                when (proxyEntity.status) {
+                    1 -> {
+                        profileStatus.text = getString(R.string.available, proxyEntity.ping)
+                        profileStatus.setTextColor(requireContext().getColour(R.color.material_green_500))
                     }
-                } else if (proxyEntity.status == 1) {
-                    profileStatus.text = getString(R.string.available, proxyEntity.ping)
-                    profileStatus.setTextColor(requireContext().getColour(R.color.material_green_500))
-                } else {
-                    profileStatus.setTextColor(requireContext().getColour(R.color.material_red_500))
-                    if (proxyEntity.status == 2) {
-                        profileStatus.text = proxyEntity.error
+                    2 -> {
+                        profileStatus.text = proxyEntity.error ?: getString(R.string.unavailable)
+                        profileStatus.setTextColor(requireContext().getColour(R.color.material_red_500))
                     }
-                }
-
-                if (proxyEntity.status == 3) {
-                    val err = proxyEntity.error ?: "<?>"
-                    val msg = Protocols.genFriendlyMsg(err)
-                    profileStatus.text = if (msg != err) msg else getString(R.string.unavailable)
+                    3 -> {
+                        val err = proxyEntity.error ?: "<?>"
+                        val msg = Protocols.genFriendlyMsg(err)
+                        profileStatus.text = if (msg != err) msg else getString(R.string.unavailable)
+                        profileStatus.setTextColor(requireContext().getColour(R.color.material_red_500))
+                    }
                 }
 
                 val selectOrChain = select || proxyEntity.type == ProxyEntity.TYPE_CHAIN
                 val isDoubleColumn = layoutManager is FixedGridLayoutManager
-                
-                val statusParams = profileStatus.layoutParams as LinearLayout.LayoutParams
-                val targetWeight = if (isDoubleColumn) 1f else 0f
-                val targetWidth = if (isDoubleColumn) 0 else ViewGroup.LayoutParams.WRAP_CONTENT
-                if (statusParams.weight != targetWeight || statusParams.width != targetWidth) {
-                    statusParams.weight = targetWeight; statusParams.width = targetWidth
-                    profileStatus.layoutParams = statusParams
+                // Same row contract in one/two-column layouts: protocol is the
+                // flexible side, status is wrap-content and never ellipsized.
+                (profileType.layoutParams as? LinearLayout.LayoutParams)?.let {
+                    it.width = 0
+                    it.weight = 1f
+                    profileType.layoutParams = it
+                }
+                (profileStatus.layoutParams as? LinearLayout.LayoutParams)?.let {
+                    it.width = ViewGroup.LayoutParams.WRAP_CONTENT
+                    it.weight = 0f
+                    profileStatus.layoutParams = it
                 }
                 if (isDoubleColumn) {
-                    editButton.isGone = true
-                    shareLayout.isGone = true
-                    removeButton.isGone = true
-                    doubleColumnMenuButton.isVisible = true
+                    // Keep the documented fixed action area in both layouts;
+                    // double-column cards must not collapse actions into an
+                    // unrelated single overflow button.
+                    doubleColumnMenuButton.isGone = true
+                    editButton.isGone = select
+                    shareLayout.isGone = selectOrChain
+                    removeButton.isGone = select
                 } else {
                     shareLayout.isGone = selectOrChain
                     editButton.isGone = select
@@ -3551,15 +3551,17 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                 val traffic = view.context.getString(
                     R.string.traffic,
-                    Formatter.formatFileSize(view.context, proxyEntity.tx),
-                    Formatter.formatFileSize(view.context, proxyEntity.rx)
+                    Formatter.formatFileSize(view.context, proxyEntity.rx),
+                    Formatter.formatFileSize(view.context, proxyEntity.tx)
                 )
-                if (proxyEntity.status <= 0) {
-                    if (profileStatus.text?.toString() != traffic) {
-                        profileStatus.text = traffic
-                    }
-                } else if (trafficText.text?.toString() != traffic) {
+                if (DataStore.profileTrafficStatistics && trafficText.text?.toString() != traffic) {
                     trafficText.text = traffic
+                    trafficText.isVisible = true
+                    trafficRow.isVisible = true
+                } else if (!DataStore.profileTrafficStatistics) {
+                    trafficText.text = ""
+                    trafficText.isVisible = false
+                    trafficRow.isVisible = true
                 }
                 lastBoundTx = proxyEntity.tx
                 lastBoundRx = proxyEntity.rx

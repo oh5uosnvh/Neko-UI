@@ -765,14 +765,14 @@ class ControlBar @JvmOverloads constructor(
         if (ready) {
             if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                 val rect = Rect()
-                sidePressed = listOf(speedBox, latencyBox).any { box ->
-                    box.getDrawingRect(rect)
-                    offsetDescendantRectToMyCoords(box, rect)
-                    box.isEnabled && rect.contains(event.x.toInt(), event.y.toInt())
-                }
                 capsule.getDrawingRect(rect)
                 offsetDescendantRectToMyCoords(capsule, rect)
-                pressCapsule(rect.contains(event.x.toInt(), event.y.toInt()) && capsule.isEnabled)
+                val inCapsule = rect.contains(event.x.toInt(), event.y.toInt())
+                // The side surface includes the top/bottom bands around the
+                // center capsule, not only the two readout child bounds.
+                // Those bands must receive the same pressed feedback.
+                sidePressed = canShowReadouts() && !inCapsule
+                pressCapsule(inCapsule && capsule.isEnabled)
             }
             if (sidePressed) sideRipple.setHotspot(event.x, event.y)
             updateSideRippleState()
@@ -857,13 +857,13 @@ class ControlBar @JvmOverloads constructor(
             val inset = density * .5f
             path.addRoundRect(RectF(bounds).apply { inset(inset, inset) }, 29.5f * density,
                 29.5f * density, Path.Direction.CW)
-            // A rounded punched-out hole leaves a second antialiased contour
-            // hugging the capsule (visible as a dark outline during side testing).
-            // Exclude a full vertical gutter instead: feedback belongs strictly
-            // to the speed and latency sides, never to any capsule edge pixel.
-            val hole = RectF(capsuleBounds.left - 2f * density, bounds.top - density,
-                capsuleBounds.right + 2f * density, bounds.bottom + density)
-            path.op(Path().apply { addRect(hole, Path.Direction.CW) }, Path.Op.DIFFERENCE)
+            // Exclude only the actual central capsule. The area above and below
+            // it belongs to the side control surface and must receive the same
+            // pressed/ripple feedback as the left and right readout areas.
+            val hole = RectF(capsuleBounds)
+            path.op(Path().apply {
+                addRoundRect(hole, 999f * density, 999f * density, Path.Direction.CW)
+            }, Path.Op.DIFFERENCE)
             canvas.drawPath(path, paint)
         }
         override fun setAlpha(alpha: Int) { paint.alpha = alpha; invalidateSelf() }

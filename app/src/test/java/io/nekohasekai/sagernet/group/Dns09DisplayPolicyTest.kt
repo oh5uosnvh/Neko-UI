@@ -6,16 +6,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class Dns09DisplayPolicyTest {
-    @Test fun onlyTwoColumnCardsUseRequestedProtocolAliases() {
-        val aliases=mapOf("WireGuard" to "WG","ShadowTLS" to "st","Hysteria1" to "hy",
-            "Hysteria2" to "hy2","Shadowsocks" to "ss","ShadowsocksR" to "ssr")
-        for((full,short) in aliases) {
-            assertEquals(short,TwoColumnProtocolLabel.display(full,true))
-            assertEquals(full,TwoColumnProtocolLabel.display(full,false))
+    @Test fun oneAndTwoColumnCardsUseTheSameProtocolText() {
+        for (full in listOf("WireGuard", "ShadowTLS", "Hysteria1", "Hysteria2", "Shadowsocks", "ShadowsocksR", "AnyTLS")) {
+            assertEquals(full, TwoColumnProtocolLabel.display(full, true))
+            assertEquals(full, TwoColumnProtocolLabel.display(full, false))
         }
-        assertEquals("hy",TwoColumnProtocolLabel.display("Hysteria",true))
-        assertEquals("Trojan",TwoColumnProtocolLabel.display("Trojan",true))
-        assertEquals("AnyTLS",TwoColumnProtocolLabel.display("AnyTLS",true))
     }
     @Test fun latencySlotClassifiesButNeverReturnsLongRawLogOrUrl() {
         assertEquals(LatencyFailureLabel.Kind.TIMEOUT,LatencyFailureLabel.kind("Get https://example.test: context deadline exceeded"))

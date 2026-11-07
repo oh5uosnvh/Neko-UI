@@ -24,12 +24,11 @@ class EndpointTextViewTest {
             View.MeasureSpec.makeMeasureSpec(40, View.MeasureSpec.EXACTLY))
     }
 
-    @Test fun longHostEllipsizesBeforeNumericPort() {
+    @Test fun narrowEndpointNeverDropsNumericPort() {
         val v = view(120)
         v.text = "nitinlinitinitingyinhjng.com:443"
-        val fitted = v.fitForWidth(v.text.toString(), 200)
+        val fitted = v.fitForWidth(v.text.toString(), 1)
         assertTrue("fitted=$fitted", fitted.endsWith(":443"))
-        assertTrue("fitted=$fitted", fitted.contains("…"))
     }
 
     @Test fun shortHostAndIpv6KeepTheirCompletePort() {
@@ -38,5 +37,17 @@ class EndpointTextViewTest {
         v.measure(View.MeasureSpec.makeMeasureSpec(400, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(40, View.MeasureSpec.EXACTLY))
         assertEquals("[2001:db8::1]:8443", v.text.toString())
+    }
+
+    @Test fun measuredWidthNotCharacterCountControlsTruncation() {
+        val v = view(400)
+        val value = "abcdefghijklmno.example.test:443"
+        assertEquals(value, v.fitForWidth(value, 400))
+    }
+
+    @Test fun multiPortSuffixStaysIntactWhenHostIsShortened() {
+        val v = view(120)
+        val fitted = v.fitForWidth("very-long-host.example.test:443,8443", 120)
+        assertTrue("fitted=$fitted", fitted.endsWith(":443,8443"))
     }
 }

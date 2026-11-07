@@ -58,7 +58,7 @@
     <string name="ws_browser_forwarding">浏览器转发</string>
     <string name="ws_browser_forwarding_sum">转发相应的 WebSockets 到浏览器.</string>
     <string name="speed_interval">速度通知更新间隔</string>
-    <string name="traffic">%1$s↑ %2$s↓</string>
+    <string name="traffic">%1$s↓ %2$s↑</string>
     <string name="speed_detail">代理： %1$s↑ %2$s↓
         \n直连： %3$s↑ %4$s↓</string>
     <string name="speed">%s/s</string>

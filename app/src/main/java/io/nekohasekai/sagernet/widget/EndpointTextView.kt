@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.widget
 
 import android.content.Context
+import android.graphics.Paint
 import android.text.TextUtils
 import android.util.AttributeSet
 import androidx.appcompat.widget.AppCompatTextView
@@ -40,20 +41,31 @@ class EndpointTextView @JvmOverloads constructor(
     internal fun fitForWidth(value: String, width: Int): String = fitEndpoint(value, width)
 
     private fun fitEndpoint(value: String, width: Int): String {
-        if (width <= 0 || (paint.measureText(value) <= width && value.length <= 28)) return value
-        val split = value.lastIndexOf(':')
-        val suffix = if (split > 0 && split < value.lastIndex &&
-            value.substring(split + 1).all { it.isDigit() }) value.substring(split) else ""
-        val host = if (suffix.isEmpty()) value else value.substring(0, split)
-        val ending = if (suffix.isEmpty()) "" else "…$suffix"
-        if (paint.measureText(ending) > width) return ending.takeLast(1)
+        // fitForWidth() is also used before the first layout pass. Use a
+        // dedicated snapshot of the TextView metrics instead of relying on the
+        // mutable internal TextView paint, which can still have zero metrics.
+        val metrics = android.graphics.Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = this@EndpointTextView.textSize.takeIf { it > 0f } ?: 14f * resources.displayMetrics.scaledDensity
+            typeface = this@EndpointTextView.typeface
+            textScaleX = this@EndpointTextView.textScaleX
+        }
+        fun measure(text: String) = metrics.measureText(text)
+        if (width <= 0 || measure(value) <= width) return value
+        // displayAddress() already brackets IPv6 hosts. Keep the complete port
+        // suffix, including protocol-specific multi-port values such as
+        // `:443,8443`; only the host may be shortened.
+        val match = Regex("^(.*):(\\d+(?:,\\d+)*)$").matchEntire(value)
+        val suffix = match?.groupValues?.get(2)?.let { ":$it" } ?: ""
+        val host = match?.groupValues?.get(1) ?: value
+        val ending = if (suffix.isEmpty()) "…" else "…$suffix"
+        if (measure(ending) > width) return suffix.ifEmpty { ending }
         var low = 0
         var high = host.length
         var best = ending
         while (low <= high) {
             val mid = (low + high) ushr 1
             val candidate = host.substring(0, mid) + ending
-            if (paint.measureText(candidate) <= width) {
+            if (measure(candidate) <= width) {
                 best = candidate
                 low = mid + 1
             } else high = mid - 1
