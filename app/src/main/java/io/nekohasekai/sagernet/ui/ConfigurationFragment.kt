@@ -243,6 +243,7 @@ class ConfigurationFragment @JvmOverloads constructor(
     private var cardStyleSnapshot = DataStore.profileCardStyle
     val alwaysShowAddress get() = addressDisplaySnapshot
     private var lastAppliedAlwaysShowAddress = addressDisplaySnapshot
+    private var lastAppliedTrafficStatistics = DataStore.profileTrafficStatistics
 
     private fun updateDisplaySnapshots() {
         addressDisplaySnapshot = DataStore.alwaysShowAddress
@@ -1919,6 +1920,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             if (!isAdded) return@runOnMainDispatcher
             updateDisplaySnapshots()
             lastAppliedAlwaysShowAddress = addressDisplaySnapshot
+            lastAppliedTrafficStatistics = DataStore.profileTrafficStatistics
             if (view != null && !select) {
                 toolbar.menu.findItem(R.id.action_always_show_address)?.isChecked = lastAppliedAlwaysShowAddress
             }
@@ -1931,12 +1933,17 @@ class ConfigurationFragment @JvmOverloads constructor(
     override fun onResume() {
         super.onResume()
         updateDisplaySnapshots()
-        if (lastAppliedAlwaysShowAddress != addressDisplaySnapshot) refreshAddressDisplayPreferences()
+        if (lastAppliedAlwaysShowAddress != addressDisplaySnapshot ||
+            lastAppliedTrafficStatistics != DataStore.profileTrafficStatistics
+        ) refreshAddressDisplayPreferences()
     }
 
     private val displayPrefListener = object : OnPreferenceDataStoreChangeListener {
         override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
-            if (key == Key.ALWAYS_SHOW_ADDRESS) refreshAddressDisplayPreferences()
+            if (key == Key.ALWAYS_SHOW_ADDRESS || key == Key.PROFILE_TRAFFIC_STATISTICS) {
+                // Display follows the switch, never stale non-zero counters or the next traffic event.
+                refreshAddressDisplayPreferences()
+            }
             if (key == Key.PROFILE_CARD_STYLE) runOnMainDispatcher {
                 updateDisplaySnapshots()
                 refreshAllGroupFragmentsCardStyle()
@@ -2381,9 +2388,11 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
 
         private var lastAddressPreference = DataStore.alwaysShowAddress
+        private var lastTrafficPreference = DataStore.profileTrafficStatistics
 
         fun refreshAddressDisplay() {
             lastAddressPreference = DataStore.alwaysShowAddress
+            lastTrafficPreference = DataStore.profileTrafficStatistics
             if (!::configurationListView.isInitialized || view == null) return
             val currentAdapter = adapter ?: return
             // A reload/DiffUtil of unchanged nodes is insufficient for display-only preferences.
@@ -2392,7 +2401,9 @@ class ConfigurationFragment @JvmOverloads constructor(
 
         override fun onResume() {
             super.onResume()
-            if (lastAddressPreference != DataStore.alwaysShowAddress) refreshAddressDisplay()
+            if (lastAddressPreference != DataStore.alwaysShowAddress ||
+                lastTrafficPreference != DataStore.profileTrafficStatistics
+            ) refreshAddressDisplay()
 
             val currentAdapter = adapter
             if (currentAdapter != null && !currentAdapter.hasCurrentSearchResult() &&
@@ -2651,8 +2662,8 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             private fun getItemAt(index: Int) = getItem(configurationIdList[index])
 
-            // The traffic placeholder row is structural, never content-driven.
-            private fun hasMiddleRow(p: ProxyEntity): Boolean = true
+            // Traffic is inline in the title row and never changes card height.
+            private fun hasMiddleRow(p: ProxyEntity): Boolean = false
 
             fun neighbourHasMiddleRow(position: Int): Boolean {
                 if (position == RecyclerView.NO_POSITION) return false
@@ -3190,7 +3201,6 @@ class ConfigurationFragment @JvmOverloads constructor(
             val profileType: TextView = view.findViewById(R.id.profile_type)
             val profileAddress: TextView = view.findViewById(R.id.profile_address)
             val profileStatus: TextView = view.findViewById(R.id.profile_status)
-            val trafficRow: View = view.findViewById(R.id.traffic_row)
             val addressRow: View = view.findViewById(R.id.address_row)
 
             val trafficText: TextView = view.findViewById(R.id.traffic_text)
@@ -3431,10 +3441,12 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val tx = proxyEntity.tx
                 val secondary = requireContext().getColorAttr(android.R.attr.textColorSecondary)
 
-                // Row ownership is fixed: traffic is always row 2. The setting
-                // controls only its content; it never moves into status/address.
-                val showTraffic = DataStore.profileTrafficStatistics
-                trafficRow.isVisible = true
+                // Traffic is inline with the title and is never a structural row.
+                // The setting controls visibility; zero values remain visible.
+                val showTraffic = !twoColumn && DataStore.profileTrafficStatistics
+                // Single-column statistics occupy title line two, never an additional row.
+                profileName.minLines = if (showTraffic) 1 else 2
+                profileName.maxLines = if (showTraffic) 1 else 2
                 trafficText.isVisible = showTraffic
                 trafficText.setTextColor(secondary)
                 trafficText.text = if (showTraffic) view.context.getString(
@@ -3453,7 +3465,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                         else R.dimen.profile_card_height_without_address
                     )
                 }
-                lastSelfHasMiddleRow = true
+                lastSelfHasMiddleRow = false
 
                 // Row 4 is exclusively protocol + latency/error status.
                 profileStatus.text = ""
@@ -3490,18 +3502,17 @@ class ConfigurationFragment @JvmOverloads constructor(
                     profileStatus.layoutParams = it
                 }
                 if (isDoubleColumn) {
-                    // Keep the documented fixed action area in both layouts;
-                    // double-column cards must not collapse actions into an
-                    // unrelated single overflow button.
-                    doubleColumnMenuButton.isGone = true
-                    editButton.isGone = select
-                    shareLayout.isGone = selectOrChain
-                    removeButton.isGone = select
+                    // Two-column cards expose exactly one overflow action.
+                    doubleColumnMenuButton.isGone = select
+                    editButton.isGone = true
+                    shareLayout.isGone = true
+                    removeButton.isGone = true
                 } else {
+                    // Single-column cards retain the separate edit/share/delete actions.
+                    doubleColumnMenuButton.isGone = true
                     shareLayout.isGone = selectOrChain
                     editButton.isGone = select
                     removeButton.isGone = select
-                    doubleColumnMenuButton.isGone = true
                 }
 
                 proxyEntity.nekoBean?.apply {
@@ -3554,14 +3565,13 @@ class ConfigurationFragment @JvmOverloads constructor(
                     Formatter.formatFileSize(view.context, proxyEntity.rx),
                     Formatter.formatFileSize(view.context, proxyEntity.tx)
                 )
-                if (DataStore.profileTrafficStatistics && trafficText.text?.toString() != traffic) {
+                val isDoubleColumn = layoutManager is FixedGridLayoutManager
+                if (!isDoubleColumn && DataStore.profileTrafficStatistics) {
                     trafficText.text = traffic
                     trafficText.isVisible = true
-                    trafficRow.isVisible = true
-                } else if (!DataStore.profileTrafficStatistics) {
+                } else {
                     trafficText.text = ""
                     trafficText.isVisible = false
-                    trafficRow.isVisible = true
                 }
                 lastBoundTx = proxyEntity.tx
                 lastBoundRx = proxyEntity.rx

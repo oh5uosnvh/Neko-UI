@@ -34,8 +34,10 @@
                     android:layout_gravity="center_vertical"
                     android:layout_weight="1"
                     android:gravity="center_vertical"
+                    android:orientation="vertical"
                     android:paddingLeft="12dp"
                     android:paddingTop="8dp"
+                    android:paddingRight="4dp"
                     android:paddingBottom="8dp">
 
                     <io.nekohasekai.sagernet.widget.ProfileNameTextView
@@ -52,6 +54,19 @@
                         android:textColor="?android:attr/textColorPrimary"
                         android:textStyle="bold"
                         tools:text="@string/profile_name" />
+
+                <TextView
+                    android:id="@+id/traffic_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_vertical"
+                    android:layout_marginEnd="4dp"
+                    android:gravity="end|center_vertical"
+                    android:maxLines="1"
+                    android:ellipsize="none"
+                    android:textAppearance="?android:attr/textAppearanceSmall"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:visibility="gone" />
                 </LinearLayout>
 
                 <androidx.appcompat.widget.AppCompatImageView
@@ -68,13 +83,13 @@
                 <androidx.appcompat.widget.AppCompatImageView
                     android:id="@+id/double_column_menu"
                     android:layout_width="@dimen/profile_card_action_width"
-                    android:layout_height="28dp"
-                    android:layout_gravity="center_vertical"
+                    android:layout_height="48dp"
+                    android:layout_gravity="top"
                     android:layout_marginEnd="4dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/edit"
+                    android:contentDescription="@string/topbar_more_desc"
                     android:focusable="true"
-                    android:padding="2dp"
+                    android:padding="12dp"
                     android:scaleType="centerInside"
                     android:visibility="gone"
                     app:srcCompat="@drawable/ic_baseline_more_vert_24" />
@@ -118,29 +133,7 @@
 
             </LinearLayout>
 
-            <!-- Row 2: traffic only. It remains a fixed placeholder when empty. -->
-            <LinearLayout
-                android:id="@+id/traffic_row"
-                android:layout_width="match_parent"
-                android:layout_height="@dimen/profile_card_traffic_row_height"
-                android:gravity="center_vertical|end"
-                android:orientation="horizontal"
-                android:paddingStart="12dp"
-                android:paddingEnd="8dp">
-
-                <TextView
-                    android:id="@+id/traffic_text"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:gravity="end|center_vertical"
-                    android:maxLines="1"
-                    android:ellipsize="none"
-                    android:text="@string/traffic"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:textColor="?android:attr/textColorSecondary" />
-            </LinearLayout>
-
-            <!-- Row 3: endpoint only. Visibility changes the four-row mode. -->
+            <!-- Optional row 3: endpoint. -->
             <LinearLayout
                 android:id="@+id/address_row"
                 android:layout_width="match_parent"

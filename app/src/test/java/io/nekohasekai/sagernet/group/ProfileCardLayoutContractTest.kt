@@ -8,18 +8,19 @@ import java.io.File
 class ProfileCardLayoutContractTest {
     private val layout = File("src/main/res/layout/layout_profile.xml").readText()
 
-    @Test fun cardHasExplicitTitleTrafficAddressAndStatusRows() {
-        for (id in listOf("title_row", "traffic_row", "address_row", "status_row")) {
+    @Test fun cardHasTitleAddressAndStatusRows() {
+        for (id in listOf("title_row", "address_row", "status_row")) {
             assertTrue("missing $id", layout.contains("android:id=\"@+id/$id\""))
         }
     }
 
-    @Test fun trafficAndAddressAreSeparateFromStatus() {
-        val traffic = layout.indexOf("android:id=\"@+id/traffic_row\"")
+    @Test fun trafficIsInlineAndAddressPrecedesStatus() {
+        val traffic = layout.indexOf("android:id=\"@+id/traffic_text\"")
         val address = layout.indexOf("android:id=\"@+id/address_row\"")
         val status = layout.indexOf("android:id=\"@+id/status_row\"")
-        assertTrue(traffic >= 0 && address > traffic && status > address)
-        assertTrue(layout.indexOf("android:id=\"@+id/traffic_text\"") < address)
+        val title = layout.indexOf("android:id=\"@+id/title_row\"")
+        assertTrue(title >= 0 && traffic > title && address > title && status > address)
         assertTrue(layout.indexOf("android:id=\"@+id/profile_address\"") < status)
+        assertTrue(!layout.contains("android:id=\"@+id/traffic_row\""))
     }
 }
