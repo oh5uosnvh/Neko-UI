@@ -34,6 +34,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.graphics.ColorUtils
+import androidx.core.widget.TextViewCompat
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.bg.BaseService
 import java.util.Locale
@@ -312,6 +313,21 @@ class ControlBar @JvmOverloads constructor(
             capsule.setPaddingRelative(capsulePadding, capsule.paddingTop, capsulePadding, capsule.paddingBottom)
             (speedBox.layoutParams as LinearLayout.LayoutParams).weight = if (compact) 1.35f else 1f
             (latencyBox.layoutParams as LinearLayout.LayoutParams).weight = 1f
+            // Extreme narrow + large-font layouts need a deterministic compact
+            // speed size; Spannable autosize differs between LEGACY and NATIVE.
+            if (compact) {
+                listOf(speedDown, speedUp).forEach {
+                    it.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f)
+                    TextViewCompat.setAutoSizeTextTypeWithDefaults(
+                        it, TextViewCompat.AUTO_SIZE_TEXT_TYPE_NONE)
+                }
+            } else {
+                listOf(speedDown, speedUp).forEach {
+                    it.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                    TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
+                        it, 8, 13, 1, TypedValue.COMPLEX_UNIT_SP)
+                }
+            }
             // The toggle keeps the HTML-fixed 118x44dp capsule; only readout weights flex.
             speedBox.setPaddingRelative(speedBox.paddingStart, speedBox.paddingTop,
                 ((if (compact) 0 else 4) * density).toInt(), speedBox.paddingBottom)
