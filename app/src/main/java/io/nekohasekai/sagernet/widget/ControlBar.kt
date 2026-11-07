@@ -188,11 +188,21 @@ class ControlBar @JvmOverloads constructor(
         // failures and a final stop roll it back. A duplicate Connected report while
         // a stop request is pending must not undo the immediate stop feedback.
         when (state) {
-            BaseService.State.Connecting,
+            BaseService.State.Connecting -> {
+                if (onToggleIntent == null) {
+                    if (requested != true) requestedConnected = null
+                    togglePending = false
+                } else if (requested != null) {
+                    togglePending = true
+                }
+            }
             BaseService.State.Stopping -> {
                 // Keep the latest user intent visible while the service catches
                 // up. This is what makes on/off/on taps reversible mid-transition.
-                if (requested != null) togglePending = true
+                if (onToggleIntent == null) {
+                    requestedConnected = null
+                    togglePending = false
+                } else if (requested != null) togglePending = true
             }
             BaseService.State.Connected -> {
                 if (requested == false && wasPending) {
@@ -604,6 +614,7 @@ class ControlBar @JvmOverloads constructor(
 
     private fun requestToggle() {
         if (!canShowReadouts()) return
+        if (onToggleIntent == null && onToggle == null) return
         // Keep the old callback contract safe for embedders. MainActivity uses
         // onToggleIntent, which deliberately opts into reversible rapid taps.
         if (onToggleIntent == null && (togglePending || isTransitioning())) return
