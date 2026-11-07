@@ -4,8 +4,8 @@
     <string name="latency_test_failed">测试超时</string>
     <string name="latency_test_untested">测试未测</string>
     <string name="latency_test_empty_all">当前分组没有可测试节点</string>
-    <string name="latency_test_empty_failed">没有需要重测的超时或失败节点</string>
-    <string name="latency_test_empty_untested">没有未测节点</string>
+    <string name="latency_test_empty_failed">没有超时或不可用节点</string>
+    <string name="latency_test_empty_untested">没有未测试节点</string>
     <string name="latency_test_completed">测试完成</string>
     <string name="latency_test_interrupted">测试中断</string>
     <string name="latency_test_available">可用:%1$d</string>

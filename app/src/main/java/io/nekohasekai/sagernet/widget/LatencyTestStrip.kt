@@ -60,6 +60,9 @@ class LatencyTestStrip @JvmOverloads constructor(
     private var maxWidth = Int.MAX_VALUE
     private var widthAnimator: ValueAnimator? = null
     private var slideAnimator: ValueAnimator? = null
+    /** Single scene offset; surface, glyphs and border always move together. */
+    private var stripOffset = 0f
+    private var stripAnimator: ValueAnimator? = null
     private var spinnerAnimator: ValueAnimator? = null
     private var retire: Runnable? = null
     private var onCancel: (() -> Unit)? = null
@@ -145,11 +148,11 @@ class LatencyTestStrip @JvmOverloads constructor(
         contentWidth = width
         targetWidth = width
         invalidate()
-        translationX = -width
-        animate().cancel()
-        animate().translationX(0f).setDuration(420L).withEndAction {
+        translationX = 0f
+        stripOffset = -width
+        animateStripOffset(-width, 0f) {
             if (current == State.RUNNING) startSpinner()
-        }.start()
+        }
         startSpinner()
         invalidate()
     }
@@ -205,8 +208,9 @@ class LatencyTestStrip @JvmOverloads constructor(
     fun showEmpty(message: CharSequence) {
         val wasHidden = current == State.HIDDEN || visibility != VISIBLE
         stopRetire()
-        animate().cancel()
+        stopStripAnimation()
         translationX = 0f
+        stripOffset = 0f
         runningSnapshot = false
         generation++
         current = State.EMPTY
@@ -227,10 +231,7 @@ class LatencyTestStrip @JvmOverloads constructor(
         contentWidth = targetWidth
         accessibilityPaneTitle = message
         contentDescription = message
-        if (wasHidden) {
-            translationX = -targetWidth
-            animate().translationX(0f).setDuration(420L).start()
-        }
+        if (wasHidden) animateStripOffset(-targetWidth, 0f)
         val token = generation
         slideAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 420L
@@ -243,11 +244,12 @@ class LatencyTestStrip @JvmOverloads constructor(
 
     fun release() {
         generation++
-        stopRetire(); stopSpinner(); stopSlide(); stopWidth()
+        stopRetire(); stopSpinner(); stopSlide(); stopWidth(); stopStripAnimation()
         counterAnimator?.removeAllListeners(); counterAnimator?.cancel(); counterAnimator = null
         current = State.HIDDEN
         runningSnapshot = false
-        animate().cancel()
+        translationX = 0f
+        stripOffset = 0f
         onCancel = null
         visibility = GONE
     }
@@ -270,26 +272,36 @@ class LatencyTestStrip @JvmOverloads constructor(
         super.onDraw(canvas)
         val w = (if (current == State.RUNNING) contentWidth else animatedWidth).coerceIn(1f, width.toFloat()); val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
-        drawSurface(canvas, w, h)
+        val scene = canvas.save()
+        canvas.clipRect(0f, 0f, width.toFloat(), h)
+        canvas.translate(stripOffset, 0f)
         when (current) {
-            State.RUNNING -> drawRunning(canvas, w, h)
+            State.RUNNING -> {
+                drawSurface(canvas, w, h)
+                drawRunning(canvas, w, h)
+                drawBorder(canvas, w, h)
+            }
             State.RESULT, State.EMPTY -> {
                 // Keep the running snapshot underneath: the result is an opaque
                 // surface that slides over it, not a replacement of the strip.
-                if (runningSnapshot) drawRunning(canvas, w, h)
+                if (runningSnapshot) {
+                    drawSurface(canvas, w, h)
+                    drawRunning(canvas, w, h)
+                }
                 canvas.save()
                 canvas.clipRect(0f, 0f, w, h)
                 canvas.translate(-w * (1f - resultFraction), 0f)
+                // Surface, text AND perimeter are one scene. Drawing the
+                // perimeter outside this translation was the source of the
+                // visible frame/text desynchronization during completion.
                 drawSurface(canvas, w, h)
                 drawResult(canvas, w, h)
+                drawBorder(canvas, w, h)
                 canvas.restore()
             }
             State.HIDDEN -> Unit
         }
-        borderPaint.color = stroke
-        bounds.set(borderPaint.strokeWidth / 2f, borderPaint.strokeWidth / 2f,
-            w - borderPaint.strokeWidth / 2f, h - borderPaint.strokeWidth / 2f)
-        canvas.drawRoundRect(bounds, h / 2f, h / 2f, borderPaint)
+        canvas.restoreToCount(scene)
     }
 
     private fun drawSurface(canvas: Canvas, w: Float, h: Float) {
@@ -297,6 +309,13 @@ class LatencyTestStrip @JvmOverloads constructor(
         bounds.set(borderPaint.strokeWidth / 2f, borderPaint.strokeWidth / 2f,
             w - borderPaint.strokeWidth / 2f, h - borderPaint.strokeWidth / 2f)
         canvas.drawRoundRect(bounds, h / 2f, h / 2f, surfacePaint)
+    }
+
+    private fun drawBorder(canvas: Canvas, w: Float, h: Float) {
+        borderPaint.color = stroke
+        bounds.set(borderPaint.strokeWidth / 2f, borderPaint.strokeWidth / 2f,
+            w - borderPaint.strokeWidth / 2f, h - borderPaint.strokeWidth / 2f)
+        canvas.drawRoundRect(bounds, h / 2f, h / 2f, borderPaint)
     }
 
     private fun drawRunning(canvas: Canvas, w: Float, h: Float) {
@@ -416,6 +435,22 @@ class LatencyTestStrip @JvmOverloads constructor(
         widthAnimator?.cancel(); widthAnimator = null
     }
     private fun stopRetire() { retire?.let(::removeCallbacks); retire = null }
+    private fun stopStripAnimation() {
+        stripAnimator?.removeAllListeners()
+        stripAnimator?.removeAllUpdateListeners()
+        stripAnimator?.cancel()
+        stripAnimator = null
+    }
+    private fun animateStripOffset(from: Float, to: Float, end: (() -> Unit)? = null) {
+        stopStripAnimation()
+        stripOffset = from
+        stripAnimator = ValueAnimator.ofFloat(from, to).apply {
+            duration = 420L
+            addUpdateListener { stripOffset = it.animatedValue as Float; invalidate() }
+            doOnEnd { stripOffset = to; stripAnimator = null; end?.invoke() }
+            start()
+        }
+    }
 
     private fun scheduleRetire(token: Long) {
         stopRetire()
@@ -424,10 +459,14 @@ class LatencyTestStrip @JvmOverloads constructor(
     }
     private fun retract(token: Long) {
         if (token != generation) return
-        animate().cancel()
-        animate().translationX(-width.toFloat()).setDuration(420L).withEndAction {
-            if (token == generation) { visibility = GONE; current = State.HIDDEN; translationX = 0f; resultFraction = 1f }
-        }.start()
+        animateStripOffset(stripOffset, -width.toFloat()) {
+            if (token == generation) {
+                visibility = GONE
+                current = State.HIDDEN
+                stripOffset = 0f
+                resultFraction = 1f
+            }
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

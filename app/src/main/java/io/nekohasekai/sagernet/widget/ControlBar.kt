@@ -54,6 +54,8 @@ class ControlBar @JvmOverloads constructor(
 ) : FrameLayout(context, attrs, defStyleAttr) {
 
     var onToggle: (() -> Unit)? = null
+    /** Receives the user's desired state immediately, even while VPN is connecting/stopping. */
+    var onToggleIntent: ((Boolean) -> Unit)? = null
     var onTest: (() -> Unit)? = null
     /** The host owns the full error detail. Only a failed latency click invokes this callback. */
     var onError: (() -> Unit)? = null
@@ -186,12 +188,28 @@ class ControlBar @JvmOverloads constructor(
         // failures and a final stop roll it back. A duplicate Connected report while
         // a stop request is pending must not undo the immediate stop feedback.
         when (state) {
-            BaseService.State.Connecting -> {
-                if (requested != true) requestedConnected = null
-                togglePending = false
+            BaseService.State.Connecting,
+            BaseService.State.Stopping -> {
+                // Keep the latest user intent visible while the service catches
+                // up. This is what makes on/off/on taps reversible mid-transition.
+                if (requested != null) togglePending = true
             }
             BaseService.State.Connected -> {
-                if (!(requested == false && wasPending && previous == state)) {
+                if (requested == false && wasPending) {
+                    // A stale Connected broadcast must not undo a newer OFF tap.
+                    togglePending = true
+                } else {
+                    requestedConnected = null
+                    togglePending = false
+                }
+            }
+            BaseService.State.Stopped -> {
+                // Preserve an ON tap made during Stopping until MainActivity
+                // dispatches the restart at this safe state. Idle remains the
+                // permission-denied/reset path and clears stale intent.
+                if (requested == true && onToggleIntent != null) {
+                    togglePending = true
+                } else {
                     requestedConnected = null
                     togglePending = false
                 }
@@ -585,16 +603,19 @@ class ControlBar @JvmOverloads constructor(
     }
 
     private fun requestToggle() {
-        if (!canShowReadouts() || togglePending || isTransitioning()) return
-        val callback = onToggle ?: return
-        // Reserve once and start the visual BEFORE invoking the host. Do not
-        // invent a Connected service report, a successful probe, or green latency.
-        requestedConnected = currentState != BaseService.State.Connected
+        if (!canShowReadouts()) return
+        // Keep the old callback contract safe for embedders. MainActivity uses
+        // onToggleIntent, which deliberately opts into reversible rapid taps.
+        if (onToggleIntent == null && (togglePending || isTransitioning())) return
+        val desired = !(requestedConnected ?: (currentState == BaseService.State.Connected))
+        // The visual is an immediate user-intent presentation. It must not wait
+        // for VPN broadcasts, so repeated taps alternate it smoothly.
+        requestedConnected = desired
         togglePending = true
         if (shouldAnimateCapsule()) animatePresentation() else settlePresentation()
         updateEnabledState()
         try {
-            callback()
+            onToggleIntent?.invoke(desired) ?: onToggle?.invoke()
         } catch (error: Exception) {
             togglePending = false
             requestedConnected = null
@@ -608,7 +629,9 @@ class ControlBar @JvmOverloads constructor(
         currentState == BaseService.State.Stopping
 
     private fun updateEnabledState() {
-        capsule.isEnabled = canShowReadouts() && !togglePending && !isTransitioning()
+        // A VPN transition is not a UI lock. The user may reverse the intent
+        // before the previous service acknowledgement arrives.
+        capsule.isEnabled = canShowReadouts()
         val canTest = canShowReadouts() && !testing &&
             (currentState == BaseService.State.Connected || (failed && onError != null))
         speedBox.isEnabled = canTest

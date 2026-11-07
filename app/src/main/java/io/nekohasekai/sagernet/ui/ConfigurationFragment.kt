@@ -766,8 +766,11 @@ class ConfigurationFragment @JvmOverloads constructor(
         super.onHiddenChanged(hidden)
         // 被抽屉切走（hide）时收起搜索，避免返回键拦截器在其它页面残留
         if (hidden) {
+            // Navigation between Configuration/Groups/Settings is still inside
+            // the foreground activity. Keep the test running and leave its
+            // strip/notification state untouched; true process backgrounding
+            // is handled by MainActivity's ProcessLifecycle observer.
             topBar.collapseSearch()
-            minimizeActiveLatencyTest()
         } else if (::groupPager.isInitialized && ::tabLayout.isInitialized && ::adapter.isInitialized) {
             activeLatencyResume?.invoke()
             // 显示修复：从分组管理页返回时，把顶部标签栏同步到当前选中的分组。
@@ -1336,6 +1339,8 @@ class ConfigurationFragment @JvmOverloads constructor(
     private var activeLatencyMinimize: (() -> Unit)? = null
 
     fun minimizeActiveLatencyTest() { activeLatencyMinimize?.invoke() }
+
+    fun resumeActiveLatencyTest() { activeLatencyResume?.invoke() }
 
     inner class TestDialog(private val request: LatencyTestRequest, var proxyN: Int, private val generation: Long) {
         lateinit var cancel: () -> Unit

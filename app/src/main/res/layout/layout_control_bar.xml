@@ -11,6 +11,7 @@
         android:baselineAligned="false"
         android:gravity="center_vertical"
         android:orientation="horizontal"
+        android:background="@drawable/bg_control_bar"
         android:paddingStart="18dp"
         android:paddingEnd="18dp">
 

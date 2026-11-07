@@ -20,7 +20,10 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentManager
+import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -87,6 +90,25 @@ class MainActivity : ThemedActivity(),
     private var startupProbe: ConnectionProbeStatus? = null
     private var controlErrorDetail: String? = null
     private var lastErrorDialog = ""
+    private var latestToggleIntent = false
+    private var vpnPermissionRequestInFlight = false
+
+    /** Process background, not fragment navigation, owns latency-test minimization. */
+    private val processLifecycleObserver = object : DefaultLifecycleObserver {
+        override fun onStop(owner: LifecycleOwner) {
+            (currentMainFragment as? ConfigurationFragment)?.minimizeActiveLatencyTest()
+            fragmentCache.values.filterIsInstance<ConfigurationFragment>()
+                .filter { it !== currentMainFragment }
+                .forEach { it.minimizeActiveLatencyTest() }
+        }
+
+        override fun onStart(owner: LifecycleOwner) {
+            (currentMainFragment as? ConfigurationFragment)?.resumeActiveLatencyTest()
+            fragmentCache.values.filterIsInstance<ConfigurationFragment>()
+                .filter { it !== currentMainFragment }
+                .forEach { it.resumeActiveLatencyTest() }
+        }
+    }
 
     // Only pages explicitly visited by the user are retained. Cold navigation waits for the
     // requested view's real first draw instead of inflating unrelated pages during startup.
@@ -115,6 +137,7 @@ class MainActivity : ThemedActivity(),
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ProcessLifecycleOwner.get().lifecycle.addObserver(processLifecycleObserver)
         MessageStore.setCurrentActivity(this)
         // The UI starts unbound: do not restore a stale Connected tray before the service replies.
         DataStore.serviceState = BaseService.State.Idle
@@ -142,11 +165,16 @@ class MainActivity : ThemedActivity(),
             }
         }
 
+        // Handle the latest UI intent immediately. Do not gate this callback on
+        // Connecting/Stoppng: a fast OFF/ON/OFF sequence must reach the service
+        // in the same order as the user's taps.
+        binding.controlBar.onToggleIntent = { desiredConnected ->
+            latestToggleIntent = desiredConnected
+            dispatchLatestToggleIntent()
+        }
         binding.controlBar.onToggle = {
-            val state = DataStore.serviceState
-            if (state != BaseService.State.Connecting && state != BaseService.State.Stopping) {
-                if (state.canStop) SagerNet.stopService() else connect.launch(null)
-            }
+            // Kept for embedders/tests that use the legacy callback directly.
+            if (DataStore.serviceState.canStop) SagerNet.stopService() else connect.launch(null)
         }
         binding.controlBar.onTest = { testControlLatency() }
         binding.controlBar.onError = { showControlErrorSnackbar() }
@@ -776,6 +804,11 @@ class MainActivity : ThemedActivity(),
         msg: String? = null,
     ) {
         DataStore.serviceState = state
+        if (state == BaseService.State.Stopped && latestToggleIntent) {
+            // The OFF->ON tap made during Stopping is dispatched only after the
+            // service reaches its safe restart point.
+            window.decorView.post { dispatchLatestToggleIntent() }
+        }
         if (state == BaseService.State.Connecting) {
             startupProbe = null
             controlErrorDetail = null
@@ -822,13 +855,40 @@ class MainActivity : ThemedActivity(),
         connection.connect(this, this)
     }
 
+    private fun dispatchLatestToggleIntent() {
+        if (!::binding.isInitialized) return
+        val state = DataStore.serviceState
+        if (latestToggleIntent) {
+            // Wait for a previous stop to reach Stopped. Starting a new VPN
+            // while the old runner is still stopping loses the user's ON tap.
+            if (state == BaseService.State.Connecting ||
+                state == BaseService.State.Stopping ||
+                state == BaseService.State.Connected ||
+                vpnPermissionRequestInFlight) return
+            vpnPermissionRequestInFlight = true
+            runCatching { connect.launch(null) }.onFailure {
+                vpnPermissionRequestInFlight = false
+                Logs.w(it)
+                binding.controlBar.changeState(DataStore.serviceState)
+            }
+        } else if (state.canStop || state == BaseService.State.Connecting ||
+            state == BaseService.State.Stopping) {
+            SagerNet.stopService()
+        }
+    }
+
     private val connect = registerForActivityResult(VpnRequestActivity.StartService()) { denied ->
+        vpnPermissionRequestInFlight = false
         if (denied) {
             binding.controlBar.changeState(DataStore.serviceState)
             syncMainControls() // Authoritative permission cancellation re-arms the capsule.
             snackbar(R.string.vpn_permission_denied).show()
+        } else if (!latestToggleIntent) {
+            // The permission sheet may finish after the user has already tapped
+            // OFF. Do not resurrect a VPN for a stale START result.
+            SagerNet.stopService()
         }
-        // Successful requests stay locked until the real service reports Connecting/Connected.
+        // Successful requests stay visually immediate; service broadcasts remain authoritative.
     }
 
     // may NOT called when app is in background
@@ -895,10 +955,12 @@ class MainActivity : ThemedActivity(),
     }
 
     override fun onDestroy() {
+        ProcessLifecycleOwner.get().lifecycle.removeObserver(processLifecycleObserver)
         cancelNavigationWork()
         invalidateControlLatency()
         if (::binding.isInitialized) {
             binding.controlBar.onToggle = null
+            binding.controlBar.onToggleIntent = null
             binding.controlBar.onTest = null
             binding.controlBar.onError = null
         }

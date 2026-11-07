@@ -184,7 +184,11 @@ internal class FlMenuPopup(
         val below = screen.bottom - location[1] - anchor.height
         val above = location[1] - screen.top
         val room = max(below, above) - dp(16)
-        val height = contentHeight.coerceAtMost(room.coerceAtLeast(dp(96)))
+        // contentHeight is the page's inner height. Include both surface
+        // paddings in the PopupWindow height; omitting the bottom padding clips
+        // the last row against the rounded border (especially on submenu pages).
+        val surfacePadding = surface.paddingTop + surface.paddingBottom
+        val height = (contentHeight + surfacePadding).coerceAtMost(room.coerceAtLeast(dp(96)))
         val rtl = anchor.layoutDirection == View.LAYOUT_DIRECTION_RTL
         var x = if (rtl) location[0] else location[0] + anchor.width - width - surface.paddingLeft
         x = x.coerceIn(screen.left + dp(8), max(screen.left + dp(8), screen.right - width - dp(8)))
