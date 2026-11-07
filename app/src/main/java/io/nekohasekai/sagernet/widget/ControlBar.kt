@@ -121,6 +121,14 @@ class ControlBar @JvmOverloads constructor(
         latencyBox = findViewById(R.id.latency_box)
         speedDown = findViewById(R.id.speed_down)
         speedUp = findViewById(R.id.speed_up)
+        // Real Android's NATIVE text engine may still create a second line for a
+        // Spannable even with XML maxLines=1. singleLine locks the layout; clear
+        // its implicit END ellipsize afterwards so the spec remains no-ellipsis.
+        listOf(speedDown, speedUp).forEach {
+            it.setSingleLine(true)
+            it.ellipsize = null
+            it.setHorizontallyScrolling(true)
+        }
         capsule = findViewById(R.id.capsule)
         capsuleIcon = findViewById(R.id.capsule_icon)
         capsuleLabel = findViewById(R.id.capsule_label)
