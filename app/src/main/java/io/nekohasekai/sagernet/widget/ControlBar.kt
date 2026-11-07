@@ -135,6 +135,9 @@ class ControlBar @JvmOverloads constructor(
         capsuleLabel = findViewById(R.id.capsule_label)
         latency = findViewById(R.id.latency)
         latencyProgress = findViewById(R.id.latency_progress)
+        latency.setSingleLine(true)
+        latency.ellipsize = null
+        latency.setHorizontallyScrolling(true)
 
         val buttonSemantics = object : AccessibilityDelegate() {
             override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
