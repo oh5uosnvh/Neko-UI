@@ -142,6 +142,16 @@ jobs:
               'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.10.2-bin.zip',
               'distributionUrl=' + pathlib.Path(sys.argv[1]).as_uri()))
           PY
+          # The Kotlin Maven artifact can also redirect to an unavailable release
+          # URL. Seed its exact content-addressed cache entry, without changing
+          # dependency coordinates, versions, repositories or resolution rules.
+          compiler_cache="$HOME/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-compiler-embeddable/2.0.21/79346ed53db48b18312a472602eb5c057070c54d"
+          mkdir -p "$compiler_cache"
+          curl -fLSs --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 180 \
+            -H 'Accept: application/octet-stream' \
+            https://api.github.com/repos/JetBrains/kotlin/releases/assets/587823233 \
+            -o "$compiler_cache/kotlin-compiler-embeddable-2.0.21.jar"
+          echo "9fa8cdd1de0dccffe154c997d423ec6b5f53cd6d9177e3a77a9b0de03fb1bc81  $compiler_cache/kotlin-compiler-embeddable-2.0.21.jar" | sha256sum -c -
           ./gradlew --no-daemon app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.group.*'
           ./gradlew --no-daemon app:assemblePreviewRelease
           mkdir -p release
