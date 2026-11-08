@@ -1000,7 +1000,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 if (openingGroupSettings) return true
                 openingGroupSettings = true
                 startActivity(Intent(requireContext(), GroupSettingsActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                     putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, 0L)
                 })
             }
@@ -3222,7 +3222,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 io.nekohasekai.sagernet.widget.FlMenu.show(anchor, popup.menu) { onMenuItemClick(it) }
             }
 
-            val profileName: TextView = view.findViewById(R.id.profile_name)
+            val profileName: io.nekohasekai.sagernet.widget.ProfileNameTextView = view.findViewById(R.id.profile_name)
             val profileType: TextView = view.findViewById(R.id.profile_type)
             val profileAddress: TextView = view.findViewById(R.id.profile_address)
             val profileStatus: TextView = view.findViewById(R.id.profile_status)
@@ -3476,6 +3476,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                 profileName.minLines = 2
                 profileName.maxLines = 2
                 profileName.ellipsize = null
+                profileName.twoColumnDisplay = twoColumn
+                profileName.wrapLongNames = !twoColumn
                 val nameContainer = view.findViewById<View>(R.id.title_text_container)
                 // Keep the full two-line title height even when traffic is visible;
                 // traffic overlays line two on the right instead of clipping the name.

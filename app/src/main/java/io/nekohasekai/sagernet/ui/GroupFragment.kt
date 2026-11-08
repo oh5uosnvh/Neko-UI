@@ -269,7 +269,10 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     override fun onMenuItemClick(item: MenuItem): Boolean {
         when (item.itemId) {
             R.id.action_new_group -> {
-                startActivity(Intent(context, GroupSettingsActivity::class.java))
+                startActivity(Intent(context, GroupSettingsActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, 0L)
+                })
             }
 
             R.id.action_update_all -> {

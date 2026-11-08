@@ -46,12 +46,27 @@ class ProfileNameTextView @JvmOverloads constructor(
         override fun onFocusChanged(view: View?, sourceText: CharSequence?, focused: Boolean,
             direction: Int, previouslyFocusedRect: Rect?) = Unit
     }
+    private var forceLongNameWrap = false
+
     var twoColumnDisplay: Boolean = false
         set(value) {
             if (field == value) return
             field = value
-            transformationMethod = if (value) nameTransformation else null
+            updateNameTransformation()
         }
+
+    /** Enables the same safe break opportunities for narrow single-column cards. */
+    var wrapLongNames: Boolean
+        get() = forceLongNameWrap
+        set(value) {
+            if (forceLongNameWrap == value) return
+            forceLongNameWrap = value
+            updateNameTransformation()
+        }
+
+    private fun updateNameTransformation() {
+        transformationMethod = if (twoColumnDisplay || forceLongNameWrap) nameTransformation else null
+    }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         // Follow the real layout manager, not a saved preference/snapshot. An
@@ -62,12 +77,10 @@ class ProfileNameTextView @JvmOverloads constructor(
             val manager = ancestor.layoutManager as? GridLayoutManager
             twoColumnDisplay = manager != null && manager.spanCount > 1
         }
-        // Long ASCII node names must wrap in single-column cards too. The
-        // transformation inserts zero-width break opportunities while keeping
-        // the raw TextView text unchanged for accessibility/export.
-        if (transformationMethod !== nameTransformation) {
-            transformationMethod = nameTransformation
-        }
+        // Keep the transformation controlled by twoColumnDisplay. The card
+        // binder may opt into it for single-column long ASCII names explicitly;
+        // onMeasure must not replace a caller's transformation during tests or
+        // RecyclerView measurement.
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
     }
 
