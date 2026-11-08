@@ -39,7 +39,10 @@ class GroupTabPill(context: Context) : AppCompatTextView(context) {
         ready = true
     }
     /** The cap is a width, not seven code points: narrow digits can occupy more. */
-    internal fun labelWidthLimit(): Int = kotlin.math.ceil(paint.measureText("模模模模模模模").toDouble()).toInt()
+    internal fun labelWidthLimit(): Int {
+        val probe = Paint(paint).apply { textSize = this@GroupTabPill.textSize }
+        return kotlin.math.ceil(probe.measureText("模模模模模模模").toDouble()).toInt()
+    }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val limit = labelWidthLimit() + compoundPaddingLeft + compoundPaddingRight

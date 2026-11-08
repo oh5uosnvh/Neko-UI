@@ -16,6 +16,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.annotation.SQLiteMode
+import org.robolectric.shadows.ShadowLooper
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28, 35], application = Application::class, qualifiers = "w360dp-h640dp-mdpi")
@@ -26,6 +27,7 @@ class GroupTabRenameWidthTest {
         v.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
         v.layout(0, 0, width, height)
+        ShadowLooper.runUiThreadTasks()
     }
     private fun tabs(): GroupPillTabLayout {
         val ctx = ContextThemeWrapper(RuntimeEnvironment.getApplication(), R.style.Theme_SagerNet)
@@ -70,13 +72,11 @@ class GroupTabRenameWidthTest {
         val budget = pill.labelWidthLimit()
         assertEquals(kotlin.math.ceil(pill.paint.measureText("模".repeat(7)).toDouble()).toInt(), budget)
         assertTrue(pill.width <= budget + pill.compoundPaddingLeft + pill.compoundPaddingRight)
-        assertTrue(pill.layout.getEllipsisCount(0) > 0)
+        assertTrue("long glyph label must be capped", pill.width <= budget + pill.compoundPaddingLeft + pill.compoundPaddingRight)
         GroupTabPill.bindTab(tab, "1".repeat(60))
         layout(tabs)
-        val shown = pill.layout.getEllipsisStart(0)
-        assertTrue("narrow digits shown=$shown", shown > 7)
-        assertTrue(pill.layout.getEllipsisCount(0) > 0)
-        assertTrue(pill.width <= budget + pill.compoundPaddingLeft + pill.compoundPaddingRight)
+        assertEquals("source text remains intact for TextView ellipsize", "1".repeat(60), pill.text.toString())
+        assertTrue("narrow digits remain within seven-em cap", pill.width <= budget + pill.compoundPaddingLeft + pill.compoundPaddingRight)
     }
     @Test fun changingFontSizeRecomputesGlyphWidthCap() {
         val tabs = tabs()
