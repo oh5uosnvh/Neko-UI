@@ -3233,7 +3233,11 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             val profileName: io.nekohasekai.sagernet.widget.ProfileNameTextView = view.findViewById(R.id.profile_name)
             val profileType: TextView = view.findViewById(R.id.profile_type)
-            val profileAddress: TextView = view.findViewById(R.id.profile_address)
+            // This is an EndpointTextView in layout_profile.xml. Keep the
+            // specialized type visible at the binding boundary so endpoint
+            // fitting cannot be accidentally replaced by TextView ellipsizing.
+            val profileAddress: io.nekohasekai.sagernet.widget.EndpointTextView =
+                view.findViewById(R.id.profile_address)
             val profileStatus: TextView = view.findViewById(R.id.profile_status)
             val addressRow: View = view.findViewById(R.id.address_row)
 
