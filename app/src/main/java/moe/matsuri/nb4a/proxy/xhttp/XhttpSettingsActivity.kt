@@ -46,7 +46,10 @@ class XhttpSettingsActivity : ProfileSettingsActivity<XhttpBean>() {
             setOnBindEditTextListener(EditTextPreferenceModifiers.Port)
         }
 
-        // xhttp 全参数明文直显 (不隐藏); 弹窗编辑走明文等宽 modifier
+        findPreference<EditTextPreference>("sess")?.title = "会话前缀 Sess (hex，可选；留空自动随机)"
+        findPreference<EditTextPreference>("auth")?.title = "鉴权令牌 Auth (hex，可选；留空用 password 里的 key2)"
+
+        // sess/auth 可选：留空时分别自动随机、回退到 password 里的 key2。
         listOf("password", "sess", "auth", "uuid").forEach { key ->
             findPreference<EditTextPreference>(key)?.apply {
                 setOnBindEditTextListener(EditTextPreferenceModifiers.PasswordPlain)

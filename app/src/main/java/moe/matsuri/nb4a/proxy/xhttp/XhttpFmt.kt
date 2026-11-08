@@ -19,30 +19,35 @@ fun buildSingBoxOutboundXhttpBean(bean: XhttpBean): SingBoxOption {
         put("server", bean.serverAddress)
         put("server_port", bean.serverPort)
         if (bean.password.isNotBlank()) put("password", bean.password)
+        // sess 为空时不下发，客户端会自动随机生成 68 字节前缀。
         if (bean.sess.isNotBlank()) put("sess", bean.sess)
-        if (bean.auth.isNotBlank()) put("auth", bean.auth)
+        val effAuth = bean.effectiveAuth()
+        if (effAuth.isNotBlank()) put("auth", effAuth)
         if (bean.uuid.isNotBlank()) put("uuid", bean.uuid)
     }
     return CustomSingBoxOption(json.toString(2))
 }
 
 fun XhttpBean.toUri(): String {
-    val sb = StringBuilder("heysocks://")
+    val sb = StringBuilder("xhttp://")
         .append(serverAddress.wrapIPV6Host())
         .append(":").append(serverPort)
-        .append("?sess=").append(sess)
-        .append("&auth=").append(auth)
-        .append("&fake_net_tcp=").append(sess)
-        .append("&padding_len=").append(paddingLen)
-    if (password.isNotBlank()) sb.append("&password=").append(password)
+    if (password.isNotBlank()) sb.append("?password=").append(password)
+    // 只有用户显式覆盖时才带（兼容手工填的特殊节点）。
+    if (sess.isNotBlank()) sb.append(if (sb.contains('?')) "&" else "?").append("sess=").append(sess)
+    if (auth.isNotBlank()) sb.append(if (sb.contains('?')) "&" else "?").append("auth=").append(auth)
     if (!name.isNullOrBlank()) sb.append("#").append(name.urlSafe())
     return sb.toString()
 }
 
 fun parseXhttpLink(url: String): XhttpBean {
-    // heysocks://gateway:port?sess=..&auth=..&password=..&fake_net_tcp=..&padding_len=..#name
-    val link = url.replace("heysocks://", "https://a:a@").toHttpUrlOrNull()
-        ?: error("Invalid heysocks URL: $url")
+    val normalized = when {
+        url.startsWith("xhttp://") -> url
+        url.startsWith("heysocks://") -> url.replaceFirst("heysocks://", "xhttp://")
+        else -> error("Unsupported xhttp link: $url")
+    }
+    val link = normalized.replaceFirst("xhttp://", "https://a:a@").toHttpUrlOrNull()
+        ?: error("Invalid xhttp URL: $url")
 
     return XhttpBean().apply {
         serverAddress = link.host

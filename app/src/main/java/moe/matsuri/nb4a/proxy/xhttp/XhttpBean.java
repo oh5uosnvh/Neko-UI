@@ -31,6 +31,22 @@ public class XhttpBean extends AbstractBean {
     public String landingServer;  // 落地 server (展示用)
     public Integer landingPort;   // 落地 port (展示用)
 
+    /** auth 为空时，回退到 password 里冒号后的 key2。 */
+    public String effectiveAuth() {
+        if (auth != null && !auth.isEmpty()) return auth;
+        if (password != null && password.contains(":")) {
+            return password.substring(password.indexOf(':') + 1);
+        }
+        return "";
+    }
+
+    /** password 里冒号前的 key1。 */
+    public String key1() {
+        if (password == null) return "";
+        int i = password.indexOf(':');
+        return i < 0 ? password : password.substring(0, i);
+    }
+
     public static final Creator<XhttpBean> CREATOR = new CREATOR<XhttpBean>() {
         @NonNull
         @Override
