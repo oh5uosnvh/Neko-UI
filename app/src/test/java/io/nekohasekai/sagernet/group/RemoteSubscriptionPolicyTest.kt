@@ -16,7 +16,7 @@ class RemoteSubscriptionPolicyTest {
         """.trimIndent())
         val remote = SubscriptionDns.fromSubscriptionDocument(doc)
         assertEquals(setOf("node.example", "another.example", "+.private.example"), remote.policy.keys)
-        assertEquals(listOf("https://dns.example/dns-query"), remote.serverDns)
+        assertTrue(remote.serverDns.isEmpty())
         assertTrue(remote.warnings.any { it.contains("geosite") })
         assertFalse(remote.policy.containsKey("*"))
         assertEquals(remote.policy, SubscriptionDns.fromDocument(SubscriptionDns.loadDocument(remote.snapshot())).policy)

@@ -185,7 +185,7 @@ fun buildConfig(
     val activeSubscription = group?.subscription
     val activeDns = subscriptionDns.config(proxy.requireBean(), activeSubscription)
     val directOverride = activeSubscription?.directDnsResolver.orEmpty()
-    val subscriptionDirectDns = if (directOverride.isNotBlank()) SubscriptionDns.endpointList(directOverride) else activeDns.directDns
+    val subscriptionDirectDns = SubscriptionDns.endpointList(directOverride)
     val isVPN = DataStore.serviceMode == Key.MODE_VPN
     val deviceInboundTag = if (isVPN && DataStore.enableHevTun) TAG_MIXED else "tun-in"
     val bind = if (!forTest && DataStore.allowAccess) "0.0.0.0" else LOCALHOST

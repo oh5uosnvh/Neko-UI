@@ -219,6 +219,7 @@ public class SubscriptionDnsTest {
 
     @Test public void blankOverridesInheritAndEmptyMapsDisableOnlyTheirScope() {
         SubscriptionDns.Config original = parse(IMPORTED);
+        original.serverDns.clear(); original.directDns.clear();
         assertEquals(original.asDocument(), SubscriptionDns.effective(IMPORTED, " \n", "\t", "").asDocument());
         assertEquals(original.asDocument(), SubscriptionDns.effective(IMPORTED, null, null, null).asDocument());
         SubscriptionDns.Config noPrivate = SubscriptionDns.effective(IMPORTED, "{}", "", "");

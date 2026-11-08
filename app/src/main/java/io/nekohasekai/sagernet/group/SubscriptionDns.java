@@ -110,10 +110,14 @@ public final class SubscriptionDns {
      * into catch-all rules. User-authored editor policies remain strictly validated.
      */
     public static Config fromSubscriptionDocument(Map<?, ?> root) {
-        return fromDocument(root, true);
+        return fromDocument(root, true, false);
     }
 
     private static Config fromDocument(Map<?, ?> root, boolean remote) {
+        return fromDocument(root, remote, true);
+    }
+
+    private static Config fromDocument(Map<?, ?> root, boolean remote, boolean ordinaryDns) {
         Config result = new Config();
         Object dnsObject = root.get("dns");
         Map<?, ?> dns = dnsObject == null ? Collections.emptyMap() : asMap(dnsObject, "dns");
@@ -121,11 +125,13 @@ public final class SubscriptionDns {
         if (!Boolean.FALSE.equals(dns.get("enable"))) {
             readPolicy(dns.get("nameserver-policy"), result.policy, remote, result.warnings);
             readPolicy(dns.get("proxy-server-nameserver-policy"), result.serverPolicy, remote, result.warnings);
-            result.serverDns.addAll(remote ? sourceEndpoints(dns.get("proxy-server-nameserver"), result.warnings) : endpoints(dns.get("proxy-server-nameserver")));
-            result.directDns.addAll(remote ? sourceEndpoints(dns.get("direct-nameserver"), result.warnings) : endpoints(dns.get("direct-nameserver")));
+            if (ordinaryDns) {
+                result.serverDns.addAll(remote ? sourceEndpoints(dns.get("proxy-server-nameserver"), result.warnings) : endpoints(dns.get("proxy-server-nameserver")));
+                result.directDns.addAll(remote ? sourceEndpoints(dns.get("direct-nameserver"), result.warnings) : endpoints(dns.get("direct-nameserver")));
+            }
             result.bootstrap.addAll(remote ? sourceEndpoints(dns.get("default-nameserver"), result.warnings) : endpoints(dns.get("default-nameserver")));
             // Clash often points node DNS back at its own listener. NekoBox does not run that listener.
-            int listenPort = listenerPort(dns.get("listen"));
+            int listenPort = ordinaryDns ? listenerPort(dns.get("listen")) : 0;
             if (listenPort != 0) {
                 boolean removed = result.serverDns.removeIf(value -> {
                     Endpoint e = endpoint(value);
@@ -151,7 +157,9 @@ public final class SubscriptionDns {
     }
 
     public static Config effective(String imported, String privateOverride, String hostsOverride, String serverOverride) {
-        Config config = fromDocument(loadDocument(imported));
+        // Old saved snapshots may still contain ordinary YAML DNS. Ignore those
+        // two fields too; only the user's explicit override can supply them.
+        Config config = fromDocument(loadDocument(imported), false, false);
         if (privateOverride != null && !privateOverride.trim().isEmpty()) {
             Config custom = parsePrivate(privateOverride);
             config.policy.clear(); config.policy.putAll(custom.policy);

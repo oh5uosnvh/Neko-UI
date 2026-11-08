@@ -31,13 +31,22 @@ class GroupTabPill(context: Context) : AppCompatTextView(context) {
         background = surface
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
         setPadding(dp(14), dp(6), dp(14), dp(6))
-        minHeight = dp(34); maxWidth = dp(264); maxLines = 1
+        minHeight = dp(34); maxLines = 1
         ellipsize = TextUtils.TruncateAt.END
         gravity = android.view.Gravity.CENTER
         isClickable = false; isFocusable = false
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         ready = true
     }
+    /** The cap is a width, not seven code points: narrow digits can occupy more. */
+    internal fun labelWidthLimit(): Int = kotlin.math.ceil(paint.measureText("模模模模模模模").toDouble()).toInt()
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val limit = labelWidthLimit() + compoundPaddingLeft + compoundPaddingRight
+        if (maxWidth != limit) maxWidth = limit
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+
     override fun setSelected(selected: Boolean) {
         super.setSelected(selected)
         if (ready && !manualProgress) selectionProgress = if (selected) 1f else 0f
@@ -96,8 +105,25 @@ class GroupTabPill(context: Context) : AppCompatTextView(context) {
         fun bindTab(tab: TabLayout.Tab, label: CharSequence?) {
             tab.text = label; tab.contentDescription = label
             val existing = tab.customView as? GroupTabPill
-            if (existing != null) { existing.text = label; existing.settleSelected(tab.isSelected) }
-            else tab.customView = GroupTabPill(tab.view.context).apply { text = label; settleSelected(tab.isSelected) }
+            if (existing != null) {
+                existing.text = label
+                existing.settleSelected(tab.isSelected)
+                // Fixed-height TextView.setText() may only invalidate when the
+                // line count is unchanged. Invalidate the TabView's measurement
+                // too: its custom pill must shrink/grow on a rename, immediately.
+                existing.forceLayout()
+            } else tab.customView = GroupTabPill(tab.view.context).apply { text = label; settleSelected(tab.isSelected) }
+            tab.customView?.layoutParams?.let { params ->
+                params.width = android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                tab.customView?.layoutParams = params
+            }
+            tab.view.forceLayout()
+            (tab.view.parent as? View)?.let { strip ->
+                strip.forceLayout()
+                strip.requestLayout()
+                (strip.parent as? View)?.requestLayout()
+            }
+            tab.view.requestLayout()
         }
     }
 }

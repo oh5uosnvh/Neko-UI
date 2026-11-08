@@ -85,7 +85,7 @@ class GroupDnsUiTest {
                 assertEquals(GroupDnsUi.Summary.UNSET, state.summary)
                 assertEquals("", state.content)
                 assertFalse(state.hasContent)
-                assertTrue(state.hasAutomatic)
+                assertEquals(auto.isNotBlank(), state.hasAutomatic)
                 assertNull(state.edited(""))
                 assertEquals(manual, state.manual)
             }
@@ -112,8 +112,13 @@ class GroupDnsUiTest {
     @Test fun clearingAutomaticContentWritesDisableSentinelForEveryField() {
         for (auto in fields(GroupDnsUi.automatic(imported))) {
             val state = GroupDnsUi.state("", auto, "subscription", true)
-            assertEquals("{}", state.edited(""))
-            assertEquals("{}", state.edited(" \n"))
+            if (auto.isNotBlank()) {
+                assertEquals("{}", state.edited(""))
+                assertEquals("{}", state.edited(" \n"))
+            } else {
+                assertNull(state.edited(""))
+                assertEquals(" \n", state.edited(" \n"))
+            }
         }
     }
 
@@ -145,8 +150,8 @@ class GroupDnsUiTest {
 
     @Test fun autoEditorsContainOnlyTheirSupportedConfigFields() {
         val auto = GroupDnsUi.automatic(imported)
-        assertEquals("https://resolver.example/dns-query\ntcp://192.0.2.53:5353", auto.server)
-        assertEquals("223.5.5.5\ntls://1.1.1.1", auto.direct)
+        assertEquals("", auto.server)
+        assertEquals("", auto.direct)
         assertTrue(SubscriptionDns.isValidEndpointList(auto.server))
         assertTrue(SubscriptionDns.isValidEndpointList(auto.direct))
         assertNull(SubscriptionDns.validatePrivateConfig(auto.privateDns))
