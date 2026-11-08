@@ -15,10 +15,12 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.annotation.SQLiteMode
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28, 35], application = Application::class, qualifiers = "w360dp-h640dp-mdpi")
-@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@GraphicsMode(GraphicsMode.Mode.LEGACY)
+@SQLiteMode(SQLiteMode.Mode.LEGACY)
 class GroupTabRenameWidthTest {
     private fun layout(v: View, width: Int = 360, height: Int = 80) {
         v.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),

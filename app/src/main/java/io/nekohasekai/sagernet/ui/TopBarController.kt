@@ -118,6 +118,7 @@ internal class TopBarController(
 
     /** ⊙ 点击循环进度：false=下次去选定节点分组，true=下次去第一个分组 */
     private var jumpToggle = false
+    private var selectedGroupJumped = false
 
     /** 长按判定时长：0.5s */
     private val longPressMs = 500L
@@ -158,6 +159,7 @@ internal class TopBarController(
         iconColor = resolveForeground(toolbar)
 
         jumpToggle = false
+        selectedGroupJumped = false
         longPressFired = false
         pressedView = null
         searchExpanded = false
@@ -567,12 +569,19 @@ internal class TopBarController(
         return false
     }
 
-    /** ⊙ 单击：1) 选定节点所在分组  2) 第一个分组，往复循环 */
+    /** ⊙ 单击：第一次到选定组/节点，第二次才回首组。无选定时直接首组。 */
     private fun onJumpTap() {
-        if (jumpToggle) {
+        if (selectedGroupJumped) {
+            selectedGroupJumped = false
             jumpToggle = false
             jumpToFirstGroup()
         } else {
+            val selectedId = host.selectedItem?.id ?: DataStore.selectedProxy
+            if (selectedId <= 0L) {
+                jumpToFirstGroup()
+                return
+            }
+            selectedGroupJumped = true
             jumpToggle = true
             jumpToSelectedGroup()
         }
@@ -618,6 +627,7 @@ internal class TopBarController(
                 val index = groups().indexOfFirst { it.id == groupId }
                 if (index >= 0) {
                     jumpTo(index)
+                    host.jumpToSelectedGroupAndProfile()
                     host.snackbar(R.string.jump_hint_selected)
                 } else jumpToFirstGroup()
             }

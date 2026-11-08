@@ -212,6 +212,19 @@ class ConfigurationFragment @JvmOverloads constructor(
         Logs.w("no MainActivity host found for overflow menu")
     }
 
+    /** First jump centers the selected group and then smoothly centers its selected card. */
+    internal fun jumpToSelectedGroupAndProfile() {
+        val selectedProxy = selectedItem?.id ?: DataStore.selectedProxy
+        val fragment = getCurrentGroupFragment()
+        if (fragment == null) return
+        fragment.view?.postDelayed({
+            val current = getCurrentGroupFragment() ?: return@postDelayed
+            val position = current.adapter?.configurationIdList?.indexOf(selectedProxy) ?: -1
+            val target = position.takeIf { it >= 0 } ?: 0
+            current.configurationListView.smoothScrollToPosition(target)
+        }, 500L)
+    }
+
     /** 滚到当前选中节点；不在可见范围内则滚到它，否则回顶部 */
     private fun scrollToSelectedProfile() {
         val fragment = getCurrentGroupFragment() ?: return

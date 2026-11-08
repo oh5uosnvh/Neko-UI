@@ -91,12 +91,17 @@ abstract class ThemedActivity : AppCompatActivity {
         themeResId = resId
     }
 
+    override fun onPostResume() {
+        super.onPostResume()
+        ThemeCrossFade.consumeAndFade(window.decorView as? ViewGroup ?: return)
+    }
+
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
 
         if (newConfig.uiMode != uiMode) {
             uiMode = newConfig.uiMode
-            ActivityCompat.recreate(this)
+            ThemeCrossFade.transition(this) { ActivityCompat.recreate(this) }
         }
     }
 
