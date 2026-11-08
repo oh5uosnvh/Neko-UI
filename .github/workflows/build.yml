@@ -142,16 +142,20 @@ jobs:
               'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.10.2-bin.zip',
               'distributionUrl=' + pathlib.Path(sys.argv[1]).as_uri()))
           PY
-          # The Kotlin Maven artifact can also redirect to an unavailable release
-          # URL. Seed its exact content-addressed cache entry, without changing
-          # dependency coordinates, versions, repositories or resolution rules.
-          compiler_cache="$HOME/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-compiler-embeddable/2.0.21/79346ed53db48b18312a472602eb5c057070c54d"
+          # Resolve only this exact module from a hash-verified local Maven
+          # directory: Gradle otherwise HEADs the failing remote even with a jar cache.
+          export NEKO_PINNED_MAVEN="$RUNNER_TEMP/pinned-maven"
+          compiler_cache="$NEKO_PINNED_MAVEN/org/jetbrains/kotlin/kotlin-compiler-embeddable/2.0.21"
           mkdir -p "$compiler_cache"
           curl -fLSs --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 180 \
             -H 'Accept: application/octet-stream' \
             https://api.github.com/repos/JetBrains/kotlin/releases/assets/587823233 \
             -o "$compiler_cache/kotlin-compiler-embeddable-2.0.21.jar"
           echo "9fa8cdd1de0dccffe154c997d423ec6b5f53cd6d9177e3a77a9b0de03fb1bc81  $compiler_cache/kotlin-compiler-embeddable-2.0.21.jar" | sha256sum -c -
+          curl -fLSs --retry 3 --max-time 60 \
+            https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/2.0.21/kotlin-compiler-embeddable-2.0.21.pom \
+            -o "$compiler_cache/kotlin-compiler-embeddable-2.0.21.pom"
+          echo "bd4656a46ec418252e5bc5e1c20eb2029fb2a8e0e3cc94eeddfac7e87c8cd5b6  $compiler_cache/kotlin-compiler-embeddable-2.0.21.pom" | sha256sum -c -
           ./gradlew --no-daemon app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.group.*'
           ./gradlew --no-daemon app:assemblePreviewRelease
           mkdir -p release
