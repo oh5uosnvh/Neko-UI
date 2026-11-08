@@ -10,14 +10,17 @@
     <dimen name="profile_card_corner_radius">24dp</dimen>
     <dimen name="profile_card_selected_bar_width">5dp</dimen>
     <dimen name="profile_card_elevation_classic">2dp</dimen>
-    <!-- Fixed card geometry: title + traffic placeholder + address + status. -->
-    <dimen name="profile_card_height">156dp</dimen>
-    <dimen name="profile_card_height_without_address">124dp</dimen>
+    <!-- Fixed card geometry: title (up to two lines), address, status. -->
+    <dimen name="profile_card_height">112dp</dimen>
+    <dimen name="profile_card_height_without_address">88dp</dimen>
     <dimen name="profile_card_title_row_height">56dp</dimen>
-    <dimen name="profile_card_traffic_row_height">28dp</dimen>
-    <dimen name="profile_card_address_row_height">32dp</dimen>
-    <dimen name="profile_card_status_row_height">40dp</dimen>
+    <dimen name="profile_card_address_row_height">24dp</dimen>
+    <dimen name="profile_card_status_row_height">32dp</dimen>
     <dimen name="profile_card_action_width">48dp</dimen>
+    <dimen name="profile_card_actions_width">144dp</dimen>
+    <dimen name="profile_card_actions_width_minus_one">96dp</dimen>
+    <dimen name="profile_card_title_text_height">32dp</dimen>
+    <dimen name="profile_card_traffic_row_height">24dp</dimen>
 
     <dimen name="input_corner_radius">12dp</dimen>
     <!-- 分组卡片左滑展开的「删除」按钮 -->

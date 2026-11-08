@@ -1,5 +1,19 @@
 package io.nekohasekai.sagernet.bg.proto
 
+internal fun applyTrafficDelta(
+    item: TrafficUpdater.TrafficLooperData,
+    rx: Long,
+    tx: Long,
+    profileStatisticsEnabled: Boolean,
+) {
+    item.rx += rx
+    item.tx += tx
+    if (profileStatisticsEnabled) {
+        item.profileRx += rx
+        item.profileTx += tx
+    }
+}
+
 class TrafficUpdater(
     private val box: libcore.BoxInstance,
     val items: List<TrafficLooperData>, // contain "bypass"
@@ -8,8 +22,12 @@ class TrafficUpdater(
     class TrafficLooperData(
         // Don't associate proxyEntity
         var tag: String,
+        // rx/tx are live counters used by the speed display. Profile counters
+        // deliberately advance only while profile traffic statistics is enabled.
         var tx: Long = 0,
         var rx: Long = 0,
+        var profileTx: Long = tx,
+        var profileRx: Long = rx,
         var txBase: Long = 0,
         var rxBase: Long = 0,
         var txRate: Long = 0,
@@ -19,7 +37,7 @@ class TrafficUpdater(
         var hasTrafficDelta: Boolean = false,
     )
 
-    private fun updateOne(item: TrafficLooperData): TrafficLooperData {
+    private fun updateOne(item: TrafficLooperData, profileStatisticsEnabled: Boolean): TrafficLooperData {
         // last update
         val now = System.currentTimeMillis()
         val interval = now - item.lastUpdate
@@ -35,8 +53,7 @@ class TrafficUpdater(
         val rx = box.queryStats(item.tag, "downlink")
 
         // add diff
-        item.rx += rx
-        item.tx += tx
+        applyTrafficDelta(item, rx, tx, profileStatisticsEnabled)
         item.rxRate = rx * 1000 / interval
         item.txRate = tx * 1000 / interval
 
@@ -50,7 +67,7 @@ class TrafficUpdater(
         )
     }
 
-    fun updateAll() {
+    fun updateAll(profileStatisticsEnabled: Boolean = true) {
         val updated = mutableMapOf<String, TrafficLooperData>() // diffs
         items.forEach { item ->
             item.hasTrafficDelta = false
@@ -58,12 +75,11 @@ class TrafficUpdater(
             val diff = updated[item.tag]
             // query a tag only once
             if (diff == null) {
-                val newDiff = updateOne(item)
+                val newDiff = updateOne(item, profileStatisticsEnabled)
                 updated[item.tag] = newDiff
                 item.hasTrafficDelta = newDiff.rx != 0L || newDiff.tx != 0L
             } else {
-                item.rx += diff.rx
-                item.tx += diff.tx
+                applyTrafficDelta(item, diff.rx, diff.tx, profileStatisticsEnabled)
                 item.rxRate = diff.rxRate
                 item.txRate = diff.txRate
                 item.hasTrafficDelta = diff.rx != 0L || diff.tx != 0L

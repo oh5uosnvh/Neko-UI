@@ -213,6 +213,7 @@
             android:configChanges="uiMode" />
         <activity
             android:name="io.nekohasekai.sagernet.ui.GroupSettingsActivity"
+            android:launchMode="singleTask"
             android:configChanges="uiMode" />
         <activity
             android:name="io.nekohasekai.sagernet.ui.RouteSettingsActivity"

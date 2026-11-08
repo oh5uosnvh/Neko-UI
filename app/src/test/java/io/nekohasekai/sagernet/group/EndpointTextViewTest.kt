@@ -4,6 +4,7 @@ import android.app.Application
 import android.graphics.Color
 import android.view.ContextThemeWrapper
 import android.view.View
+import android.widget.FrameLayout
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.widget.EndpointTextView
 import org.junit.Assert.*
@@ -49,5 +50,47 @@ class EndpointTextViewTest {
         val v = view(120)
         val fitted = v.fitForWidth("very-long-host.example.test:443,8443", 120)
         assertTrue("fitted=$fitted", fitted.endsWith(":443,8443"))
+    }
+
+    @Test fun actualLayoutWidthChangeRefitsFromOriginalEndpoint() {
+        val context = ContextThemeWrapper(
+            org.robolectric.RuntimeEnvironment.getApplication(), R.style.Theme_SagerNet
+        )
+        val v = EndpointTextView(context).apply {
+            textSize = 14f
+            text = "nitinlinitinitingyinhjng.com:443"
+        }
+        val parent = FrameLayout(context)
+        parent.addView(v, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, 40
+        ))
+        parent.measure(
+            View.MeasureSpec.makeMeasureSpec(320, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(40, View.MeasureSpec.EXACTLY)
+        )
+        parent.layout(0, 0, 320, 40)
+        assertEquals("nitinlinitinitingyinhjng.com:443", v.text.toString())
+
+        // Simulates a RecyclerView column change/rebind where the first measure
+        // was wider than the final laid-out child.
+        parent.measure(
+            View.MeasureSpec.makeMeasureSpec(120, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(40, View.MeasureSpec.EXACTLY)
+        )
+        parent.layout(0, 0, 120, 40)
+        assertTrue("text=${v.text}", v.text.toString().contains("…"))
+        assertFalse("text=${v.text}", v.text.toString().endsWith(":4"))
+        assertTrue("text=${v.text} width=${v.width} measured=${v.measuredWidth}", v.text.toString().contains("…"))
+    }
+
+    @Test fun rebindingShortEndpointRestoresFullSourceAfterTruncatedEndpoint() {
+        val v = view(120)
+        v.text = "very-long-host.example.test:321"
+        v.layout(0, 0, 120, 40)
+        assertTrue(v.text.toString().endsWith(":321"))
+
+        v.text = "short.example:8443"
+        v.layout(0, 0, 120, 40)
+        assertEquals("short.example:8443", v.text.toString())
     }
 }

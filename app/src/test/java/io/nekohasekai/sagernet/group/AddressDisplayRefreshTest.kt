@@ -50,6 +50,8 @@ class AddressDisplayRefreshTest {
         val block=source.substringAfter("private fun refreshAddressDisplayPreferences()").substringBefore("inner class GroupPagerAdapter")
         assertTrue(block.contains("childFragmentManager.fragments"))
         assertTrue(block.contains("refreshAddressDisplay()"))
+        assertTrue(block.contains("key == Key.PROFILE_TRAFFIC_STATISTICS"))
+        assertTrue(block.contains("lastAppliedTrafficStatistics != DataStore.profileTrafficStatistics"))
         assertFalse(block.contains("reloadProfiles()"))
         assertTrue(source.contains("ProfileDisplayRefresh.apply(configurationListView, currentAdapter)"))
     }

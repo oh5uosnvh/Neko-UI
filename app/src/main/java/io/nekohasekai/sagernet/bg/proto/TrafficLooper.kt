@@ -52,8 +52,8 @@ class TrafficLooper
             data.proxy?.config?.trafficMap?.forEach { (_, ents) ->
                 for (ent in ents) {
                     val item = idMap[ent.id] ?: return@forEach
-                    ent.rx = item.rx
-                    ent.tx = item.tx
+                    ent.rx = item.profileRx
+                    ent.tx = item.profileTx
                     ProfileManager.updateTraffic(ent.id, ent.rx, ent.tx)
                     traffic[ent.id] = TrafficData(
                         id = ent.id,
@@ -95,8 +95,8 @@ class TrafficLooper
             // post traffic when switch
             if (DataStore.profileTrafficStatistics) {
                 data.proxy?.config?.trafficMap?.get(tag)?.firstOrNull()?.let {
-                    it.rx = rx
-                    it.tx = tx
+                    it.rx = profileRx
+                    it.tx = profileTx
                     ProfileManager.updateTraffic(it.id, it.rx, it.tx)
                 }
             }
@@ -114,11 +114,11 @@ class TrafficLooper
         if (targetIds.isEmpty()) return
 
         withStateLock {
-            trafficUpdater?.updateAll()
+            trafficUpdater?.updateAll(DataStore.profileTrafficStatistics)
             val changed = linkedMapOf<Long, TrafficData>()
             idMap.forEach { (id, item) ->
                 if (id > 0L && id !in targetIds && item.hasTrafficDelta) {
-                    changed[id] = TrafficData(id = id, rx = item.rx, tx = item.tx)
+                    changed[id] = TrafficData(id = id, rx = item.profileRx, tx = item.profileTx)
                 }
             }
 
@@ -136,6 +136,8 @@ class TrafficLooper
                     rx = 0L
                     txBase = 0L
                     rxBase = 0L
+                    profileTx = 0L
+                    profileRx = 0L
                     txRate = 0L
                     rxRate = 0L
                     hasTrafficDelta = false
@@ -159,7 +161,6 @@ class TrafficLooper
     private suspend fun loop() {
         val delayMs = DataStore.speedInterval.toLong()
         val showDirectSpeed = DataStore.showDirectSpeed
-        val profileTrafficStatistics = DataStore.profileTrafficStatistics
         if (delayMs == 0L) return
 
         // for display
@@ -205,7 +206,10 @@ class TrafficLooper
                     proxy.box.setV2rayStats(tags.joinToString("\n"))
                 }
 
-                trafficUpdater!!.updateAll()
+                // Read the preference for every tick: speed remains live while
+                // disabled, but its bytes are not added to profile counters.
+                val profileTrafficStatistics = DataStore.profileTrafficStatistics
+                trafficUpdater!!.updateAll(profileTrafficStatistics)
                 currentCoroutineContext().ensureActive()
 
                 // add all non-bypass to "main"
@@ -226,7 +230,7 @@ class TrafficLooper
                 if (profileTrafficStatistics) {
                     idMap.forEach { (id, item) ->
                         if (id > 0L && item.hasTrafficDelta) {
-                            trafficUpdates.add(TrafficData(id = id, rx = item.rx, tx = item.tx))
+                            trafficUpdates.add(TrafficData(id = id, rx = item.profileRx, tx = item.profileTx))
                         }
                     }
                 }
