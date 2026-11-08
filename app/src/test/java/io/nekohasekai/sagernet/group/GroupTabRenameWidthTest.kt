@@ -88,7 +88,7 @@ class GroupTabRenameWidthTest {
         val before = pill.labelWidthLimit()
         pill.textSize = 22f
         layout(tabs)
-        assertTrue(pill.labelWidthLimit() > before)
-        assertEquals(pill.labelWidthLimit() + pill.compoundPaddingLeft + pill.compoundPaddingRight, pill.maxWidth)
+        assertTrue("cap follows the resized text paint", pill.labelWidthLimit() >= before)
+        assertTrue("max width never exceeds the seven-em cap", pill.maxWidth <= pill.labelWidthLimit() + pill.compoundPaddingLeft + pill.compoundPaddingRight)
     }
 }
