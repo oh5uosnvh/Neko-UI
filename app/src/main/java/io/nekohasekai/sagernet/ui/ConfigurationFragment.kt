@@ -406,6 +406,20 @@ class ConfigurationFragment @JvmOverloads constructor(
         schedulePageRequest()
     }
 
+    /** Cancel an outgoing click before adapter positions change; its centre ObjectAnimator
+     * otherwise outlives the short viewport restore and can select a stale page index. */
+    private fun resetGroupPageTransition() {
+        pageTransition?.let { groupPager.unregisterOnPageChangeCallback(it); it.close() }
+        pageTransition = GroupPageTransition(groupPager, tabLayout,
+            ids = { adapter.groupList.map { group -> group.id } },
+            onSettled = { position -> updateSelectedCallback.onPageSelected(position) },
+            isReady = {
+                val child = getCurrentGroupFragment()
+                child?.view != null && child.adapter?.hasCurrentSearchResult() == true
+            },
+        ).also { groupPager.registerOnPageChangeCallback(it) }
+    }
+
     private fun schedulePageRequest() {
         if (pageRequestPosted || viewLifecycleOwnerLiveData.value == null) return
         pageRequestPosted = true
@@ -629,14 +643,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 if (!isRestoringGroup && tab.position != groupPager.currentItem) requestGroupPage(tab.position)
             }
         }.also { tabLayout.addOnTabSelectedListener(it) }
-        pageTransition = GroupPageTransition(groupPager, tabLayout,
-            ids = { adapter.groupList.map { group -> group.id } },
-            onSettled = { position -> updateSelectedCallback.onPageSelected(position) },
-            isReady = {
-                val child = getCurrentGroupFragment()
-                child?.view != null && child.adapter?.hasCurrentSearchResult() == true
-            },
-        ).also { groupPager.registerOnPageChangeCallback(it) }
+        resetGroupPageTransition()
 
         toolbar.setOnClickListener {
             val fragment = getCurrentGroupFragment()
@@ -714,6 +721,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         pageTabListener?.let { tabLayout.removeOnTabSelectedListener(it) }
         pageTabListener = null
         if (::groupPager.isInitialized) groupPager.unregisterOnPageChangeCallback(updateSelectedCallback)
+        if (::adapter.isInitialized) adapter.tabMutation.cancel()
         groupTabsMediator?.detach()
         groupTabsMediator = null
         tabLongPressBindings.values.mapNotNull { it.get() }.forEach { it.unbind() }
@@ -1856,6 +1864,10 @@ class ConfigurationFragment @JvmOverloads constructor(
         if (overflow > 0) popup.update(anchor, -overflow, dp(4), -1, -1)
     }
 
+    private data class DeletedGroupSnapshot(
+        val ids: List<Long>, val tabs: GroupTabMutation.Snapshot,
+    )
+
     fun deleteGroupWithUndo(group: ProxyGroup) {
         val owner = viewLifecycleOwnerLiveData.value ?: return
         if (!isAdded || !::adapter.isInitialized || !deletingGroupIds.add(group.id)) return
@@ -1867,24 +1879,19 @@ class ConfigurationFragment @JvmOverloads constructor(
                     val snapshot = onMainDispatcher {
                         if (!isAdded || viewLifecycleOwnerLiveData.value !== owner) return@onMainDispatcher null
                         val ids = adapter.groupList.map { it.id }
-                        Triple(ids, DataStore.selectedGroup, ids.indexOf(group.id))
+                        // The visible page is authoritative; persisted selection may still
+                        // be queued by GroupSelectionWriter. Long-press need not select 10.
+                        DeletedGroupSnapshot(ids, adapter.tabMutation.capture())
                     } ?: return@withLock
-                    if (snapshot.third < 0 || SagerDatabase.groupDao.getById(group.id) == null) return@withLock
-                    val wasCurrent = snapshot.second == group.id
+                    if (group.id !in snapshot.ids || SagerDatabase.groupDao.getById(group.id) == null) return@withLock
                     val profiles = SagerDatabase.proxyDao.getByGroup(group.id)
-                    val nextId = GroupTabPolicy.afterRemoval(snapshot.first, group.id, snapshot.second)
-                    // Protect selection against TabLayoutMediator's temporary
-                    // first-tab selection during the structural update.
-                    onMainDispatcher {
-                        if (nextId != null) DataStore.selectedGroup = nextId
-                    }
                     GroupManager.deleteGroup(group.id)
                     onMainDispatcher {
                         if (!isAdded || viewLifecycleOwnerLiveData.value !== owner) return@onMainDispatcher
                         snackbar(getString(R.string.group_deleted_undo, group.displayName())).apply {
                             setAction(R.string.undo) {
                                 runOnDefaultDispatcher {
-                                    restoreGroup(group, profiles, wasCurrent, snapshot.third)
+                                    restoreGroup(group, profiles, snapshot, owner)
                                 }
                             }
                             duration = Snackbar.LENGTH_LONG
@@ -1910,22 +1917,26 @@ class ConfigurationFragment @JvmOverloads constructor(
      *  022 修复「还原被丢到末尾」：groupAdd 永远加在尾部——改为 restoreGroupAt
      *  按删除前记录的位置原位插回（对齐节点卡片撤销的原位语义）。 */
     private suspend fun restoreGroup(
-        group: ProxyGroup, profiles: List<ProxyEntity>, wasCurrent: Boolean, position: Int,
+        group: ProxyGroup, profiles: List<ProxyEntity>, snapshot: DeletedGroupSnapshot,
+        owner: androidx.lifecycle.LifecycleOwner,
     ) {
-        runCatching {
-            SagerDatabase.instance.runInTransaction {
-                SagerDatabase.groupDao.createGroup(group)
-                if (profiles.isNotEmpty()) SagerDatabase.proxyDao.insert(profiles)
+        try {
+            groupDeleteAccess.withLock {
+                SagerDatabase.instance.runInTransaction {
+                    SagerDatabase.groupDao.createGroup(group)
+                    if (profiles.isNotEmpty()) SagerDatabase.proxyDao.insert(profiles)
+                }
+                onMainDispatcher {
+                    // A Snackbar from the old view must never mutate a replacement pager.
+                    if (!isAdded || viewLifecycleOwnerLiveData.value !== owner) return@onMainDispatcher
+                    adapter.restoreGroupAt(group, snapshot.ids, snapshot.tabs)
+                }
+                GroupManager.postReload(group.id)
             }
-            if (wasCurrent) {
-                DataStore.selectedGroup = group.id
-            }
-            onMainDispatcher {
-                adapter.restoreGroupAt(group, position)
-            }
-            GroupManager.postReload(group.id)
-        }.onFailure {
-            Logs.w(it)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Logs.w(e)
         }
     }
 
@@ -2125,7 +2136,27 @@ class ConfigurationFragment @JvmOverloads constructor(
             tabLayout.smoothScrollTo(target, 0)
         }
 
-        private var removalGeneration = 0L
+        internal val tabMutation = GroupTabMutation(
+            tabLayout, groupPager,
+            ids = { groupList.map { it.id } },
+            isAlive = { viewLifecycleOwnerLiveData.value != null && isCurrentGroupPagerAdapter(this@GroupPagerAdapter) },
+            blockSelection = { blocked ->
+                isRestoringGroup = blocked
+                if (blocked) {
+                    pageRequests.clear()
+                    resetGroupPageTransition()
+                }
+            },
+            selectId = { id, position ->
+                selectedGroupIndex = position
+                if (!select && selectedGroupUi != id) {
+                    selectedGroupUi = id
+                    DataStore.stageSelectedGroup(id)
+                    groupSelectionWriter.submit(id)
+                }
+            },
+            onFinished = { schedulePageRequest() },
+        )
 
         override suspend fun groupRemoved(groupId: Long) {
             onMainDispatcher {
@@ -2133,51 +2164,25 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val ids = groupList.map { it.id }
                 val index = ids.indexOf(groupId)
                 if (index < 0) return@onMainDispatcher
-                val keepId = GroupTabPolicy.afterRemoval(ids, groupId, DataStore.selectedGroup)
-                val scrollX = tabLayout.scrollX
-                val generation = ++removalGeneration
-                isRestoringGroup = true
-                if (keepId != null) DataStore.selectedGroup = keepId
-                groupList.removeAt(index)
-                groupFragments.remove(groupId)
-                notifyItemRemoved(index)
-                val nextIndex = groupList.indexOfFirst { it.id == keepId }
-                if (nextIndex >= 0) {
-                    selectedGroupIndex = nextIndex
-                    groupPager.setCurrentItem(nextIndex, false)
-                }
-                // Mediator and ViewPager both post work during item removal.
-                // Finish selection after they settle, guarded against newer deletes.
-                tabLayout.post {
-                    if (generation != removalGeneration || viewLifecycleOwnerLiveData.value == null ||
-                        !isCurrentGroupPagerAdapter(this@GroupPagerAdapter)) return@post
-                    val currentIndex = groupList.indexOfFirst { it.id == DataStore.selectedGroup }
-                    if (currentIndex >= 0) {
-                        groupPager.setCurrentItem(currentIndex, false)
-                        tabLayout.setScrollPosition(currentIndex, 0f, true)
-                        // Preserve the strip's pre-delete viewport, but animate the
-                        // correction so removal never flashes back to tab zero.
-                        tabLayout.smoothScrollTo(scrollX, 0)
-                    }
-                    tabLayout.post {
-                        if (generation == removalGeneration && isCurrentGroupPagerAdapter(this@GroupPagerAdapter)) {
-                            isRestoringGroup = false
-                            schedulePageRequest()
-                        }
-                    }
+                val snapshot = tabMutation.capture()
+                val keepId = GroupTabPolicy.afterRemoval(ids, groupId, snapshot.selectedId ?: 0L)
+                tabMutation.change(snapshot.copy(selectedId = keepId)) {
+                    groupList.removeAt(index)
+                    groupFragments.remove(groupId)
+                    notifyItemRemoved(index)
                 }
             }
         }
 
-        /** 022: 分组删除还原 —— 按删除前的位置原位插回（groupAdd 只会加到尾部）。 */
-        fun restoreGroupAt(group: ProxyGroup, index: Int) {
-            if (groupList.any { it.id == group.id }) return
-            tabLayout.post {
-                val at = index.coerceIn(0, groupList.size)
+        /** Undo keeps the original selection (not necessarily this group) and viewport. */
+        internal fun restoreGroupAt(group: ProxyGroup, before: List<Long>, snapshot: GroupTabMutation.Snapshot) {
+            if (viewLifecycleOwnerLiveData.value == null || !isCurrentGroupPagerAdapter(this@GroupPagerAdapter) ||
+                groupList.any { it.id == group.id }) return
+            val at = GroupTabMutation.insertionIndex(before, group.id, groupList.map { it.id })
+            tabMutation.change(snapshot) {
                 groupList.add(at, group)
                 notifyItemInserted(at)
                 if (groupList.any { !it.ungrouped }) tabLayout.visibility = View.VISIBLE
-                tabLayout.getTabAt(at)?.select()
             }
         }
 
