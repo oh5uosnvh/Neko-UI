@@ -814,8 +814,12 @@ class ConfigurationFragment @JvmOverloads constructor(
         return super.onKeyDown(ketCode, event)
     }
 
+    @Volatile
+    private var openingFilePicker = false
+
     private val importFile =
         registerForActivityResult(ActivityResultContracts.GetContent()) { file ->
+            openingFilePicker = false
             if (file != null) runOnDefaultDispatcher {
                 try {
                     val fileName =
@@ -993,6 +997,8 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             R.id.action_import_file -> {
+                if (openingFilePicker) return true
+                openingFilePicker = true
                 startFilesForResult(importFile, "*/*")
             }
 
@@ -1288,7 +1294,10 @@ class ConfigurationFragment @JvmOverloads constructor(
                 return true
             }
         }
-        return false
+        // The popup invokes this same handler after its animated dismissal.
+        // Consume every known action here; returning false lets AppCompat
+        // dispatch the toolbar item a second time (notably file/new-group).
+        return true
     }
 
     private var latencyOverlay: LatencyTestOverlay? = null
@@ -3469,7 +3478,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 // Traffic is inline with the title and is never a structural row.
                 // The setting controls visibility; zero values remain visible.
                 val showTraffic = !twoColumn && DataStore.profileTrafficStatistics
-                trafficText.translationY = if (showTraffic) 1f * resources.displayMetrics.density else 0f
+                trafficText.translationY = if (showTraffic) 2f * resources.displayMetrics.density else 0f
                 // Single-column statistics occupy title line two, never an additional row.
                 // The title always has two physical lines. Traffic is right-aligned
                 // inside line two and must not reduce the name to one line.
