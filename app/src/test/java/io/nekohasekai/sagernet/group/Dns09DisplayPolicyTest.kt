@@ -6,9 +6,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class Dns09DisplayPolicyTest {
-    @Test fun oneAndTwoColumnCardsUseTheSameProtocolText() {
-        for (full in listOf("WireGuard", "ShadowTLS", "Hysteria1", "Hysteria2", "Shadowsocks", "ShadowsocksR", "AnyTLS")) {
+    @Test fun onlySsAndSsrAreAbbreviatedInTwoColumnCards() {
+        for (full in listOf("WireGuard", "ShadowTLS", "Hysteria1", "Hysteria2", "AnyTLS", "Shadowsocks-plugin")) {
             assertEquals(full, TwoColumnProtocolLabel.display(full, true))
+            assertEquals(full, TwoColumnProtocolLabel.display(full, false))
+        }
+        for (full in listOf("Shadowsocks", "shadowsocks", "SHADOWSOCKS")) {
+            assertEquals("SS", TwoColumnProtocolLabel.display(full, true))
+            assertEquals(full, TwoColumnProtocolLabel.display(full, false))
+        }
+        for (full in listOf("ShadowsocksR", "shadowsocksR", "SHADOWSOCKSR")) {
+            assertEquals("SSR", TwoColumnProtocolLabel.display(full, true))
             assertEquals(full, TwoColumnProtocolLabel.display(full, false))
         }
     }

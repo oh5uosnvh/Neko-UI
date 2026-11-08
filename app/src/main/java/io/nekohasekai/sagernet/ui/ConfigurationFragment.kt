@@ -3472,7 +3472,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                 // Keep a stable card row in both layouts; single-line names occupy the
                 // second line as reserved space and long names ellipsize there.
                 profileName.minLines = 2
-                profileType.text = io.nekohasekai.sagernet.widget.TwoColumnProtocolLabel.display(proxyEntity.displayType(), twoColumn)
+                val fullProtocol = proxyEntity.displayType()
+                profileType.text = io.nekohasekai.sagernet.widget.TwoColumnProtocolLabel.display(fullProtocol, twoColumn)
+                profileType.contentDescription = fullProtocol
                 profileType.setTextColor(requireContext().getProtocolColor(proxyEntity.type))
 
                 val rx = proxyEntity.rx

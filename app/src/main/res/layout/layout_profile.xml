@@ -148,7 +148,7 @@
                 <io.nekohasekai.sagernet.widget.EndpointTextView
                     android:id="@+id/profile_address"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
+                    android:layout_height="match_parent"
                     android:minLines="1"
                     android:maxLines="1"
                     android:singleLine="true"

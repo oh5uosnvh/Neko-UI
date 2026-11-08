@@ -1,113 +1,141 @@
 package io.nekohasekai.sagernet.widget
 
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Rect
+import android.os.Build
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextDirectionHeuristics
+import android.text.TextPaint
 import android.util.AttributeSet
+import android.view.Gravity
 import androidx.appcompat.widget.AppCompatTextView
+import kotlin.math.ceil
 
-/** One-line endpoint label that truncates the host before the port suffix. */
+/**
+ * Read-only endpoint label. Text remains the full source (including accessibility),
+ * while onDraw fits only the host against the FINAL content width.
+ *
+ * Do not replace TextView.text during measure/layout: same-size RecyclerView binds
+ * can skip both callbacks, and replacing text makes the framework layout stale.
+ */
 class EndpointTextView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null,
     defStyleAttr: Int = android.R.attr.textViewStyle,
 ) : AppCompatTextView(context, attrs, defStyleAttr) {
-    private var sourceText = ""
-    private var applying = false
+    private var cachedKey: List<Any?>? = null
+    private var fittedLayout: StaticLayout? = null
+    private var drawingScale = 1f
+    private var leftInkInset = 0f
+    private var horizontalExtent = 0f
+    private var verticalExtent = 0f
+    private var topInkInset = 0f
+    private val inkBounds = Rect()
+    internal var renderedX = 0f
+        private set
+    internal var renderedY = 0f
+        private set
+    internal var renderedVerticalScale = 1f
+        private set
 
     init {
         isSingleLine = true
-        // Never let TextView ellipsize the complete endpoint after the host-only
-        // formatter has preserved the port suffix.
+        setHorizontallyScrolling(false)
         ellipsize = null
+        textDirection = TEXT_DIRECTION_LTR
     }
 
-    override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) {
-        if (!applying) sourceText = text?.toString().orEmpty()
-        super.onTextChanged(text, start, before, count)
-    }
+    internal fun fitForWidth(value: String, width: Int): String =
+        EndpointLabelFormatter.fit(value, width.toFloat()) { Layout.getDesiredWidth(it, paint) }
 
-    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        // Let TextView resolve the parent's real width first. In a RecyclerView
-        // the first pass can use a provisional column width; fitting against a
-        // desired width here is what used to leave only ":4"/":321" after the
-        // later layout pass clipped the stale result.
-        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-        if (sourceText.isEmpty() || applying) return
-
-        val measuredWidthBeforeFit = measuredWidth
-        val measuredHeightBeforeFit = measuredHeight
-        if (refit(measuredWidthBeforeFit)) {
-            // Keep the dimensions selected by the parent. A shorter fitted
-            // string must not make an AT_MOST/wrap-content item narrower, or a
-            // second RecyclerView pass will feed a different width back here.
-            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-            setMeasuredDimension(measuredWidthBeforeFit, measuredHeightBeforeFit)
+    override fun onDraw(canvas: Canvas) {
+        val available = width - compoundPaddingLeft - compoundPaddingRight
+        if (available <= 0 || text.isNullOrEmpty()) {
+            cachedKey = null
+            fittedLayout = null
+            return
+        }
+        // Preserve the source but normalize controls in this one-line label.
+        val rawSource = text.toString()
+        val source = if (rawSource.any { it.isISOControl() || it == '\u2028' || it == '\u2029' }) {
+            rawSource.map { if (it.isISOControl() || it == '\u2028' || it == '\u2029') ' ' else it }.joinToString("")
+        } else rawSource
+        // Use the live Paint for cache comparison; allocate a snapshot only on
+        // misses. TextPaint.set() also copies TextPaint-specific properties.
+        val live = paint
+        val key = listOf(source, available, live.textSize, live.textScaleX,
+            live.textSkewX, live.typeface, live.flags, live.letterSpacing,
+            live.fontFeatureSettings, live.textLocale, includeFontPadding,
+            live.isElegantTextHeight, live.hinting,
+            if (Build.VERSION.SDK_INT >= 24) live.textLocales else null,
+            if (Build.VERSION.SDK_INT >= 26) live.fontVariationSettings else null)
+        if (key != cachedKey) {
+            val metrics = TextPaint().apply { set(live) }
+            val budget = (available - 1).coerceAtLeast(1).toFloat()
+            val display = EndpointLabelFormatter.fit(source, budget) { value ->
+                metrics.getTextBounds(value, 0, value.length, inkBounds)
+                maxOf(Layout.getDesiredWidth(value, metrics), inkBounds.right.toFloat()) -
+                    minOf(0, inkBounds.left)
+            }
+            val naturalWidth = ceil(Layout.getDesiredWidth(display, metrics).toDouble())
+                .toInt().coerceAtLeast(1)
+            metrics.getTextBounds(display, 0, display.length, inkBounds)
+            leftInkInset = -minOf(0, inkBounds.left).toFloat()
+            horizontalExtent = maxOf(naturalWidth.toFloat(), inkBounds.right.toFloat()) + leftInkInset
+            drawingScale = minOf(1f, budget / horizontalExtent)
+            // Only pathological port lists wider than the ENTIRE row use the
+            // port-only scale fallback. Normal endpoints keep the configured font.
+            fittedLayout = if (Build.VERSION.SDK_INT >= 23) {
+                StaticLayout.Builder.obtain(display, 0, display.length, metrics, naturalWidth)
+                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                    .setTextDirection(TextDirectionHeuristics.LTR)
+                    .setIncludePad(includeFontPadding)
+                    .build()
+            } else {
+                @Suppress("DEPRECATION")
+                StaticLayout(display, metrics, naturalWidth, Layout.Alignment.ALIGN_NORMAL,
+                    1f, 0f, includeFontPadding)
+            }
+            val label = requireNotNull(fittedLayout)
+            val baseline = label.getLineBaseline(0)
+            topInkInset = -minOf(0, baseline + inkBounds.top).toFloat()
+            verticalExtent = maxOf(label.height, baseline + inkBounds.bottom).toFloat() + topInkInset
+            cachedKey = key
+        }
+        val label = fittedLayout ?: return
+        label.paint.color = currentTextColor
+        label.paint.drawableState = drawableState
+        // The parent address row is intentionally 24dp. Cap the exceptional
+        // large-font rendering to this real row height rather than let its
+        // ancestors clip the top/bottom of the port glyphs.
+        val parentHeight = (parent as? android.view.View)?.height?.takeIf { it > 0 } ?: height
+        val contentHeight = (minOf(height, parentHeight) - compoundPaddingTop - compoundPaddingBottom).coerceAtLeast(0)
+        if (contentHeight == 0) return
+        val verticalScale = minOf(1f, (contentHeight - 1).coerceAtLeast(1) / verticalExtent)
+        val drawnHeight = verticalExtent * verticalScale
+        val top = when (gravity and Gravity.VERTICAL_GRAVITY_MASK) {
+            Gravity.CENTER_VERTICAL -> compoundPaddingTop + (contentHeight - drawnHeight).coerceAtLeast(0f) / 2f
+            Gravity.BOTTOM -> compoundPaddingTop + (contentHeight - drawnHeight).coerceAtLeast(0f)
+            else -> compoundPaddingTop.toFloat()
+        }
+        renderedX = compoundPaddingLeft + leftInkInset * drawingScale
+        renderedY = top + topInkInset * verticalScale
+        renderedVerticalScale = verticalScale
+        val checkpoint = canvas.save()
+        try {
+            canvas.clipRect(compoundPaddingLeft, compoundPaddingTop,
+                width - compoundPaddingRight, compoundPaddingTop + contentHeight)
+            canvas.translate(compoundPaddingLeft.toFloat(), top)
+            canvas.scale(drawingScale, verticalScale)
+            canvas.translate(leftInkInset, topInkInset)
+            label.draw(canvas)
+        } finally {
+            canvas.restoreToCount(checkpoint)
         }
     }
 
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-        if (w != oldw && sourceText.isNotEmpty() && !applying) refit(w)
-    }
-
-    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
-        // onSizeChanged is normally enough, but onLayout is the authoritative
-        // point for a RecyclerView child after margins/decorations have been
-        // applied. Fit before TextView builds its layout for this final width.
-        if (sourceText.isNotEmpty() && !applying) refit(right - left)
-        super.onLayout(changed, left, top, right, bottom)
-    }
-
-    /** Rebuild the display value from the unmodified endpoint for this width. */
-    private fun refit(viewWidth: Int): Boolean {
-        val available = (viewWidth - paddingLeft - paddingRight).coerceAtLeast(0)
-        val display = fitEndpoint(sourceText, available)
-        if (display == text?.toString()) return false
-        applying = true
-        super.setText(display, BufferType.NORMAL)
-        applying = false
-        return true
-    }
-
-    internal fun fitForWidth(value: String, width: Int): String = fitEndpoint(value, width)
-
-    private fun fitEndpoint(value: String, width: Int): String {
-        // Use a resolved, independent Paint. During an early RecyclerView
-        // measure Robolectric/AppCompat can expose a paint whose measureText()
-        // returns a tiny placeholder width (e.g. 32px for a long endpoint),
-        // which incorrectly bypasses host fitting and later clips the port.
-        val metrics = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = this@EndpointTextView.textSize.takeIf { it > 0f }
-                ?: 14f * resources.displayMetrics.scaledDensity
-            typeface = this@EndpointTextView.typeface
-            textScaleX = this@EndpointTextView.textScaleX
-        }
-        fun measure(text: String): Float {
-            val measured = metrics.measureText(text)
-            // A pre-layout font backend can return a placeholder width for a
-            // long string. Keep a conservative glyph-width floor so the host
-            // is fitted instead of letting the platform clip the port later.
-            val floor = text.codePointCount(0, text.length) * metrics.textSize * 0.45f
-            return maxOf(measured, floor)
-        }
-        if (width <= 0 || measure(value) <= width) return value
-        // displayAddress() already brackets IPv6 hosts. Keep the complete port
-        // suffix, including protocol-specific multi-port values such as
-        // `:443,8443`; only the host may be shortened.
-        val match = Regex("^(.*):(\\d+(?:,\\d+)*)$").matchEntire(value)
-        val suffix = match?.groupValues?.get(2)?.let { ":$it" } ?: ""
-        val host = match?.groupValues?.get(1) ?: value
-        val ending = if (suffix.isEmpty()) "…" else "…$suffix"
-        if (measure(ending) > width) return suffix.ifEmpty { ending }
-        var low = 0
-        var high = host.length
-        var best = ending
-        while (low <= high) {
-            val mid = (low + high) ushr 1
-            val candidate = host.substring(0, mid) + ending
-            if (measure(candidate) <= width) {
-                best = candidate
-                low = mid + 1
-            } else high = mid - 1
-        }
-        return best
-    }
+    /** Actual last rendered layout, for pixel-boundary regression assertions. */
+    internal val renderedLayout: Layout? get() = fittedLayout
+    internal val renderedScale: Float get() = drawingScale
 }
