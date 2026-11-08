@@ -194,11 +194,16 @@ class SagerNet : Application(),
 
         // Only an explicit user start can reopen a user-stopped session. Tag the
         // request now so a start queued before notification Stop cannot reopen it.
-        fun startService() = ContextCompat.startForegroundService(
-            application, ServiceStartPolicy.tag(
-                Intent(application, SagerConnection.serviceClass), ServiceStartPolicy.USER
+        fun startService(epoch: Long = ServiceStartPolicy.fence.snapshot()) {
+            // Permission results must carry the click's epoch, not mint a new
+            // user start after a notification Stop invalidated that click.
+            if (!ServiceStartPolicy.fence.permitsUserStart(epoch)) return
+            ContextCompat.startForegroundService(
+                application, ServiceStartPolicy.tag(
+                    Intent(application, SagerConnection.serviceClass), ServiceStartPolicy.USER, epoch
+                )
             )
-        )
+        }
 
         fun startServiceAutomatically(cause: String) {
             val epoch = ServiceStartPolicy.fence.snapshot()

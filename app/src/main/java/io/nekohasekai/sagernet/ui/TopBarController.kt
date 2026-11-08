@@ -171,7 +171,66 @@ internal class TopBarController(
 
         buildRow(container, hidingToolbar)
         if (hidingToolbar) toolbar.visibility = View.GONE
-        Logs.d("TopBar: attached, hidingToolbar=$hidingToolbar controls=${order.size}")
+        android.util.Log.d("TopBar", "attached, hidingToolbar=$hidingToolbar controls=${order.size}")
+    }
+
+    /**
+     * Mount the same custom top-bar row used by the main configuration page on
+     * profile-selection pages.  The old select branch left AppCompat's Toolbar
+     * visible and only changed its menu icon; that bypassed the hidden-toolbar /
+     * title-ink layout contract and allowed a white vector to disappear in day
+     * mode.  Keep this deliberately small: select pages need only close, title,
+     * and group picker, but they must use the same appbar parent and inset path.
+     */
+    fun attachSelection(toolbar: Toolbar, titleRes: Int) {
+        detach()
+        this.toolbarRef = toolbar
+        iconColor = resolveForeground(toolbar)
+
+        toolbar.navigationIcon = null
+        toolbar.title = ""
+        toolbar.subtitle = ""
+
+        val container: ViewGroup = toolbar.parent as? ViewGroup ?: toolbar
+        val containerRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(6), 0, dp(6), 0)
+            layoutParams = if (container !== toolbar) {
+                ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, actionBarSizePx())
+            } else {
+                Toolbar.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT)
+            }
+        }
+        val close = iconView(R.drawable.ic_topbar_close, android.R.string.cancel).apply {
+            setOnClickListener { host.requireActivity().finish() }
+        }
+        val title = TextView(context).apply {
+            id = R.id.title_bar_title
+            text = context.getString(titleRes)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+            setSingleLine(true)
+            ellipsize = TextUtils.TruncateAt.END
+            gravity = Gravity.CENTER_VERTICAL
+            setTextColor(iconColor)
+        }
+        val group = iconView(R.drawable.ic_topbar_group, R.string.topbar_group_desc).apply {
+            setOnClickListener { showGroupPicker(this) }
+        }
+        containerRow.addView(close, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        containerRow.addView(title, LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        containerRow.addView(group, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        container.addView(containerRow)
+        row = containerRow
+        order.clear()
+        order.addAll(listOf(close, title, group))
+        toolbar.visibility = View.GONE
+        android.util.Log.d("TopBar", "attached selection row controls=${order.size}")
     }
 
     fun detach() {

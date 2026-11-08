@@ -51,16 +51,18 @@ class VpnRequestActivity : AppCompatActivity() {
 
     class StartService : ActivityResultContract<Void?, Boolean>() {
         private var cachedIntent: Intent? = null
+        private var requestEpoch: Long? = null
 
         override fun getSynchronousResult(
             context: Context,
             input: Void?,
         ): SynchronousResult<Boolean>? {
+            requestEpoch = io.nekohasekai.sagernet.bg.ServiceStartPolicy.fence.snapshot()
             if (DataStore.serviceMode == Key.MODE_VPN) VpnService.prepare(context)?.let { intent ->
                 cachedIntent = intent
                 return null
             }
-            SagerNet.startService()
+            requestEpoch?.let { SagerNet.startService(it) }
             return SynchronousResult(false)
         }
 
@@ -69,7 +71,8 @@ class VpnRequestActivity : AppCompatActivity() {
 
         override fun parseResult(resultCode: Int, intent: Intent?) =
             if (resultCode == Activity.RESULT_OK) {
-                SagerNet.startService()
+                requestEpoch?.let { SagerNet.startService(it) }
+                requestEpoch = null
                 false
             } else {
                 Logs.e("Failed to start VpnService: $intent")

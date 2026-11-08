@@ -91,6 +91,7 @@ class MainActivity : ThemedActivity(),
     private var controlErrorDetail: String? = null
     private var lastErrorDialog = ""
     private var latestToggleIntent = false
+    private val toggleStartRequest = ToggleStartRequest()
     private var vpnPermissionRequestInFlight = false
 
     /** Process background, not fragment navigation, owns latency-test minimization. */
@@ -170,11 +171,22 @@ class MainActivity : ThemedActivity(),
         // in the same order as the user's taps.
         binding.controlBar.onToggleIntent = { desiredConnected ->
             latestToggleIntent = desiredConnected
+            if (desiredConnected) toggleStartRequest.request(
+                io.nekohasekai.sagernet.bg.ServiceStartPolicy.fence.snapshot()
+            ) else toggleStartRequest.cancel()
             dispatchLatestToggleIntent()
         }
         binding.controlBar.onToggle = {
             // Kept for embedders/tests that use the legacy callback directly.
-            if (DataStore.serviceState.canStop) SagerNet.stopService() else connect.launch(null)
+            if (DataStore.serviceState.canStop) {
+                latestToggleIntent = false
+                toggleStartRequest.cancel()
+                SagerNet.stopService()
+            } else {
+                latestToggleIntent = true
+                toggleStartRequest.request(io.nekohasekai.sagernet.bg.ServiceStartPolicy.fence.snapshot())
+                dispatchLatestToggleIntent()
+            }
         }
         binding.controlBar.onTest = { testControlLatency() }
         binding.controlBar.onError = { showControlErrorSnackbar() }
@@ -804,9 +816,16 @@ class MainActivity : ThemedActivity(),
         msg: String? = null,
     ) {
         DataStore.serviceState = state
+        val currentEpoch = io.nekohasekai.sagernet.bg.ServiceStartPolicy.fence.snapshot()
+        if (state == BaseService.State.Connecting || state == BaseService.State.Connected) {
+            toggleStartRequest.acknowledgeStarted()
+        }
+        if (state == BaseService.State.Stopping || state == BaseService.State.Stopped) {
+            // Notification Stop changes the epoch. A previous successful ON tap
+            // is not permission to reopen the VPN after an external stop.
+            latestToggleIntent = toggleStartRequest.pending(currentEpoch)
+        }
         if (state == BaseService.State.Stopped && latestToggleIntent) {
-            // The OFF->ON tap made during Stopping is dispatched only after the
-            // service reaches its safe restart point.
             window.decorView.post { dispatchLatestToggleIntent() }
         }
         if (state == BaseService.State.Connecting) {
@@ -859,6 +878,10 @@ class MainActivity : ThemedActivity(),
         if (!::binding.isInitialized) return
         val state = DataStore.serviceState
         if (latestToggleIntent) {
+            if (!toggleStartRequest.pending(io.nekohasekai.sagernet.bg.ServiceStartPolicy.fence.snapshot())) {
+                latestToggleIntent = false
+                return
+            }
             // Wait for a previous stop to reach Stopped. Starting a new VPN
             // while the old runner is still stopping loses the user's ON tap.
             if (state == BaseService.State.Connecting ||
@@ -880,6 +903,8 @@ class MainActivity : ThemedActivity(),
     private val connect = registerForActivityResult(VpnRequestActivity.StartService()) { denied ->
         vpnPermissionRequestInFlight = false
         if (denied) {
+            latestToggleIntent = false
+            toggleStartRequest.cancel()
             binding.controlBar.changeState(DataStore.serviceState)
             syncMainControls() // Authoritative permission cancellation re-arms the capsule.
             snackbar(R.string.vpn_permission_denied).show()

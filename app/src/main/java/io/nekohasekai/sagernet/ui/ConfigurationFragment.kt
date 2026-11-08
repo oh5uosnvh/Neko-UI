@@ -581,21 +581,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
             })
         } else {
-            toolbar.setTitle(titleRes)
-            toolbar.menu.add(0, R.id.neko_picker_groups, 0, R.string.topbar_group_desc).apply {
-                setIcon(R.drawable.ic_topbar_group)
-                setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-            }
-            toolbar.setOnMenuItemClickListener { item ->
-                if (item.itemId == R.id.neko_picker_groups) {
-                    topBar.showGroupPicker(toolbar)
-                    true
-                } else false
-            }
-            toolbar.setNavigationIcon(R.drawable.ic_navigation_close)
-            toolbar.setNavigationOnClickListener {
-                requireActivity().finish()
-            }
+            topBar.attachSelection(toolbar, titleRes)
         }
 
 
