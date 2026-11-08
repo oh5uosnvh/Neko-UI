@@ -30,10 +30,11 @@ internal object StreamingProfileImport {
         db.runInTransaction {
             requireNotNull(db.groupDao().getById(groupId)) { "Import group no longer exists" }
             val buffer = ArrayList<AbstractBean>(BATCH_SIZE)
+            val session = ProfileBatchSession(db, groupId, source, fileName)
             fun flush() {
                 if (buffer.isEmpty()) return
                 ensureActive()
-                ProfileBatchStore.append(db, groupId, buffer, source, fileName)
+                session.append(buffer)
                 count += buffer.size
                 batches++
                 buffer.clear()
@@ -52,6 +53,7 @@ internal object StreamingProfileImport {
                 if (buffer.size == BATCH_SIZE) flush()
             }
             flush()
+            session.finish()
         }
         return Result(count, batches, peak)
     }
