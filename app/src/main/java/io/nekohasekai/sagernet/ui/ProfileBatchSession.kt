@@ -6,6 +6,7 @@ import io.nekohasekai.sagernet.ktx.applyDefaultValues
 import io.nekohasekai.sagernet.group.GroupDnsStore
 import io.nekohasekai.sagernet.group.ImportGroupName
 import io.nekohasekai.sagernet.group.NodeHostMapping
+import io.nekohasekai.sagernet.group.SubscriptionDns
 
 /**
  * A single transaction session for large imports. The old append() API remains
