@@ -14,9 +14,8 @@ download_asset() {
     # official asset API serves the SAME pinned blob. Hashes below remain gates.
     if ! curl -fLSs --connect-timeout 20 --max-time 120 --retry 2 --retry-delay 2 -o "$output" "$primary"; then
         echo "Release endpoint unavailable; trying official asset API for $output" >&2
-        curl -fLSs --connect-timeout 20 --max-time 120 --retry 3 --retry-delay 2 \
-            -H 'Accept: application/octet-stream' -o "$output" \
-            "https://api.github.com/repos/SagerNet/$repo/releases/assets/$asset_id"
+        python3 "$ROOT/buildScript/download-github-asset.py" \
+            "https://api.github.com/repos/SagerNet/$repo/releases/assets/$asset_id" "$output"
     fi
 }
 download_asset geoip.db "https://github.com/SagerNet/sing-geoip/releases/download/$VERSION_GEOIP/geoip.db" 511349217 sing-geoip

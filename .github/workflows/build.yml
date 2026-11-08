@@ -111,6 +111,7 @@ jobs:
           ALIAS_NAME: ${{ inputs.signed && secrets.ALIAS_NAME || '' }}
           ALIAS_PASS: ${{ inputs.signed && secrets.ALIAS_PASS || '' }}
           FORCE_HEV: '1'
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           trap 'rm -f release.keystore; rm -rf mg-sign' EXIT
@@ -130,10 +131,9 @@ jobs:
           ./run init action gradle
           # Bootstrap the exact wrapper distribution via the official asset API;
           # services.gradle.org redirects can fail while this endpoint works.
-          curl -fLSs --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 300 \
-            -H 'Accept: application/octet-stream' \
+          python3 buildScript/download-github-asset.py \
             https://api.github.com/repos/gradle/gradle-distributions/releases/assets/194456564 \
-            -o "$RUNNER_TEMP/gradle-8.10.2-bin.zip"
+            "$RUNNER_TEMP/gradle-8.10.2-bin.zip"
           echo "31c55713e40233a8303827ceb42ca48a47267a0ad4bab9177123121e71524c26  $RUNNER_TEMP/gradle-8.10.2-bin.zip" | sha256sum -c -
           python3 - "$RUNNER_TEMP/gradle-8.10.2-bin.zip" <<'PY'
           import pathlib, sys
@@ -147,10 +147,9 @@ jobs:
           export NEKO_PINNED_MAVEN="$RUNNER_TEMP/pinned-maven"
           compiler_cache="$NEKO_PINNED_MAVEN/org/jetbrains/kotlin/kotlin-compiler-embeddable/2.0.21"
           mkdir -p "$compiler_cache"
-          curl -fLSs --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 180 \
-            -H 'Accept: application/octet-stream' \
+          python3 buildScript/download-github-asset.py \
             https://api.github.com/repos/JetBrains/kotlin/releases/assets/587823233 \
-            -o "$compiler_cache/kotlin-compiler-embeddable-2.0.21.jar"
+            "$compiler_cache/kotlin-compiler-embeddable-2.0.21.jar"
           echo "9fa8cdd1de0dccffe154c997d423ec6b5f53cd6d9177e3a77a9b0de03fb1bc81  $compiler_cache/kotlin-compiler-embeddable-2.0.21.jar" | sha256sum -c -
           curl -fLSs --retry 3 --max-time 60 \
             https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/2.0.21/kotlin-compiler-embeddable-2.0.21.pom \
