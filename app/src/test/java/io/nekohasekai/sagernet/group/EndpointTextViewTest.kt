@@ -28,6 +28,9 @@ class EndpointTextViewTest {
 
     private fun view(width: Int): EndpointTextView = EndpointTextView(context).apply {
         textSize = 14f
+        // A real RecyclerView child always has LayoutParams. Native TextView's
+        // same-size setText fast path dereferences them (legacy shadows did not).
+        layoutParams = android.widget.FrameLayout.LayoutParams(width, 48)
         size(this, width)
     }
 
