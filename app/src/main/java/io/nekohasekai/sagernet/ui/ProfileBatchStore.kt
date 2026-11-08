@@ -23,14 +23,20 @@ internal object ProfileBatchStore {
                 ImportGroupName.fromFileName(fileName).takeIf { it.isNotBlank() }?.let { group.name = it }
             }
             val configs = hashMapOf<String, io.nekohasekai.sagernet.group.SubscriptionDns.Config>()
-            val nodes = beans.map { bean ->
+            var order = db.proxyDao().nextOrder(groupId) ?: 1L
+            val nodes = ArrayList<ProxyEntity>(minOf(512, beans.size))
+            for (bean in beans) {
                 bean.applyDefaultValues()
                 if (source.isNotBlank()) bean.subscriptionDnsSource = source
                 val config = configs.getOrPut(bean.subscriptionDns) { GroupDnsStore.config(bean, settings) }
                 NodeHostMapping.apply(bean, config.hosts, settings.applyHosts != false)
-                ProxyEntity(groupId = groupId).apply { putBean(bean) }
+                nodes.add(ProxyEntity(groupId = groupId, userOrder = order++).apply { putBean(bean) })
+                if (nodes.size == 512) {
+                    db.proxyDao().insert(nodes)
+                    nodes.clear()
+                }
             }
-            appendEntities(db, groupId, nodes)
+            if (nodes.isNotEmpty()) db.proxyDao().insert(nodes)
             db.groupDao().updateGroup(group)
         }
         return beans.size
@@ -40,7 +46,9 @@ internal object ProfileBatchStore {
         db.runInTransaction {
             var order = db.proxyDao().nextOrder(groupId) ?: 1L
             nodes.forEach { it.groupId = groupId; it.id = 0L; it.userOrder = order++ }
-            nodes.chunked(512).forEach { db.proxyDao().insert(it) }
+            for (start in nodes.indices step 512) {
+                db.proxyDao().insert(nodes.subList(start, minOf(start + 512, nodes.size)))
+            }
         }
     }
 }

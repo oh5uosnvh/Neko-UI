@@ -29,7 +29,7 @@ internal class GroupTabMutation(
         Snapshot(selectedId, tabs.scrollX)
 
     /** Main-thread only. No posted adapter write: a fast undo supersedes a pending removal. */
-    fun change(snapshot: Snapshot, mutation: () -> Unit) {
+    fun change(snapshot: Snapshot, centerSelected: Boolean = false, mutation: () -> Unit) {
         cancel()
         val ticket = ++generation
         active = true
@@ -41,7 +41,7 @@ internal class GroupTabMutation(
                 it.manualCentering = true
             }
             mutation()
-            align(snapshot)
+            align(snapshot, centerSelected)
             // post() is not a layout barrier. Mediator has just rebuilt TabViews whose
             // left/right/strip width are still zero or belong to the previous layout.
             // Reapply after real layout, then once more after pager's layout callbacks.
@@ -53,7 +53,7 @@ internal class GroupTabMutation(
                         if (!isAlive()) {
                             cancel()
                         } else {
-                            align(snapshot)
+                            align(snapshot, centerSelected)
                             if (!tabs.isLayoutRequested && !pager.isLayoutRequested && ++passes >= 2) {
                                 cancel()
                                 onFinished()
@@ -77,7 +77,7 @@ internal class GroupTabMutation(
         }
     }
 
-    private fun align(snapshot: Snapshot) {
+    private fun align(snapshot: Snapshot, centerSelected: Boolean) {
         val currentIds = ids()
         val id = snapshot.selectedId?.takeIf { it in currentIds } ?: currentIds.firstOrNull()
         val position = currentIds.indexOf(id)
@@ -94,7 +94,19 @@ internal class GroupTabMutation(
         }
         // scrollTo cancels no layout work, so this also runs at pre-draw. Never animate
         // from Mediator's temporary tab-zero offset; that visibly flashes the first tabs.
-        if (tabs is GroupPillTabLayout) tabs.restoreViewport() else tabs.scrollTo(snapshot.scrollX, 0)
+        var target = snapshot.scrollX
+        if (centerSelected && position >= 0 && !tabs.isLayoutRequested) {
+            val tabView = tabs.getTabAt(position)?.view
+            val strip = tabs.getChildAt(0)
+            if (tabView != null && tabView.width > 0 && strip != null && strip.width > 0) {
+                target = ((tabView.left + tabView.right - tabs.width) / 2)
+                    .coerceIn(0, (strip.width - tabs.width).coerceAtLeast(0))
+            }
+        }
+        if (tabs is GroupPillTabLayout) {
+            tabs.lockViewport(target, position)
+            tabs.restoreViewport()
+        } else tabs.scrollTo(target, 0)
     }
 
     fun cancel() {

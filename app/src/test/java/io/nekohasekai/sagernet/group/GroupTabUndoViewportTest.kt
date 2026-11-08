@@ -154,6 +154,38 @@ class GroupTabUndoViewportTest {
         }
     }
 
+    @Test fun newlyCreatedLastGroupIsSelectedAndVisibleAfterMediatorRebuild() {
+        val h = Harness()
+        try {
+            h.prepare(10)
+            h.mutation.change(h.mutation.capture(17L), centerSelected = true) {
+                h.ids.add(17L)
+                h.pages.notifyItemInserted(h.ids.lastIndex)
+            }
+            h.frames(20)
+            assertEquals(17L, h.selected)
+            assertEquals(17L, h.ids[h.pager.currentItem])
+            val tab = h.tabs.getTabAt(h.pager.currentItem)!!.view
+            assertTrue(tab.right > h.tabs.scrollX)
+            assertTrue(tab.left < h.tabs.scrollX + h.tabs.width)
+            assertFalse(h.blocked)
+            assertFalse(h.tabs.isViewportLocked)
+        } finally { h.close() }
+    }
+
+    @Test fun clipboardImportSelectsTargetGroupRatherThanCurrentFirstTab() {
+        val h = Harness()
+        try {
+            h.prepare(1)
+            h.mutation.change(h.mutation.capture(13L), centerSelected = true) {}
+            h.frames(20)
+            assertEquals(13L, h.selected)
+            assertEquals(13L, h.ids[h.pager.currentItem])
+            val tab = h.tabs.getTabAt(12)!!.view
+            assertTrue(tab.right > h.tabs.scrollX && tab.left < h.tabs.scrollX + h.tabs.width)
+        } finally { h.close() }
+    }
+
     @Test fun selected10UndoRestoresOrderSelectionAndScrolledViewportAfterRealLayout() {
         val h = Harness()
         try {

@@ -154,7 +154,7 @@ class EndpointTextViewTest {
         v.text = source
         val screenshot = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
         root.draw(Canvas(screenshot))
-        val output = File("build/reports/ui-pre13").apply { mkdirs() }
+        val output = File("build/reports/ui-pre14").apply { mkdirs() }
         File(output, "hongkong-Y01-api${android.os.Build.VERSION.SDK_INT}.png").outputStream().use {
             screenshot.compress(Bitmap.CompressFormat.PNG, 100, it)
         }

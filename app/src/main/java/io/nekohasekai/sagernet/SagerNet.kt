@@ -17,6 +17,7 @@ import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import androidx.core.content.getSystemService
 import go.Seq
+import io.nekohasekai.sagernet.bg.ServiceStartPolicy
 import io.nekohasekai.sagernet.bg.SagerConnection
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.Logs
@@ -191,12 +192,31 @@ class SagerNet : Application(),
             }
         }
 
+        // Only an explicit user start can reopen a user-stopped session. Tag the
+        // request now so a start queued before notification Stop cannot reopen it.
         fun startService() = ContextCompat.startForegroundService(
-            application, Intent(application, SagerConnection.serviceClass)
+            application, ServiceStartPolicy.tag(
+                Intent(application, SagerConnection.serviceClass), ServiceStartPolicy.USER
+            )
         )
 
-        fun reloadService() =
-            application.sendBroadcast(Intent(Action.RELOAD).setPackage(application.packageName))
+        fun startServiceAutomatically(cause: String) {
+            val epoch = ServiceStartPolicy.fence.snapshot()
+            if (!ServiceStartPolicy.fence.permitsAutomatic(epoch)) return
+            ContextCompat.startForegroundService(
+                application, ServiceStartPolicy.tag(
+                    Intent(application, SagerConnection.serviceClass), cause, epoch
+                )
+            )
+        }
+
+        fun reloadService() {
+            val epoch = ServiceStartPolicy.fence.snapshot()
+            if (!ServiceStartPolicy.fence.permitsAutomatic(epoch)) return
+            application.sendBroadcast(ServiceStartPolicy.tag(
+                Intent(Action.RELOAD).setPackage(application.packageName), ServiceStartPolicy.RELOAD, epoch
+            ))
+        }
 
         fun stopService() =
             application.sendBroadcast(Intent(Action.CLOSE).setPackage(application.packageName))

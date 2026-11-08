@@ -14,6 +14,7 @@ import io.nekohasekai.sagernet.database.SagerDatabase
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.util.concurrent.Callable
 
@@ -28,10 +29,12 @@ internal class GroupProfileExport(private val fragment: Fragment) {
             if (uri != null && groupId != null) {
                 export {
                     withContext(Dispatchers.IO) {
-                        val links = readLinks(groupId)
                         val output = contentResolver.openOutputStream(uri)
                             ?: error("Unable to open export document")
-                        output.bufferedWriter().use { it.write(links) }
+                        val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
+                        output.bufferedWriter().use {
+                            StreamingProfileExport.write(SagerDatabase.instance, groupId, it) { job?.ensureActive() }
+                        }
                     }
                 }
             }
@@ -52,12 +55,31 @@ internal class GroupProfileExport(private val fragment: Fragment) {
     }
 
     fun toClipboard(groupId: Long) {
-        export {
-            val links = withContext(Dispatchers.IO) { readLinks(groupId) }
-            // Keep clipboard access on Main. Do not log platform exceptions: they
-            // may contain a node URL or subscription credentials.
-            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText(null, links))
+        fragment.lifecycleScope.launch {
+            val links = try {
+                withContext(Dispatchers.IO) {
+                    val writer = ClipboardLimitWriter(192 * 1024)
+                    StreamingProfileExport.write(SagerDatabase.instance, groupId, writer)
+                    writer.toString()
+                }
+            } catch (_: ClipboardLimitExceeded) {
+                // Binder cannot safely carry multi-megabyte ClipData. Offer the
+                // file flow rather than crash, truncate or allocate all 100k links.
+                val name = withContext(Dispatchers.IO) {
+                    SagerDatabase.groupDao.getById(groupId)?.name.orEmpty()
+                }
+                toFile(groupId, name.ifBlank { "export" })
+                return@launch
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                showResult(R.string.action_export_err)
+                return@launch
+            }
+            export {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText(null, links))
+            }
         }
     }
 

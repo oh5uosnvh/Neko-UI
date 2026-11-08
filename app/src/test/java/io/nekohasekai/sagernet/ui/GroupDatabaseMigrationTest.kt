@@ -14,9 +14,11 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.SQLiteMode
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class)
+@SQLiteMode(SQLiteMode.Mode.LEGACY)
 class GroupDatabaseMigrationTest {
     private fun migrateFixture(existingColumns: List<String>) {
         val context = RuntimeEnvironment.getApplication()
@@ -55,12 +57,20 @@ class GroupDatabaseMigrationTest {
         val field = SagerDatabase::class.java.getDeclaredField("MIGRATION_8_9_SAFE")
         field.isAccessible = true
         val migration = field.get(null) as Migration
+        val indexField = SagerDatabase::class.java.getDeclaredField("MIGRATION_9_10_ORDER_INDEX")
+        indexField.isAccessible = true
+        val indexMigration = indexField.get(null) as Migration
         repeat(2) { // Upgrade and next launch must both work without data loss.
             val room = Room.databaseBuilder(context, SagerDatabase::class.java, name)
-                .addMigrations(migration).allowMainThreadQueries().build()
+                .addMigrations(migration, indexMigration).allowMainThreadQueries().build()
             try {
                 val db = room.openHelper.writableDatabase
-                assertEquals(9, db.version)
+                assertEquals(10, db.version)
+                db.query("PRAGMA index_info(`groupOrderId`)").use { cursor ->
+                    val columns = mutableListOf<String>()
+                    while (cursor.moveToNext()) columns += cursor.getString(2)
+                    assertEquals(listOf("groupId", "userOrder", "id"), columns)
+                }
                 db.query("SELECT uuid,tx,rx FROM proxy_entities WHERE id=9").use { c ->
                     assertTrue(c.moveToFirst())
                     assertEquals("sentinel", c.getString(0))

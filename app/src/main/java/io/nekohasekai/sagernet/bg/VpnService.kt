@@ -76,6 +76,10 @@ class VpnService : BaseVpnService(),
         ServiceNotification(this, profileName, "service-vpn")
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Reject stale/system retries before launching the VPN permission UI.
+        if (!ServiceStartPolicy.permits(intent)) {
+            return super<BaseService.Interface>.onStartCommand(intent, flags, startId)
+        }
         if (DataStore.serviceMode == Key.MODE_VPN) {
             if (prepare(this) != null) {
                 startActivity(
@@ -230,11 +234,11 @@ class VpnService : BaseVpnService(),
         }
     }
 
-    override fun onRevoke() = stopRunner()
+    override fun onRevoke() = stopRunner(userInitiated = true)
 
     override fun onDestroy() {
         DataStore.vpnService = null
         super.onDestroy()
-        data.binder.close()
+        dispose()
     }
 }

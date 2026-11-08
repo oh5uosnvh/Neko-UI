@@ -205,14 +205,10 @@ class UserAgentPreference
 
         private const val SUMMARY_MAX_LENGTH = 64
 
-        /**
-         * Pure helper (unit-testable): joins the enabled clash-family candidates
-         * (clash-verge, then mihomo) with ";". The NekoBox default UA ([USER_AGENT])
-         * is NEVER appended to a joined header — servers sniff the UA and the
-         * "NekoBox/Android" token makes them serve sing-box JSON (verified against a
-         * real airport: pure clash UAs -> text/yaml, any UA containing NekoBox ->
-         * application/json). It is only the fallback when no clash candidate is on.
-         */
+    /** Preferred built-in UA for display/legacy callers; RawUpdater uses
+     * SubscriptionUserAgents.attempts and tries one enabled client per request.
+     * Neko remains fallback-only, never appended to a Clash request.
+     */
         fun buildUserAgent(
             enabledFlags: List<Boolean>,
             defaults: List<String> = userAgentCandidates(),
@@ -222,7 +218,7 @@ class UserAgentPreference
                 .filter { it.value }
                 .mapNotNull { defaults.getOrNull(it.index)?.takeIf(String::isNotBlank) }
             if (enabled.isNotEmpty()) {
-                return enabled.joinToString(";")
+                return enabled.first()
             }
             return USER_AGENT
         }

@@ -63,49 +63,52 @@ object RawUpdater : GroupUpdater() {
             // 而不是裸 NPE 闪退（用户看到的是「核心未就绪」而非无情报错）
             val httpClient = Libcore.newHttpClient()
                 ?: error("core not ready")
-            val response = httpClient.apply {
-                trySocks5(
-                    DataStore.mixedPort,
-                    DataStore.mixedInboundUser,
-                    DataStore.mixedInboundPass
-                )
+            httpClient.apply {
+                trySocks5(DataStore.mixedPort, DataStore.mixedInboundUser, DataStore.mixedInboundPass)
                 tryH3Direct()
-                when (DataStore.appTLSVersion) {
-                    "1.3" -> restrictedTLS()
+                if (DataStore.appTLSVersion == "1.3") restrictedTLS()
+            }
+            val userAgents = SubscriptionUserAgents.attempts(
+                subscription.customUserAgent, DataStore.customUserAgent,
+                listOf(DataStore.userAgentClashVerge, DataStore.userAgentMihomo, DataStore.userAgentNeko),
+                UserAgentPreference.userAgentCandidates(),
+            )
+            var content = ""
+            var userInfoHeader = ""
+            var titleHeader = ""
+            var dispositionHeader = ""
+            var parsed: List<AbstractBean>? = null
+            try {
+                for ((attempt, ua) in userAgents.withIndex()) {
+                    try {
+                        val response = httpClient.newRequest().apply {
+                            if (DataStore.allowInsecureOnRequest) allowInsecure()
+                            setURL(subscription.link)
+                            setUserAgent(ua)
+                        }.execute()
+                        val body = Util.getStringBox(response.contentString)
+                        val nodes = parseRaw(body)?.takeIf { it.isNotEmpty() }
+                            ?: error("Response contains no supported nodes")
+                        content = body
+                        parsed = nodes
+                        userInfoHeader = Util.getStringBox(response.getHeader("Subscription-Userinfo"))
+                        titleHeader = Util.getStringBox(response.getHeader("profile-title"))
+                        dispositionHeader = Util.getStringBox(response.getHeader("content-disposition"))
+                        break
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        // Exception strings may contain the subscription token. Do not
+                        // expose them; try the next enabled UA on download OR parse failure.
+                        Logs.w("Subscription UA attempt ${attempt + 1} failed: ${error.javaClass.simpleName}")
+                    }
                 }
-            }.newRequest().apply {
-                if (DataStore.allowInsecureOnRequest) {
-                    allowInsecure()
-                }
-                setURL(subscription.link)
-                // REQ-07/REQ-08: User-Agent 生效链路（三条路径——首次导入、手动更新、
-                // SubscriptionUpdater 自动更新——都经由 GroupUpdater.executeUpdate 走到
-                // 本处唯一的 newRequest()，UA 一定会被 setUserAgent 设置到请求头，
-                // libcore httpRequest.SetUserAgent 内部 Header.Set("User-Agent", ...)）：
-                //  1. 逐订阅 customUserAgent（GroupSettingsActivity 读写，非空优先）；
-                //  2. 全局自定义 UA（Key.CUSTOM_USER_AGENT，REQ-08，非空次之）；
-                //  3. 内置候选开关拼接（clash-verge 在前——很多机场按 UA 前缀/包含
-                //     关系决定返回格式，第一段最关键；全关回退 Nets.kt 默认 UA）。
-                // 注意：subscription.customUserAgent 为空串时不会被 set 成空 UA，
-                // 而是继续走后续兜底，避免空 User-Agent 头覆盖。
-                setUserAgent(
-                    subscription.customUserAgent.takeIf { it.isNotBlank() }
-                        ?: DataStore.customUserAgent.takeIf { it.isNotBlank() }
-                        ?: UserAgentPreference.buildUserAgent(
-                            listOf(
-                                DataStore.userAgentClashVerge,
-                                DataStore.userAgentMihomo,
-                                DataStore.userAgentNeko,
-                            ),
-                            UserAgentPreference.userAgentCandidates(),
-                        )
-                )
-            }.execute()
-            val content = Util.getStringBox(response.contentString)
-            proxies = parseRaw(content)
-                ?: error(app.getString(R.string.no_proxies_found))
+            } finally {
+                httpClient.close()
+            }
+            proxies = parsed ?: error("Subscription fetch/parse failed for all enabled User-Agent candidates")
 
-            var userinfo = Util.getStringBox(response.getHeader("Subscription-Userinfo"))
+            var userinfo = userInfoHeader
             if (userinfo.isBlank()) {
                 findBodyHeader(content, "subscription-userinfo")?.let { userinfo = it }
             }
@@ -135,11 +138,11 @@ object RawUpdater : GroupUpdater() {
                 var remoteName = parseBodyProfileTitle(content)
                 if (remoteName.isBlank()) {
                     remoteName = parseProfileTitleHeader(
-                        Util.getStringBox(response.getHeader("profile-title"))
+                        titleHeader
                     )
                 }
                 if (remoteName.isBlank()) {
-                    remoteName = Util.decodeFilename(Util.getStringBox(response.getHeader("content-disposition")))
+                    remoteName = Util.decodeFilename(dispositionHeader)
                 }
                 if (remoteName.isNotBlank()) {
                     proxyGroup.name = GroupDisplayName.withoutFileSuffix(remoteName)
@@ -369,8 +372,10 @@ object RawUpdater : GroupUpdater() {
             try {
 
                 val yaml = SubscriptionDns.loadDocument(text)
-                val importedDns = SubscriptionDns.fromDocument(yaml)
-                importedDns.warnings.forEach { Logs.w(it) }
+                val importedDns = SubscriptionDns.fromSubscriptionDocument(yaml)
+                importedDns.warnings.forEach { warning ->
+                    android.util.Log.w("SubscriptionDns", warning)
+                }
                 val dnsSnapshot = importedDns.snapshot()
 
                 val globalClientFingerprint = yaml["global-client-fingerprint"]?.toString() ?: ""

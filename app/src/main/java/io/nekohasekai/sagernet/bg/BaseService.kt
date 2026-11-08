@@ -44,14 +44,17 @@ class BaseService {
     interface ExpectedException
 
     class Data internal constructor(private val service: Interface) {
-        var state = State.Stopped
+        @Volatile var state = State.Stopped
         var proxy: ProxyInstance? = null
         var notification: ServiceNotification? = null
+        var pendingRestartEpoch: Long? = null
+        var pendingUserStart: Intent? = null
 
         val receiver = broadcastReceiver { ctx, intent ->
             when (intent.action) {
                 Intent.ACTION_SHUTDOWN -> service.persistStats()
-                Action.RELOAD -> service.reload()
+                Action.RELOAD -> if (ServiceStartPolicy.permits(intent)) service.reload()
+                Action.CLOSE -> service.stopRunner(userInitiated = true)
                 // Action.SWITCH_WAKE_LOCK -> runOnDefaultDispatcher { service.switchWakeLock() }
                 PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -67,6 +70,7 @@ class BaseService {
                 }
 
                 Action.RESET_UPSTREAM_CONNECTIONS -> runOnDefaultDispatcher {
+                    if (!state.canStop || !ServiceStartPolicy.fence.permitsAutomatic()) return@runOnDefaultDispatcher
                     Libcore.resetAllConnections(true)
                     runOnMainDispatcher {
                         Util.collapseStatusBar(ctx)
@@ -75,10 +79,10 @@ class BaseService {
                     }
                 }
 
-                else -> service.stopRunner()
+                else -> Unit
             }
         }
-        var closeReceiverRegistered = false
+        @Volatile var closeReceiverRegistered = false
 
         val binder = Binder(this)
         var connectingJob: Job? = null
@@ -202,8 +206,12 @@ class BaseService {
             if (intent.action == Action.SERVICE) data.binder else null
 
         fun reload() {
+            // Reload is never an explicit start. A stale switch/apply callback may
+            // arrive while Stopping, or after a bound service has reached Stopped.
+            if (!ServiceStartPolicy.fence.permitsAutomatic() || !data.state.canStop) return
             if (DataStore.selectedProxy == 0L) {
                 stopRunner(false, (this as Context).getString(R.string.profile_empty))
+                return
             }
             if (canReloadSelector()) {
                 val ent = SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
@@ -218,7 +226,6 @@ class BaseService {
             }
             val s = data.state
             when {
-                s == State.Stopped -> startRunner()
                 s.canStop -> stopRunner(true)
                 else -> Logs.w("Illegal state $s when invoking use")
             }
@@ -239,10 +246,12 @@ class BaseService {
             data.proxy!!.launch()
         }
 
-        fun startRunner() {
+        fun startRunner(epoch: Long = ServiceStartPolicy.fence.snapshot()) {
+            if (!ServiceStartPolicy.fence.permitsAutomatic(epoch)) return
             this as Context
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(Intent(this, javaClass))
-            else startService(Intent(this, javaClass))
+            val intent = ServiceStartPolicy.tag(Intent(this, javaClass), ServiceStartPolicy.RELOAD, epoch)
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent)
+            else startService(intent)
         }
 
         fun killProcesses() {
@@ -251,17 +260,25 @@ class BaseService {
                 release()
                 wakeLock = null
             }
-            runOnDefaultDispatcher {
-                DefaultNetworkListener.stop(this)
-            }
         }
 
-        fun stopRunner(restart: Boolean = false, msg: String? = null) {
+        fun stopRunner(restart: Boolean = false, msg: String? = null, userInitiated: Boolean = false) {
+            // Revoke the restart BEFORE the Stopping early return: a reload may
+            // already own the cleanup coroutine, but notification Stop must win.
+            if (userInitiated) {
+                val epoch = ServiceStartPolicy.fence.userStop()
+                data.pendingRestartEpoch = null
+                data.pendingUserStart = null
+                BootReceiver.enabled = false
+                Logs.d("Service user stop: epoch=$epoch")
+            }
+            if (data.state == State.Stopping) return
+            data.pendingRestartEpoch = if (restart) ServiceStartPolicy.fence.snapshot() else null
+
             DataStore.baseService = null
             DataStore.vpnService = null
             DataStore.mixedInboundAuthed = false
 
-            if (data.state == State.Stopping) return
             data.probeJob?.cancel()
             data.probeJob = null
             if (!msg.isNullOrBlank()) data.publishProbe("failed", error = msg)
@@ -277,21 +294,36 @@ class BaseService {
                 // we use a coroutineScope here to allow clean-up in parallel
                 coroutineScope {
                     killProcesses()
-                    val data = data
-                    if (data.closeReceiverRegistered) {
-                        unregisterReceiver(data.receiver)
-                        data.closeReceiverRegistered = false
-                    }
+                    // Join listener removal before starting the replacement. An
+                    // unjoined Default dispatcher stop could unregister its listener.
+                    DefaultNetworkListener.stop(this@Interface)
                     data.proxy = null
                 }
 
                 // change the state
                 data.changeState(State.Stopped, msg)
                 // stop the service if nothing has bound to it
-                if (restart) startRunner() else {
-                    stopSelf()
-                }
+                val userStart = data.pendingUserStart
+                val restartEpoch = data.pendingRestartEpoch
+                data.pendingUserStart = null
+                data.pendingRestartEpoch = null
+                if (userStart != null && ServiceStartPolicy.permits(userStart)) {
+                    // A new, explicit Connect tap during cleanup is not a stale retry.
+                    onStartCommand(userStart, 0, 0)
+                } else if (restartEpoch != null && ServiceStartPolicy.fence.permitsAutomatic(restartEpoch)) {
+                    startRunner(restartEpoch)
+                } else stopSelf()
             }
+        }
+
+        fun dispose() {
+            // Bound services can stay alive in Stopped: keep CLOSE registered until
+            // actual destruction so Stop can still cancel a queued replacement.
+            if (data.closeReceiverRegistered) {
+                (this as Context).unregisterReceiver(data.receiver)
+                data.closeReceiverRegistered = false
+            }
+            data.binder.close()
         }
 
         fun persistStats() {
@@ -303,6 +335,7 @@ class BaseService {
 
         suspend fun preInit() {
             DefaultNetworkListener.start(this) {
+                if (!data.state.canStop || !ServiceStartPolicy.fence.permitsAutomatic()) return@start
                 SagerNet.connectivity.getLinkProperties(it)?.also { link ->
                     SagerNet.underlyingNetwork = it
                     DataStore.vpnService?.updateUnderlyingNetwork()
@@ -339,10 +372,29 @@ class BaseService {
         }
 
         fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-            DataStore.baseService = this
-
             val data = data
+            val cause = when (intent?.getStringExtra(ServiceStartPolicy.EXTRA_CAUSE)) {
+                ServiceStartPolicy.USER -> ServiceStartPolicy.USER
+                ServiceStartPolicy.RELOAD -> ServiceStartPolicy.RELOAD
+                ServiceStartPolicy.BOOT -> ServiceStartPolicy.BOOT
+                else -> "system/legacy"
+            }
+            if (!ServiceStartPolicy.permits(intent)) {
+                Logs.d("Service start rejected: cause=$cause state=${data.state} startId=$startId")
+                if (data.state == State.Stopped) (this as Service).stopSelf()
+                return Service.START_NOT_STICKY
+            }
+            if (data.state == State.Stopping) {
+                if (cause == ServiceStartPolicy.USER) data.pendingUserStart = Intent(intent!!)
+                return Service.START_NOT_STICKY
+            }
             if (data.state != State.Stopped) return Service.START_NOT_STICKY
+            if (!ServiceStartPolicy.admit(intent)) {
+                (this as Service).stopSelf()
+                return Service.START_NOT_STICKY
+            }
+            Logs.d("Service start accepted: cause=$cause startId=$startId")
+            DataStore.baseService = this
             val profile = SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
             this as Context
             if (profile == null) { // gracefully shutdown: https://stackoverflow.com/q/47337857/2245107
@@ -398,8 +450,13 @@ class BaseService {
                     DataStore.currentProfile = profile.id
 
                     proxy.processes = GuardedProcessPool {
-                        Logs.w(it)
-                        stopRunner(false, it.readableMessage)
+                        // A fatal callback dispatched by an old pool must not stop
+                        // its replacement after a user start or a profile switch.
+                        if (data.proxy === proxy && data.state.canStop &&
+                            ServiceStartPolicy.fence.permitsAutomatic()) {
+                            Logs.w(it)
+                            stopRunner(false, it.readableMessage)
+                        }
                     }
 
                     startProcesses()
@@ -448,7 +505,9 @@ class BaseService {
                     data.connectingJob = null
                 }
             }
-            return Service.START_NOT_STICKY
+            // Preserve recovery after an unexpected process kill. A persisted
+            // user-stop fence rejects sticky/null intents before admission.
+            return Service.START_STICKY
         }
     }
 

@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import io.nekohasekai.sagernet.bg.ServiceStartPolicy
 import io.nekohasekai.sagernet.bg.SubscriptionUpdater
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.app
@@ -37,6 +38,6 @@ class BootReceiver : BroadcastReceiver() {
             else -> Build.VERSION.SDK_INT < 24 || SagerNet.user.isUserUnlocked
         } && DataStore.selectedProxy > 0
 
-        if (doStart) SagerNet.startService()
+        if (doStart) SagerNet.startServiceAutomatically(ServiceStartPolicy.BOOT)
     }
 }

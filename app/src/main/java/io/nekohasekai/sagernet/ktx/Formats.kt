@@ -111,42 +111,28 @@ fun String.linesNoComments(): List<String> {
     return split('\n').map { it.trim() }.filterNot { it.startsWith("#") }
 }
 
-suspend fun parseProxies(text: String): List<AbstractBean> {
-    val lines = text.linesNoComments()
-    val links = lines.flatMap { it.split(' ') }
-    val linksByLine = lines
-
-    val entities = ArrayList<AbstractBean>()
-    val entitiesByLine = ArrayList<AbstractBean>()
-
-    fun String.parseLink(entities: ArrayList<AbstractBean>) {
+fun parseProxyLink(value: String): AbstractBean? {
+    val entities = ArrayList<AbstractBean>(1)
+    with(value) {
         if (startsWith("clash://install-config?") || startsWith("sn://subscription?")) {
             throw SubscriptionFoundException(this)
         }
 
         if (startsWith("sn://")) {
-            Logs.d("Try parse universal link: $this")
             runCatching {
                 entities.add(parseUniversal(this))
-            }.onFailure {
-                Logs.w(it)
             }
         } else if (startsWith("socks://") || startsWith("socks4://") || startsWith("socks4a://") || startsWith(
                 "socks5://"
             )
         ) {
-            Logs.d("Try parse socks link: $this")
             runCatching {
                 entities.add(parseSOCKS(this))
-            }.onFailure {
-                Logs.w(it)
             }
         } else if (matches("(http|https)://.*".toRegex())) {
-            Logs.d("Try parse http link: $this")
             runCatching {
                 entities.add(parseHttp(this))
             }.onFailure {
-                Logs.w(it)
                 val clashUrl = HttpUrl.Builder()
                     .scheme("https")
                     .host("install-config")
@@ -157,30 +143,18 @@ suspend fun parseProxies(text: String): List<AbstractBean> {
                 throw (SubscriptionFoundException(clashUrl))
             }
         } else if (startsWith("vmess://")) {
-            Logs.d("Try parse v2ray link: $this")
             runCatching {
                 entities.add(parseV2Ray(this))
-            }.onFailure {
-                Logs.w(it)
             }
         } else if (startsWith("vless://")) {
-            Logs.d("Try parse vless link: $this")
             runCatching {
                 entities.add(parseV2Ray(this))
-            }.onFailure {
-                Logs.w(it)
-            }.onFailure {
-                Logs.w(it)
             }
         } else if (startsWith("heysocks://")) {
-            Logs.d("Try parse heysocks (xhttp) link: $this")
             runCatching {
                 entities.add(moe.matsuri.nb4a.proxy.xhttp.parseXhttpLink(this))
-            }.onFailure {
-                Logs.w(it)
             }
         } else if (startsWith("oppa://")) {
-            Logs.d("Try parse Oppa link: $this")
             // oppa:// without '@' = base64(JSON) provider subscription payload
             val isProvider = !substringAfter("oppa://").contains('@')
             if (isProvider) {
@@ -188,106 +162,73 @@ suspend fun parseProxies(text: String): List<AbstractBean> {
             }
             runCatching {
                 entities.add(parseOppaNode(this))
-            }.onFailure {
-                Logs.w(it)
             }
         } else if (startsWith("trojan://")) {
-            Logs.d("Try parse trojan link: $this")
             runCatching {
                 entities.add(parseTrojan(this))
-            }.onFailure {
-                Logs.w(it)
             }
         } else if (startsWith("trojan-go://")) {
-            Logs.d("Try parse trojan-go link: $this")
             runCatching {
                 entities.add(parseTrojanGo(this))
-            }.onFailure {
-                Logs.w(it)
             }
         } else if (startsWith("ss://")) {
-            Logs.d("Try parse shadowsocks link: $this")
             runCatching {
                 entities.add(parseShadowsocks(this))
-            }.onFailure {
-                Logs.w(it)
             }
         } else if (startsWith("ssr://")) {
-            Logs.d("Try parse shadowsocksr link: $this")
             runCatching {
                 entities.add(parseShadowsocksR(this))
-            }.onFailure {
-                Logs.w(it)
             }
         } else if (startsWith("naive+")) {
-            Logs.d("Try parse naive link: $this")
             runCatching {
                 entities.add(parseNaive(this))
-            }.onFailure {
-                Logs.w(it)
             }
         } else if (startsWith("hysteria://")) {
-            Logs.d("Try parse hysteria1 link: $this")
             runCatching {
                 entities.add(parseHysteria1(this))
-            }.onFailure {
-                Logs.w(it)
             }
         } else if (startsWith("hysteria2://") || startsWith("hy2://")) {
-            Logs.d("Try parse hysteria2 link: $this")
             runCatching {
                 entities.add(parseHysteria2(this))
-            }.onFailure {
-                Logs.w(it)
             }
         } else if (startsWith("tuic://")) {
-            Logs.d("Try parse TUIC link: $this")
             runCatching {
                 entities.add(parseTuic(this))
-            }.onFailure {
-                Logs.w(it)
             }
         } else if (startsWith("juicity://")) {
-            Logs.d("Try parse Juicity link: $this")
             runCatching {
                 entities.add(parseJuicity(this))
-            }.onFailure {
-                Logs.w(it)
             }
         } else if (startsWith("snell://")) {
-            Logs.d("Try parse Snell link: $this")
             runCatching {
                 entities.add(parseSnell(this))
-            }.onFailure {
-                Logs.w(it)
             }
         } else if (startsWith("anytls://")) {
-            Logs.d("Try parse anytls link: $this")
             runCatching {
                 entities.add(parseAnytls(this))
-            }.onFailure {
-                Logs.w(it)
             }
         }
     }
+    return entities.firstOrNull()?.apply { initializeDefaultValues() }
+}
 
-    for (link in links) {
-        link.parseLink(entities)
-    }
-    for (link in linksByLine) {
-        link.parseLink(entitiesByLine)
-    }
-//    var isBadLink = false
-    if (entities.onEach { it.initializeDefaultValues() }.size == entitiesByLine.onEach { it.initializeDefaultValues() }.size) run test@{
-        entities.forEachIndexed { index, bean ->
-            val lineBean = entitiesByLine[index]
-            if (bean == lineBean && bean.displayName() != lineBean.displayName()) {
-//                isBadLink = true
-                return@test
-            }
+suspend fun parseProxies(text: String): List<AbstractBean> {
+    val entities = ArrayList<AbstractBean>()
+    for (raw in text.lineSequence()) {
+        val line = raw.trim()
+        if (line.isEmpty() || line.startsWith("#")) continue
+        val whole = parseProxyLink(line)
+        // Ordinary newline node lists must not be parsed twice or copied into
+        // lines/links/beansByLine collections. Keep legacy space-list support.
+        if (' ' !in line) {
+            whole?.let(entities::add)
+        } else {
+            val separated = line.split(' ').mapNotNull { parseProxyLink(it.trim()) }
+            if (separated.size > (if (whole == null) 0 else 1)) entities.addAll(separated)
+            else whole?.let(entities::add)
         }
     }
-    return if (entities.size > entitiesByLine.size) entities else entitiesByLine
+    return entities
 }
 
 fun <T : Serializable> T.applyDefaultValues(): T {

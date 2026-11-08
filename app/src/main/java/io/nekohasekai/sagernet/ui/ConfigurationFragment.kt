@@ -35,6 +35,7 @@ import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.core.view.size
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.preference.PreferenceDataStore
@@ -838,6 +839,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                                     .let(cursor::getString)
                             }
                     val proxies = mutableListOf<AbstractBean>()
+                    var streamedCount: Int? = null
+                    var streamedTarget = 0L
                     if (fileName != null && fileName.endsWith(".zip")) {
                         // try parse wireguard zip
                         val zip =
@@ -852,14 +855,42 @@ class ConfigurationFragment @JvmOverloads constructor(
                         }
                         zip.closeQuietly()
                     } else {
-                        val fileText =
-                            requireContext().contentResolver.openInputStream(file)!!.use {
-                                it.bufferedReader().readText()
+                        requireContext().contentResolver.openInputStream(file)!!.use { input ->
+                            val reader = input.bufferedReader()
+                            reader.mark(64 * 1024)
+                            val probe = CharArray(16 * 1024)
+                            val length = reader.read(probe)
+                            val prefix = if (length > 0) String(probe, 0, length) else ""
+                            reader.reset()
+                            if (StreamingProfileImport.isNodeListPrefix(prefix)) {
+                                streamedTarget = DataStore.selectedGroupForImport()
+                                val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
+                                streamedCount = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                    StreamingProfileImport.append(SagerDatabase.instance, streamedTarget, reader,
+                                        "file", fileName.orEmpty()) { job?.ensureActive() }.count
+                                }
+                            } else {
+                                RawUpdater.parseRaw(reader.readText(), fileName.orEmpty())
+                                    ?.let(proxies::addAll)
                             }
-                        RawUpdater.parseRaw(fileText, fileName ?: "")
-                            ?.let { pl -> proxies.addAll(pl) }
+                        }
                     }
-                    if (proxies.isEmpty()) onMainDispatcher {
+                    if (streamedCount != null) {
+                        val count = streamedCount!!
+                        if (count > 0) {
+                            GroupManager.postUpdate(streamedTarget)
+                            GroupManager.postReload(streamedTarget)
+                            onMainDispatcher {
+                                if (isAdded) {
+                                    DataStore.editingGroup = streamedTarget
+                                    adapter.selectImportedGroup(streamedTarget)
+                                    snackbar(resources.getQuantityString(R.plurals.added, count, count)).show()
+                                }
+                            }
+                        } else onMainDispatcher {
+                            if (isAdded) snackbar(getString(R.string.no_proxies_found_in_file)).show()
+                        }
+                    } else if (proxies.isEmpty()) onMainDispatcher {
                         if (isAdded) snackbar(getString(R.string.no_proxies_found_in_file)).show()
                     } else import(proxies, "file", fileName.orEmpty())
                 } catch (e: SubscriptionFoundException) {
@@ -884,6 +915,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         GroupManager.postReload(targetId)
         onMainDispatcher {
             DataStore.editingGroup = targetId
+            adapter.selectImportedGroup(targetId)
             snackbar(
                 requireContext().resources.getQuantityString(
                     R.plurals.added, proxies.size, proxies.size
@@ -2103,37 +2135,21 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
 
         override suspend fun groupAdd(group: ProxyGroup) {
-            tabLayout.post {
-                groupList.add(group)
-
-                if (groupList.any { !it.ungrouped }) tabLayout.post {
-                    tabLayout.visibility = View.VISIBLE
+            onMainDispatcher {
+                if (viewLifecycleOwnerLiveData.value == null || !isCurrentGroupPagerAdapter(this@GroupPagerAdapter)) return@onMainDispatcher
+                if (groupList.any { it.id == group.id }) return@onMainDispatcher
+                tabMutation.change(tabMutation.capture(group.id), centerSelected = true) {
+                    val newIndex = groupList.size
+                    groupList.add(group)
+                    notifyItemInserted(newIndex)
+                    if (groupList.any { !it.ungrouped }) tabLayout.visibility = View.VISIBLE
                 }
-
-                val newIndex = groupList.size - 1
-                DataStore.selectedGroup = group.id
-                selectedGroupIndex = newIndex
-                notifyItemInserted(newIndex)
-                groupPager.setCurrentItem(newIndex, false)
-                tabLayout.getTabAt(newIndex)?.select()
-                // A newly-created group is appended and selected; keep the selected tab
-                // visible instead of leaving the strip at its previous (usually first) offset.
-                smoothTabTo(newIndex)
             }
         }
 
-        /** Animate the strip without changing the pager selection or rebuilding tabs. */
-        private fun smoothTabTo(index: Int) {
-            if (index !in 0 until tabLayout.tabCount) {
-                // TabLayoutMediator may attach the newly inserted tab one frame later.
-                if (index >= 0) tabLayout.postOnAnimation { smoothTabTo(index) }
-                return
-            }
-            val tab = tabLayout.getTabAt(index)?.view ?: return
-            val strip = tabLayout.getChildAt(0) as? ViewGroup ?: return
-            val target = (tab.left + tab.right - tabLayout.width) / 2
-                .coerceIn(0, (strip.width - tabLayout.width).coerceAtLeast(0))
-            tabLayout.smoothScrollTo(target, 0)
+        internal fun selectImportedGroup(groupId: Long) {
+            if (groupList.none { it.id == groupId } || !isCurrentGroupPagerAdapter(this@GroupPagerAdapter)) return
+            tabMutation.change(tabMutation.capture(groupId), centerSelected = true) {}
         }
 
         internal val tabMutation = GroupTabMutation(

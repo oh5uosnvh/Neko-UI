@@ -102,16 +102,28 @@ public final class SubscriptionDns {
     }
 
     public static Config fromDocument(Map<?, ?> root) {
+        return fromDocument(root, false);
+    }
+
+    /** Remote Clash selectors may use geosite/rule-set, unsupported by host matcher.
+     * Ignore ONLY known incompatible selectors, with a warning; never turn them
+     * into catch-all rules. User-authored editor policies remain strictly validated.
+     */
+    public static Config fromSubscriptionDocument(Map<?, ?> root) {
+        return fromDocument(root, true);
+    }
+
+    private static Config fromDocument(Map<?, ?> root, boolean remote) {
         Config result = new Config();
         Object dnsObject = root.get("dns");
         Map<?, ?> dns = dnsObject == null ? Collections.emptyMap() : asMap(dnsObject, "dns");
         if (!Boolean.FALSE.equals(dns.get("use-hosts"))) readHosts(root.get("hosts"), result.hosts);
         if (!Boolean.FALSE.equals(dns.get("enable"))) {
-            readPolicy(dns.get("nameserver-policy"), result.policy);
-            readPolicy(dns.get("proxy-server-nameserver-policy"), result.serverPolicy);
-            result.serverDns.addAll(endpoints(dns.get("proxy-server-nameserver")));
-            result.directDns.addAll(endpoints(dns.get("direct-nameserver")));
-            result.bootstrap.addAll(endpoints(dns.get("default-nameserver")));
+            readPolicy(dns.get("nameserver-policy"), result.policy, remote, result.warnings);
+            readPolicy(dns.get("proxy-server-nameserver-policy"), result.serverPolicy, remote, result.warnings);
+            result.serverDns.addAll(remote ? sourceEndpoints(dns.get("proxy-server-nameserver"), result.warnings) : endpoints(dns.get("proxy-server-nameserver")));
+            result.directDns.addAll(remote ? sourceEndpoints(dns.get("direct-nameserver"), result.warnings) : endpoints(dns.get("direct-nameserver")));
+            result.bootstrap.addAll(remote ? sourceEndpoints(dns.get("default-nameserver"), result.warnings) : endpoints(dns.get("default-nameserver")));
             // Clash often points node DNS back at its own listener. NekoBox does not run that listener.
             int listenPort = listenerPort(dns.get("listen"));
             if (listenPort != 0) {
@@ -264,12 +276,53 @@ public final class SubscriptionDns {
         return new ArrayList<>(result);
     }
 
-    private static void readPolicy(Object value, Map<String, List<String>> target) {
+    private static List<String> sourceEndpoints(Object value, List<String> warnings) {
+        if (value == null) return Collections.emptyList();
+        List<?> input = value instanceof List ? (List<?>) value : Collections.singletonList(value);
+        List<Object> cleaned = new ArrayList<>();
+        for (Object item : input) {
+            if (item instanceof String) {
+                String endpoint = ((String) item).trim();
+                int fragment = endpoint.indexOf('#');
+                if (fragment >= 0) {
+                    // Clash DNS fragment options are not part of a DoH/DoT URL.
+                    // Remove source-specific routing/TLS options, never downgrade
+                    // Neko's certificate verification based on remote YAML.
+                    warnings.add("Source Clash DNS fragment options ignored; strict TLS retained");
+                    endpoint = endpoint.substring(0, fragment);
+                }
+                cleaned.add(endpoint);
+            } else cleaned.add(item);
+        }
+        return endpoints(cleaned);
+    }
+
+    private static void readPolicy(Object value, Map<String, List<String>> target, boolean remote, List<String> warnings) {
         if (value == null) return;
         Map<?, ?> map = asMap(value, "DNS policy");
         for (Map.Entry<?, ?> entry : map.entrySet()) {
-            String key = pattern(entry.getKey());
-            List<String> servers = endpoints(entry.getValue());
+            Object raw = entry.getKey();
+            if (remote && raw instanceof String) {
+                String selector = ((String) raw).trim().toLowerCase(Locale.ROOT);
+                if (selector.startsWith("geosite:") || selector.startsWith("rule-set:") ||
+                        selector.startsWith("regexp:")) {
+                    warnings.add("Unsupported source Clash DNS selector omitted: " + selector.substring(0, selector.indexOf(':')));
+                    continue;
+                }
+                if (selector.startsWith("domain:")) raw = ((String) raw).trim().substring(7);
+                else if (selector.startsWith("domain-suffix:")) raw = "+." + ((String) raw).trim().substring(14);
+            }
+            if (remote && raw instanceof String && ((String) raw).contains(",")) {
+                // Clash supports comma-separated domain: selectors in one key.
+                List<String> servers = sourceEndpoints(entry.getValue(), warnings);
+                for (String part : ((String) raw).split(",")) {
+                    String key = pattern(part.trim());
+                    target.put(key, servers);
+                }
+                continue;
+            }
+            String key = pattern(raw);
+            List<String> servers = remote ? sourceEndpoints(entry.getValue(), warnings) : endpoints(entry.getValue());
             if (servers.isEmpty()) throw invalid("DNS policy requires at least one server");
             if (target.put(key, servers) != null) throw invalid("Duplicate normalized DNS policy");
         }

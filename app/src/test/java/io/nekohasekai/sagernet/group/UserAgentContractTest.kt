@@ -57,7 +57,7 @@ class UserAgentContractTest {
         val ua = UserAgentPreference.buildUserAgent(listOf(true, false, true), candidates)
         assertEquals("clash-verge/v2.4.2", ua)
         val all = UserAgentPreference.buildUserAgent(listOf(true, true, true), candidates)
-        assertEquals("clash-verge/v2.4.2;mihomo.party/v2.0.0 (clash.meta)", all)
+        assertEquals("clash-verge/v2.4.2", all)
         assertFalse(all.contains(USER_AGENT))
         // 仅 neko 开（其余全关）-> 兜底默认 UA
         assertEquals(
@@ -74,7 +74,7 @@ class UserAgentContractTest {
             UserAgentPreference.userAgentCandidates(),
         )
         // REQ-08 顺序契约：clash-verge 排最前，mihomo 其后
-        assertEquals("clash-verge/v2.4.2;mihomo.party/v2.0.0 (clash.meta)", header)
+        assertEquals("clash-verge/v2.4.2", header)
         // 顺序契约的机器校验：candidates 第一段必须是 clash-verge、最后是 NekoBox
         val cands = UserAgentPreference.userAgentCandidates()
         assertEquals("clash-verge/v2.4.2", cands.first())

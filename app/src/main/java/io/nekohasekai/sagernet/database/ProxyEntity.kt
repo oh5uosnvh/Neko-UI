@@ -53,7 +53,7 @@ import moe.matsuri.nb4a.proxy.neko.*
 import moe.matsuri.nb4a.proxy.shadowtls.ShadowTLSSettingsActivity
 
 @Entity(
-    tableName = "proxy_entities", indices = [Index("groupId", name = "groupId")]
+    tableName = "proxy_entities", indices = [Index("groupId", name = "groupId"), Index(value = ["groupId", "userOrder", "id"], name = "groupOrderId")]
 )
 data class ProxyEntity(
     @PrimaryKey(autoGenerate = true) var id: Long = 0L,
@@ -629,6 +629,12 @@ data class ProxyEntity(
 
         @Query("SELECT * FROM proxy_entities WHERE id in (:proxyIds)")
         fun getEntities(proxyIds: List<Long>): List<ProxyEntity>
+
+        @Query("SELECT * FROM proxy_entities WHERE groupId = :groupId AND (userOrder > :afterOrder OR (userOrder = :afterOrder AND id > :afterId)) ORDER BY userOrder, id LIMIT :pageSize")
+        fun orderedPageAfter(groupId: Long, afterOrder: Long, afterId: Long, pageSize: Int): List<ProxyEntity>
+
+        @Query("SELECT MIN(userOrder) FROM proxy_entities WHERE groupId = :groupId")
+        fun firstOrder(groupId: Long): Long?
 
         @Query("SELECT COUNT(*) FROM proxy_entities WHERE groupId = :groupId")
         fun countByGroup(groupId: Long): Long
