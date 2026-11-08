@@ -14,6 +14,17 @@ class ProfileCardLayoutContractTest {
         }
     }
 
+    @Test fun singleColumnActionsRemainDeleteShareEditLeftToRight() {
+        assertTrue(layout.contains("android:id=\"@+id/edit\""))
+        assertTrue(layout.contains("android:id=\"@+id/share\""))
+        assertTrue(layout.contains("android:id=\"@+id/remove\""))
+        // FrameLayout uses end margins: edit=0 (right), share=48 (middle),
+        // remove=96 (left).
+        assertTrue(layout.contains("android:id=\"@+id/edit\""))
+        assertTrue(layout.contains("android:id=\"@+id/remove\""))
+        assertTrue(layout.contains("android:layout_marginEnd=\"@dimen/profile_card_actions_width_minus_one\""))
+    }
+
     @Test fun trafficIsInlineAndAddressPrecedesStatus() {
         val traffic = layout.indexOf("android:id=\"@+id/traffic_text\"")
         val address = layout.indexOf("android:id=\"@+id/address_row\"")

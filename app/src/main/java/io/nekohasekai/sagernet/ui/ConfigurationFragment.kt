@@ -3475,7 +3475,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 // inside line two and must not reduce the name to one line.
                 profileName.minLines = 2
                 profileName.maxLines = 2
-                profileName.ellipsize = null
+                profileName.ellipsize = android.text.TextUtils.TruncateAt.END
                 profileName.twoColumnDisplay = twoColumn
                 profileName.wrapLongNames = !twoColumn
                 val nameContainer = view.findViewById<View>(R.id.title_text_container)
