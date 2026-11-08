@@ -11,7 +11,6 @@ import android.text.TextPaint
 import android.util.AttributeSet
 import android.view.Gravity
 import androidx.appcompat.widget.AppCompatTextView
-import kotlin.math.ceil
 
 /**
  * Read-only endpoint label. Text remains the full source (including accessibility),
@@ -49,6 +48,27 @@ class EndpointTextView @JvmOverloads constructor(
     internal fun fitForWidth(value: String, width: Int): String =
         EndpointLabelFormatter.fit(value, width.toFloat()) { Layout.getDesiredWidth(it, paint) }
 
+    private fun singleLineLayout(value: String, metrics: TextPaint): StaticLayout {
+        // This is a SHAPING canvas, not the available display width. Android 15
+        // can shape a line wider than getDesiredWidth() (notably punctuation and
+        // five-digit ports). Building at ceil(getDesiredWidth()) then wraps the
+        // final digit to line two. Never use a tight width for shaping.
+        val shapingWidth = 1 shl 24
+        return if (Build.VERSION.SDK_INT >= 23) {
+            StaticLayout.Builder.obtain(value, 0, value.length, metrics, shapingWidth)
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                .setTextDirection(TextDirectionHeuristics.LTR)
+                .setIncludePad(includeFontPadding)
+                .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+                .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
+                .build()
+        } else {
+            @Suppress("DEPRECATION")
+            StaticLayout(value, metrics, shapingWidth, Layout.Alignment.ALIGN_NORMAL,
+                1f, 0f, includeFontPadding)
+        }
+    }
+
     override fun onDraw(canvas: Canvas) {
         val available = width - compoundPaddingLeft - compoundPaddingRight
         if (available <= 0 || text.isNullOrEmpty()) {
@@ -73,31 +93,26 @@ class EndpointTextView @JvmOverloads constructor(
         if (key != cachedKey) {
             val metrics = TextPaint().apply { set(live) }
             val budget = (available - 1).coerceAtLeast(1).toFloat()
-            val display = EndpointLabelFormatter.fit(source, budget) { value ->
+            var lastValue = ""
+            var lastLayout: StaticLayout? = null
+            fun shapedExtent(value: String): Float {
+                val shaped = singleLineLayout(value, metrics)
+                check(shaped.lineCount == 1) { "Endpoint shaping must remain one line" }
                 metrics.getTextBounds(value, 0, value.length, inkBounds)
-                maxOf(Layout.getDesiredWidth(value, metrics), inkBounds.right.toFloat()) -
-                    minOf(0, inkBounds.left)
+                lastValue = value
+                lastLayout = shaped
+                return maxOf(shaped.getLineWidth(0), inkBounds.right.toFloat()) - minOf(0, inkBounds.left)
             }
-            val naturalWidth = ceil(Layout.getDesiredWidth(display, metrics).toDouble())
-                .toInt().coerceAtLeast(1)
+            // Fit using the ACTUAL shaped line, not another width approximation.
+            val display = EndpointLabelFormatter.fit(source, budget, ::shapedExtent)
+            val label = if (lastValue == display) requireNotNull(lastLayout) else singleLineLayout(display, metrics)
+            fittedLayout = label
             metrics.getTextBounds(display, 0, display.length, inkBounds)
             leftInkInset = -minOf(0, inkBounds.left).toFloat()
-            horizontalExtent = maxOf(naturalWidth.toFloat(), inkBounds.right.toFloat()) + leftInkInset
-            drawingScale = minOf(1f, budget / horizontalExtent)
-            // Only pathological port lists wider than the ENTIRE row use the
-            // port-only scale fallback. Normal endpoints keep the configured font.
-            fittedLayout = if (Build.VERSION.SDK_INT >= 23) {
-                StaticLayout.Builder.obtain(display, 0, display.length, metrics, naturalWidth)
-                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                    .setTextDirection(TextDirectionHeuristics.LTR)
-                    .setIncludePad(includeFontPadding)
-                    .build()
-            } else {
-                @Suppress("DEPRECATION")
-                StaticLayout(display, metrics, naturalWidth, Layout.Alignment.ALIGN_NORMAL,
-                    1f, 0f, includeFontPadding)
-            }
-            val label = requireNotNull(fittedLayout)
+            horizontalExtent = maxOf(label.getLineWidth(0), inkBounds.right.toFloat()) + leftInkInset
+            drawingScale = minOf(1f, budget / horizontalExtent.coerceAtLeast(1f))
+            // Only a port specification wider than the ENTIRE row is compressed.
+            // Normal addresses never wrap or shrink to compensate for two lines.
             val baseline = label.getLineBaseline(0)
             topInkInset = -minOf(0, baseline + inkBounds.top).toFloat()
             verticalExtent = maxOf(label.height, baseline + inkBounds.bottom).toFloat() + topInkInset

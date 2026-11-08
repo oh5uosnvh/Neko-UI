@@ -179,6 +179,7 @@ jobs:
             app/build/reports/tests/testPreviewDebugUnitTest/
             app/build/reports/ui-pre4/
             app/build/reports/ui-pre12/
+            app/build/reports/ui-pre13/
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:

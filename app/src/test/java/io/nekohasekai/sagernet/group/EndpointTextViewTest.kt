@@ -20,7 +20,7 @@ import org.robolectric.annotation.GraphicsMode
 import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [28], application = Application::class)
+@Config(sdk = [28, 35], application = Application::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class EndpointTextViewTest {
     private val context get() = ContextThemeWrapper(
@@ -124,6 +124,41 @@ class EndpointTextViewTest {
         render(v, ":443", true)
         size(v, 400)
         render(v, ":443", false)
+    }
+
+    @Test fun screenshotDottedHongKongFiveDigitPortNeverWrapsOrFlattens() {
+        val density = context.resources.displayMetrics.density
+        val v = view((170 * density).toInt())
+        val source = "j.5.y.y.h.d.b.9.6.hk01-example.com:19273"
+        val root = android.widget.FrameLayout(context)
+        root.addView(v, android.widget.FrameLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT))
+        for (scale in listOf(1f, 1.15f, 1.3f)) {
+            v.textSize = 14f * scale
+            v.text = source
+            size(root, (170 * density).toInt(), (24 * density).toInt())
+            for (width in 151..181) {
+                size(root, (width * density).toInt(), (24 * density).toInt())
+                render(v, ":19273", true)
+                assertEquals(1, v.renderedLayout!!.lineCount)
+                assertTrue("two-line compression must not hide wrapping", v.renderedVerticalScale > 0.8f)
+                assertEquals(1f, v.renderedScale, 0.0001f)
+            }
+        }
+        v.textSize = 14f
+        for (port in listOf("474", "14561", "484", "65535", "19273")) {
+            v.text = "j.s.c.2.t.d.f.9.6.hk01-example.com:$port"
+            render(v, ":$port", true)
+        }
+        v.text = source
+        val screenshot = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
+        root.draw(Canvas(screenshot))
+        val output = File("build/reports/ui-pre13").apply { mkdirs() }
+        File(output, "hongkong-Y01-api${android.os.Build.VERSION.SDK_INT}.png").outputStream().use {
+            screenshot.compress(Bitmap.CompressFormat.PNG, 100, it)
+        }
+        screenshot.recycle()
     }
 
     @Test fun shortAndBracketedIpv6KeepFullSourceAndPort() {
