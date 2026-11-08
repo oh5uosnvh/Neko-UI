@@ -178,6 +178,18 @@
                     android:textAppearance="?android:attr/textAppearanceSmall"
                     android:textColor="?android:textColorSecondary" />
 
+                <ProgressBar
+                    android:id="@+id/profile_pending"
+                    style="?android:attr/progressBarStyleSmall"
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_marginEnd="4dp"
+                    android:indeterminate="true"
+                    android:indeterminateTint="?android:textColorSecondary"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
+
                 <TextView
                     android:id="@+id/profile_status"
                     android:layout_width="wrap_content"
