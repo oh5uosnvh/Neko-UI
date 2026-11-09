@@ -202,6 +202,7 @@ internal object NightThemeSnapshot {
         }
 
         private fun startFade() {
+            if (phase == Phase.FADING || phase == Phase.FINISHED) return
             val activity = owner.get()
             if (activity == null || activity.isFinishing || activity.isDestroyed ||
                 !animationsEnabled(activity)) { finish(); return }

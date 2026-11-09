@@ -12,7 +12,11 @@ import android.view.View
 import android.widget.FrameLayout
 import io.nekohasekai.sagernet.ui.theme.NightThemeSnapshot
 import org.junit.Assert.*
+import org.junit.Before
+import org.junit.After
 import org.junit.Test
+import org.robolectric.shadows.ShadowChoreographer
+import android.animation.ValueAnimator
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
@@ -27,6 +31,16 @@ import java.time.Duration
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @LooperMode(LooperMode.Mode.PAUSED)
 class NightThemeSnapshotTest {
+    @Before fun pauseFrames() {
+        ShadowChoreographer.setPaused(true)
+        ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
+        ValueAnimator::class.java.getDeclaredMethod("setDurationScale", Float::class.javaPrimitiveType).invoke(null, 1f)
+    }
+    @After fun restoreFrames() {
+        ValueAnimator::class.java.getDeclaredMethod("setDurationScale", Float::class.javaPrimitiveType).invoke(null, 1f)
+        ShadowChoreographer.setPaused(false)
+        ShadowChoreographer.setFrameDelay(Duration.ofMillis(1))
+    }
     @Test fun oldFrameAlphaOnlyProducesExactLinearMidpointOverNewFrame() {
         val old = Bitmap.createBitmap(20, 20, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.WHITE) }
         val layer = NightThemeSnapshot.SnapshotDrawable(old).apply { setBounds(0, 0, 20, 20) }
