@@ -3245,8 +3245,8 @@ class ConfigurationFragment @JvmOverloads constructor(
             // fitting cannot be accidentally replaced by TextView ellipsizing.
             val profileAddress: io.nekohasekai.sagernet.widget.EndpointTextView =
                 view.findViewById(R.id.profile_address)
-            val profileStatus: TextView = view.findViewById(R.id.profile_status)
             val profilePending: View = view.findViewById(R.id.profile_pending)
+            val profileStatus: TextView = view.findViewById(R.id.profile_status)
             val addressRow: View = view.findViewById(R.id.address_row)
 
             val trafficText: TextView = view.findViewById(R.id.traffic_text)
@@ -3539,56 +3539,62 @@ class ConfigurationFragment @JvmOverloads constructor(
                 lastSelfHasMiddleRow = false
 
                 // Row 4 is exclusively protocol + latency/error status.
-                // 延迟测试动画：未测显示转圈；有结果 150ms 后转圈淡出、延迟淡入。
+                val testing = DataStore.runningTest
                 view.tag = proxyEntity.id
                 profilePending.animate().cancel()
                 profileStatus.animate().cancel()
-                profilePending.alpha = 1f
-                profilePending.visibility = View.GONE
-                profileStatus.alpha = 0f
-                profileStatus.scaleX = 1f
-                profileStatus.scaleY = 1f
+
+                if (!testing) {
+                    // Outside a test, latency/error is persistent.  In particular,
+                    // never reset alpha here: RecyclerView rebinding must not replay
+                    // an entrance animation while the user scrolls.
+                    profilePending.visibility = View.GONE
+                    profilePending.alpha = 1f
+                    profileStatus.alpha = 1f
+                    profileStatus.scaleX = 1f
+                    profileStatus.scaleY = 1f
+                } else {
+                    profilePending.alpha = 1f
+                    profilePending.visibility = View.GONE
+                    profileStatus.alpha = 0f
+                    profileStatus.scaleX = 1f
+                    profileStatus.scaleY = 1f
+                }
                 profileStatus.text = ""
                 profileStatus.setTextColor(secondary)
 
-                val showLatencyResult = { text: CharSequence, color: Int ->
-                    profileStatus.text = text
-                    profileStatus.setTextColor(color)
+                when (proxyEntity.status) {
+                    0 -> if (testing) {
+                        profilePending.visibility = View.VISIBLE
+                    }
+                    1 -> {
+                        profileStatus.text = getString(R.string.available, proxyEntity.ping)
+                        profileStatus.setTextColor(requireContext().getColour(R.color.material_green_500))
+                    }
+                    2 -> {
+                        profileStatus.text = proxyEntity.error ?: getString(R.string.unavailable)
+                        profileStatus.setTextColor(requireContext().getColour(R.color.material_red_500))
+                    }
+                    3 -> {
+                        val err = proxyEntity.error ?: "<?>"
+                        val msg = Protocols.genFriendlyMsg(err)
+                        profileStatus.text = if (msg != err) msg else getString(R.string.unavailable)
+                        profileStatus.setTextColor(requireContext().getColour(R.color.material_red_500))
+                    }
+                }
+
+                if (testing && proxyEntity.status in 1..3) {
                     val boundId = proxyEntity.id
                     profileStatus.postDelayed({
-                        // ViewHolder 可能已被复用，校验后再生效
                         if (view.tag != boundId) return@postDelayed
                         profilePending.animate().alpha(0f).setDuration(120L).withEndAction {
                             if (view.tag == boundId) profilePending.visibility = View.GONE
                         }.start()
                         profileStatus.scaleX = 0.92f
                         profileStatus.scaleY = 0.92f
-                        profileStatus.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(180L).start()
+                        profileStatus.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                            .setDuration(180L).start()
                     }, 150L)
-                }
-
-                when (proxyEntity.status) {
-                    0 -> {
-                        // 未测：显示转圈，继续等待
-                        profilePending.visibility = View.VISIBLE
-                        profilePending.alpha = 1f
-                    }
-                    1 -> showLatencyResult(
-                        getString(R.string.available, proxyEntity.ping),
-                        requireContext().getColour(R.color.material_green_500)
-                    )
-                    2 -> showLatencyResult(
-                        proxyEntity.error ?: getString(R.string.unavailable),
-                        requireContext().getColour(R.color.material_red_500)
-                    )
-                    3 -> {
-                        val err = proxyEntity.error ?: "<?>"
-                        val msg = Protocols.genFriendlyMsg(err)
-                        showLatencyResult(
-                            if (msg != err) msg else getString(R.string.unavailable),
-                            requireContext().getColour(R.color.material_red_500)
-                        )
-                    }
                 }
 
                 val selectOrChain = select || proxyEntity.type == ProxyEntity.TYPE_CHAIN
