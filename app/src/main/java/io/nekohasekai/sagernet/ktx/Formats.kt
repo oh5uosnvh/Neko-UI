@@ -150,7 +150,7 @@ fun parseProxyLink(value: String): AbstractBean? {
             runCatching {
                 entities.add(parseV2Ray(this))
             }
-        } else if (startsWith("heysocks://")) {
+        } else if (startsWith("xhttp://") || startsWith("heysocks://")) {
             runCatching {
                 entities.add(moe.matsuri.nb4a.proxy.xhttp.parseXhttpLink(this))
             }

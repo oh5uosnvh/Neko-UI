@@ -11,7 +11,7 @@ internal object StreamingProfileImport {
     const val BATCH_SIZE = 512
     private val schemes = listOf("vless://", "vmess://", "ss://", "ssr://", "trojan://",
         "trojan-go://", "socks://", "socks4://", "socks5://", "anytls://", "hysteria://",
-        "hysteria2://", "hy2://", "tuic://", "juicity://", "snell://", "naive+", "heysocks://")
+        "hysteria2://", "hy2://", "tuic://", "juicity://", "snell://", "naive+", "xhttp://", "heysocks://")
 
     fun isNodeListPrefix(prefix: String): Boolean {
         val first = prefix.lineSequence().map { it.trim().removePrefix("\uFEFF") }
