@@ -117,7 +117,8 @@ internal class TopBarController(
     private var groupPickerSession: PickerSession? = null
 
     /** ⊙ 点击循环进度：false=下次去选定节点分组，true=下次去第一个分组 */
-    private var jumpToggle = false
+    private val jumpSequence = SelectedJumpSequence()
+    private var jumpGeneration = 0L
 
     /** 长按判定时长：0.5s */
     private val longPressMs = 500L
@@ -157,7 +158,8 @@ internal class TopBarController(
         this.toolbarRef = toolbar
         iconColor = resolveForeground(toolbar)
 
-        jumpToggle = false
+        jumpSequence.reset()
+        jumpGeneration++
         longPressFired = false
         pressedView = null
         searchExpanded = false
@@ -234,6 +236,8 @@ internal class TopBarController(
     }
 
     fun detach() {
+        jumpGeneration++
+        jumpSequence.reset()
         dismissGroupPicker()
         searchExpanded = false
         searchField?.let { sv ->
@@ -567,21 +571,37 @@ internal class TopBarController(
         return false
     }
 
-    /** ⊙ 单击：1) 选定节点所在分组  2) 第一个分组，往复循环 */
+    /** First click locates the selected group/card; only a consecutive second click goes first. */
     private fun onJumpTap() {
-        if (jumpToggle) {
-            jumpToggle = false
-            jumpToFirstGroup()
-        } else {
-            jumpToggle = true
-            jumpToSelectedGroup()
+        host.cancelSelectedCardJump()
+        val token = ++jumpGeneration
+        val selectedId = host.selectedItem?.id ?: DataStore.selectedProxy
+        if (selectedId <= 0L) { jumpSequence.reset(); jumpToFirstGroup(); return }
+        runOnDefaultDispatcher {
+            val groupId = SagerDatabase.proxyDao.getById(selectedId)?.groupId ?: 0L
+            onMainDispatcher {
+                if (token != jumpGeneration || !host.isAdded || host.viewLifecycleOwnerLiveData.value == null ||
+                    (host.selectedItem?.id ?: DataStore.selectedProxy) != selectedId) return@onMainDispatcher
+                val list = groups()
+                val visibleId = list.getOrNull(host.groupPager.currentItem)?.id ?: 0L
+                if (groupId <= 0L || list.none { it.id == groupId }) {
+                    jumpSequence.reset()
+                    jumpToFirstGroup()
+                } else if (jumpSequence.returnToFirst(selectedId, groupId, visibleId)) {
+                    jumpToFirstGroup()
+                } else {
+                    host.requestSelectedCardJump(groupId, selectedId)
+                }
+            }
         }
     }
 
     /** ⊙ 长按（0.5s）：跳到末尾分组 */
     private fun onLongPress() {
         longPressFired = true
-        jumpToggle = false
+        jumpSequence.reset()
+        jumpGeneration++
+        host.cancelSelectedCardJump()
         jumpToLastGroup()
     }
 
@@ -590,6 +610,7 @@ internal class TopBarController(
     private fun groups(): List<ProxyGroup> = host.adapter.groupList
 
     private fun jumpTo(index: Int) {
+        host.cancelSelectedCardJump()
         val list = groups()
         if (list.isEmpty()) {
             host.snackbar(R.string.jump_hint_none)

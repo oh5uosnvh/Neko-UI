@@ -3,6 +3,8 @@ package io.nekohasekai.sagernet.ui
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import io.nekohasekai.sagernet.ui.theme.NightThemeSnapshot
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
@@ -34,6 +36,7 @@ abstract class ThemedActivity : AppCompatActivity {
         Theme.applyNightTheme()
 
         super.onCreate(savedInstanceState)
+        NightThemeSnapshot.created(this, savedInstanceState)
 
         uiMode = resources.configuration.uiMode
 
@@ -91,7 +94,40 @@ abstract class ThemedActivity : AppCompatActivity {
         themeResId = resId
     }
 
+    /** Only the night preference uses this path; accent/theme and language stay unchanged. */
+    fun changeNightMode(mode: Int) {
+        val targetNight = when (mode) {
+            1 -> Configuration.UI_MODE_NIGHT_YES
+            2 -> Configuration.UI_MODE_NIGHT_NO
+            0 -> applicationContext.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+            else -> if ((getSystemService(POWER_SERVICE) as PowerManager).isPowerSaveMode)
+                Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+        }
+        val snapshot = NightThemeSnapshot.begin(this, targetNight)
+        try {
+            // Persist before AppCompat can synchronously deliver onConfigurationChanged.
+            DataStore.nightTheme = mode
+            Theme.currentNightMode = mode
+            Theme.applyNightTheme()
+            NightThemeSnapshot.applied(this, snapshot)
+        } catch (failure: Throwable) {
+            snapshot?.finish()
+            throw failure
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        NightThemeSnapshot.save(this, outState)
+        super.onSaveInstanceState(outState)
+    }
+
+    override fun onDestroy() {
+        NightThemeSnapshot.destroyed(this)
+        super.onDestroy()
+    }
+
     override fun onConfigurationChanged(newConfig: Configuration) {
+        NightThemeSnapshot.beforeRecreate(this, newConfig)
         super.onConfigurationChanged(newConfig)
 
         if (newConfig.uiMode != uiMode) {

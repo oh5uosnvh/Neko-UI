@@ -212,28 +212,29 @@ class ConfigurationFragment @JvmOverloads constructor(
         Logs.w("no MainActivity host found for overflow menu")
     }
 
-    /** 滚到当前选中节点；不在可见范围内则滚到它，否则回顶部 */
+    /** Title click always locates the selected card smoothly, never toggles back to top. */
     private fun scrollToSelectedProfile() {
         val fragment = getCurrentGroupFragment() ?: return
+        val nodes = fragment.adapter ?: return
         val selectedProxy = selectedItem?.id ?: DataStore.selectedProxy
-        val selectedProfileIndex =
-            fragment.adapter?.configurationIdList?.indexOf(selectedProxy) ?: -1
-
-        if (selectedProfileIndex != -1) {
-            val layoutManager = fragment.layoutManager
-            if (layoutManager is LinearLayoutManager) {
-                val first = layoutManager.findFirstVisibleItemPosition()
-                val last = layoutManager.findLastVisibleItemPosition()
-                if (selectedProfileIndex !in first..last) {
-                    fragment.configurationListView.scrollTo(selectedProfileIndex, true)
-                    return
+        cancelSelectedCardJump()
+        if (selectedProxy > 0L && selectedProxy !in nodes.configurationIdList) {
+            runOnDefaultDispatcher {
+                val groupId = SagerDatabase.proxyDao.getById(selectedProxy)?.groupId
+                onMainDispatcher {
+                    if (isAdded && viewLifecycleOwnerLiveData.value != null && groupId != null &&
+                        (selectedItem?.id ?: DataStore.selectedProxy) == selectedProxy) {
+                        requestSelectedCardJump(groupId, selectedProxy)
+                    }
                 }
-            } else {
-                fragment.configurationListView.scrollTo(selectedProfileIndex, true)
-                return
             }
+            return
         }
-        fragment.configurationListView.scrollTo(0)
+        val target = selectedProxy.takeIf { it in nodes.configurationIdList }
+            ?: nodes.configurationIdList.firstOrNull() ?: return
+        selectedCardScroller = SelectedProfileScroller(fragment.configurationListView).also {
+            it.scrollTo(target) { nodes.configurationIdList }
+        }
     }
 
 
@@ -390,6 +391,46 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
     }
 
+    private data class SelectedCardJump(val groupId: Long, val profileId: Long)
+    private var selectedCardJump: SelectedCardJump? = null
+    private var selectedCardScroller: SelectedProfileScroller? = null
+
+    internal fun cancelSelectedCardJump() {
+        selectedCardJump = null
+        selectedCardScroller?.close()
+        selectedCardScroller = null
+    }
+
+    internal fun requestSelectedCardJump(groupId: Long, profileId: Long) {
+        cancelSelectedCardJump()
+        val position = adapter.groupList.indexOfFirst { it.id == groupId }
+        if (position < 0) return
+        selectedCardJump = SelectedCardJump(groupId, profileId)
+        requestGroupPage(position)
+        trySelectedCardJump()
+    }
+
+    private fun trySelectedCardJump() {
+        val request = selectedCardJump ?: return
+        if (pageTransition?.clicking == true || groupPager.scrollState != ViewPager2.SCROLL_STATE_IDLE) return
+        if (adapter.groupList.getOrNull(groupPager.currentItem)?.id != request.groupId) return
+        val index = groupPager.currentItem
+        val tab = tabLayout.getTabAt(index)?.view
+        val strip = tabLayout.getChildAt(0)
+        if (tab != null && strip != null && tab.width > 0) {
+            val targetX = ((tab.left + tab.right - tabLayout.width) / 2)
+                .coerceIn(0, (strip.width - tabLayout.width).coerceAtLeast(0))
+            tabLayout.smoothScrollTo(targetX, 0)
+        }
+        val child = getCurrentGroupFragment() ?: return
+        val nodes = child.adapter ?: return
+        if (child.view == null || !nodes.hasCurrentSearchResult() || request.profileId !in nodes.configurationIdList) return
+        selectedCardJump = null
+        selectedCardScroller = SelectedProfileScroller(child.configurationListView).also {
+            it.scrollTo(request.profileId) { nodes.configurationIdList }
+        }
+    }
+
     private val pageRequests = GroupPageRequests()
     private val groupSelectionWriter = GroupSelectionWriter { id ->
         if (DataStore.configurationStore.getLong(Key.PROFILE_GROUP, -1L) != id) DataStore.selectedGroup = id
@@ -433,11 +474,15 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     val updateSelectedCallback = object : ViewPager2.OnPageChangeCallback() {
         override fun onPageScrollStateChanged(state: Int) {
-            if (state == ViewPager2.SCROLL_STATE_IDLE) schedulePageRequest()
+            if (state == ViewPager2.SCROLL_STATE_IDLE) {
+                schedulePageRequest()
+                trySelectedCardJump()
+            }
         }
 
         override fun onPageSelected(position: Int) {
             if (pageTransition?.clicking == true) return
+            trySelectedCardJump()
             if (!isRestoringGroup) adapter.selectedGroupIndex = position
             if (!select && !isRestoringGroup && position in adapter.groupList.indices) {
                 val newId = adapter.groupList[position].id
@@ -489,6 +534,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private fun onSearchResultsChanged(source: GroupFragment.ConfigurationAdapter) {
         if (getCurrentGroupFragment()?.adapter !== source) return
+        trySelectedCardJump()
         searchScope.updateDeleteVisibility(
             searchQueryText.isNotBlank() && source.hasCurrentSearchResult() &&
                 source.configurationIdList.isNotEmpty(),
@@ -701,6 +747,7 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     override fun onDestroyView() {
+        cancelSelectedCardJump()
         pageTransition?.let { groupPager.unregisterOnPageChangeCallback(it); it.close() }
         pageTransition = null
         pageRequests.clear()
@@ -723,6 +770,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         activeLatencyCancel = null
         activeLatencyMinimize = null
         activeLatencyIds.clear()
+        cardLatencySession.clear()
         if (ownedLatencyTask) DataStore.runningTest = false
         pendingLatencyRequest = null
         latencyOverlay?.release()
@@ -1433,6 +1481,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             synchronized(resultsLock) {
                 if (dialogStatus.get() == 2 || !ownsSession() || terminal.get()) return
                 results.add(profile)
+                cardLatencySession.complete(profile, generation)
                 if (profile.status == 1) successN.incrementAndGet() else failedN.incrementAndGet()
                 finishedN.incrementAndGet()
             }
@@ -1456,6 +1505,12 @@ class ConfigurationFragment @JvmOverloads constructor(
                 if (!ownsSession()) return@runOnMainDispatcher
                 latencyOverlay()?.completed(successN.get(), failedN.get(), interrupted)
                 notification?.updateNotification(finishedN.get(), proxyN, true)
+                refreshVisibleCardLatency()
+                delay(150L)
+                if (ownsSession() && !DataStore.runningTest) {
+                    cardLatencySession.clear()
+                    refreshVisibleCardLatency()
+                }
             }
         }
     }
@@ -1494,7 +1549,13 @@ class ConfigurationFragment @JvmOverloads constructor(
             val profiles = ConcurrentLinkedQueue(profilesList)
             activeLatencyIds.addAll(profilesList.map { it.id })
             profilesList.forEach { it.status = 0 }
-            runOnMainDispatcher { if (test.ownsSession()) latencyOverlay()?.running(0, profilesList.size, 0) }
+            cardLatencySession.begin(profilesList.map { it.id }, generation)
+            onMainDispatcher {
+                if (test.ownsSession()) {
+                    refreshVisibleCardLatency()
+                    latencyOverlay()?.running(0, profilesList.size, 0)
+                }
+            }
             repeat(DataStore.connectionTestConcurrent) {
                 testJobs.add(launch(Dispatchers.IO) {
                     while (isActive) {
@@ -1624,7 +1685,13 @@ class ConfigurationFragment @JvmOverloads constructor(
             test.targetIds.addAll(profilesList.map { it.id })
             val profiles = ConcurrentLinkedQueue(profilesList)
             activeLatencyIds.addAll(profilesList.map { it.id }); profilesList.forEach { it.status = 0 }
-            runOnMainDispatcher { if (test.ownsSession()) latencyOverlay()?.running(0, profilesList.size, 0) }
+            cardLatencySession.begin(profilesList.map { it.id }, generation)
+            onMainDispatcher {
+                if (test.ownsSession()) {
+                    refreshVisibleCardLatency()
+                    latencyOverlay()?.running(0, profilesList.size, 0)
+                }
+            }
             repeat(DataStore.connectionTestConcurrent) {
                 testJobs.add(launch(Dispatchers.IO) {
                     val urlTest = UrlTest(testPool!!)
@@ -1686,6 +1753,21 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
         }
         mainJob.start()
+    }
+
+    private val cardLatencySession = CardLatencySession()
+    private fun refreshVisibleCardLatency() {
+        if (!isAdded || !::adapter.isInitialized) return
+        adapter.groupFragments.values.forEach { child ->
+            val nodes = child.adapter ?: return@forEach
+            if (child.view == null) return@forEach
+            val list = child.configurationListView
+            for (index in 0 until list.childCount) {
+                val holder = list.getChildViewHolder(list.getChildAt(index)) as? GroupFragment.ConfigurationHolder ?: continue
+                val position = holder.bindingAdapterPosition
+                if (position >= 0) nodes.notifyItemChanged(position)
+            }
+        }
     }
 
     private val activeLatencyIds = ConcurrentHashMap.newKeySet<Long>()
@@ -2763,7 +2845,13 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
             }
 
+            override fun onViewDetachedFromWindow(holder: ConfigurationHolder) {
+                holder.resetLatencyDisplay()
+                super.onViewDetachedFromWindow(holder)
+            }
+
             override fun onViewRecycled(holder: ConfigurationHolder) {
+                holder.resetLatencyDisplay()
                 holder.lastSelfHasMiddleRow = null
                 holder.lastBoundTx = Long.MIN_VALUE
                 holder.lastBoundRx = Long.MIN_VALUE
@@ -2773,6 +2861,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 super.onViewAttachedToWindow(holder)
                 val profileId = holder.itemId
                 val cached = configurationList[profileId] ?: return
+                holder.bind(cached)
                 if (holder.lastBoundTx == cached.tx && holder.lastBoundRx == cached.rx) return
                 if (configurationListView.scrollState != RecyclerView.SCROLL_STATE_IDLE) {
                     pendingTrafficUpdates.add(profileId)
@@ -3247,6 +3336,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                 view.findViewById(R.id.profile_address)
             val profilePending: View = view.findViewById(R.id.profile_pending)
             val profileStatus: TextView = view.findViewById(R.id.profile_status)
+            private val cardLatency = CardLatencyBinding(profileStatus, profilePending)
+            internal fun resetLatencyDisplay() = cardLatency.reset()
             val addressRow: View = view.findViewById(R.id.address_row)
 
             val trafficText: TextView = view.findViewById(R.id.traffic_text)
@@ -3538,64 +3629,30 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
                 lastSelfHasMiddleRow = false
 
-                // Row 4 is exclusively protocol + latency/error status.
-                val testing = DataStore.runningTest
-                view.tag = proxyEntity.id
-                profilePending.animate().cancel()
-                profileStatus.animate().cancel()
-
-                if (!testing) {
-                    // Outside a test, latency/error is persistent.  In particular,
-                    // never reset alpha here: RecyclerView rebinding must not replay
-                    // an entrance animation while the user scrolls.
-                    profilePending.visibility = View.GONE
-                    profilePending.alpha = 1f
-                    profileStatus.alpha = 1f
-                    profileStatus.scaleX = 1f
-                    profileStatus.scaleY = 1f
-                } else {
-                    profilePending.alpha = 1f
-                    profilePending.visibility = View.GONE
-                    profileStatus.alpha = 0f
-                    profileStatus.scaleX = 1f
-                    profileStatus.scaleY = 1f
-                }
+                // Preserve pre16's text/colour/error semantics. Only LIVE targeted
+                // measurements own pending; ordinary rebinds are immediately opaque.
+                val entry = pf.cardLatencySession.get(proxyEntity.id)
+                    ?.takeIf { DataStore.runningTest || it.result != null }
+                val measured = entry?.result ?: proxyEntity
                 profileStatus.text = ""
                 profileStatus.setTextColor(secondary)
-
-                when (proxyEntity.status) {
-                    0 -> if (testing) {
-                        profilePending.visibility = View.VISIBLE
-                    }
+                when (measured.status) {
                     1 -> {
-                        profileStatus.text = getString(R.string.available, proxyEntity.ping)
+                        profileStatus.text = getString(R.string.available, measured.ping)
                         profileStatus.setTextColor(requireContext().getColour(R.color.material_green_500))
                     }
                     2 -> {
-                        profileStatus.text = proxyEntity.error ?: getString(R.string.unavailable)
+                        profileStatus.text = measured.error ?: getString(R.string.unavailable)
                         profileStatus.setTextColor(requireContext().getColour(R.color.material_red_500))
                     }
                     3 -> {
-                        val err = proxyEntity.error ?: "<?>"
+                        val err = measured.error ?: "<?>"
                         val msg = Protocols.genFriendlyMsg(err)
                         profileStatus.text = if (msg != err) msg else getString(R.string.unavailable)
                         profileStatus.setTextColor(requireContext().getColour(R.color.material_red_500))
                     }
                 }
-
-                if (testing && proxyEntity.status in 1..3) {
-                    val boundId = proxyEntity.id
-                    profileStatus.postDelayed({
-                        if (view.tag != boundId) return@postDelayed
-                        profilePending.animate().alpha(0f).setDuration(120L).withEndAction {
-                            if (view.tag == boundId) profilePending.visibility = View.GONE
-                        }.start()
-                        profileStatus.scaleX = 0.92f
-                        profileStatus.scaleY = 0.92f
-                        profileStatus.animate().alpha(1f).scaleX(1f).scaleY(1f)
-                            .setDuration(180L).start()
-                    }, 150L)
-                }
+                cardLatency.bind(entry, entry?.result != null)
 
                 val selectOrChain = select || proxyEntity.type == ProxyEntity.TYPE_CHAIN
                 val isDoubleColumn = layoutManager is FixedGridLayoutManager

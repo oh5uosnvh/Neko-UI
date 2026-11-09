@@ -74,12 +74,9 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
 
         val nightTheme = findPreference<SimpleMenuPreference>(Key.NIGHT_THEME)!!
         nightTheme.setOnPreferenceChangeListener { _, newTheme ->
-            // SimpleMenuPreference delivers only after the old popup has exited and detached.
-            // Persist before applyNightTheme can recreate the activity and read this setting.
-            val mode = (newTheme as String).toInt()
-            DataStore.nightTheme = mode
-            Theme.currentNightMode = mode
-            Theme.applyNightTheme()
+            // The popup has detached. Capture the OLD decor synchronously before writing
+            // the preference or asking AppCompat to apply/recreate the new night theme.
+            (requireActivity() as ThemedActivity).changeNightMode((newTheme as String).toInt())
             true
         }
         val appLanguage = findPreference<SimpleMenuPreference>(Key.APP_LANGUAGE)!!
