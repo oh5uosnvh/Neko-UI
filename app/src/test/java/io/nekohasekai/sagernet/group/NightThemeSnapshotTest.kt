@@ -62,7 +62,13 @@ class NightThemeSnapshotTest {
             session.mount(activity, ready = true)
             assertEquals(NightThemeSnapshot.Phase.WAITING_FOR_DRAW, session.phase)
             assertEquals(1f, session.drawable!!.opacity, 0f)
+            // View.draw(Canvas) alone does NOT deliver ViewRootImpl's OnDraw
+            // notification. Reproduce the actual traversal (layout → preDraw → draw).
+            root.measure(View.MeasureSpec.makeMeasureSpec(320, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(640, View.MeasureSpec.EXACTLY))
+            root.layout(0, 0, 320, 640)
             root.viewTreeObserver.dispatchOnPreDraw()
+            root.viewTreeObserver.dispatchOnDraw()
             val output = Bitmap.createBitmap(320, 640, Bitmap.Config.ARGB_8888)
             root.draw(Canvas(output)); output.recycle()
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(32))
