@@ -6,7 +6,9 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
+import android.text.Layout
 import android.text.TextUtils
+import android.view.ViewGroup
 import android.util.TypedValue
 import android.view.View
 import androidx.appcompat.widget.AppCompatTextView
@@ -31,13 +33,33 @@ class GroupTabPill(context: Context) : AppCompatTextView(context) {
         background = surface
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
         setPadding(dp(14), dp(6), dp(14), dp(6))
-        minHeight = dp(34); maxWidth = dp(264); maxLines = 1
+        minHeight = dp(34); maxLines = 1
         ellipsize = TextUtils.TruncateAt.END
         gravity = android.view.Gravity.CENTER
         isClickable = false; isFocusable = false
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         ready = true
     }
+    /** A pixel budget, not a character count; the end ellipsis is inside it. */
+    internal fun labelWidthLimit(): Int = kotlin.math.ceil(
+        Layout.getDesiredWidth("模模模模模模模", paint).toDouble()
+    ).toInt()
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val padding = compoundPaddingLeft + compoundPaddingRight
+        val desired = kotlin.math.ceil(Layout.getDesiredWidth(text ?: "", paint).toDouble()).toInt()
+        val wanted = minOf(desired, labelWidthLimit()) + padding
+        maxWidth = labelWidthLimit() + padding
+        // A same-line TextView rebind can retain its previous desired width.
+        // Recompute from source on each measure and never keep a stale expanded frame.
+        val offered = View.MeasureSpec.getSize(widthMeasureSpec)
+        val width = when (View.MeasureSpec.getMode(widthMeasureSpec)) {
+            View.MeasureSpec.EXACTLY, View.MeasureSpec.AT_MOST -> minOf(wanted, offered)
+            else -> wanted
+        }
+        super.onMeasure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), heightMeasureSpec)
+    }
+
     override fun setSelected(selected: Boolean) {
         super.setSelected(selected)
         if (ready && !manualProgress) selectionProgress = if (selected) 1f else 0f
@@ -96,8 +118,24 @@ class GroupTabPill(context: Context) : AppCompatTextView(context) {
         fun bindTab(tab: TabLayout.Tab, label: CharSequence?) {
             tab.text = label; tab.contentDescription = label
             val existing = tab.customView as? GroupTabPill
-            if (existing != null) { existing.text = label; existing.settleSelected(tab.isSelected) }
-            else tab.customView = GroupTabPill(tab.view.context).apply { text = label; settleSelected(tab.isSelected) }
+            val pill = existing ?: GroupTabPill(tab.view.context).also { tab.customView = it }
+            pill.text = label
+            pill.settleSelected(tab.isSelected)
+            pill.minimumWidth = 0
+            pill.layoutParams = (pill.layoutParams ?: ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            )).apply { width = ViewGroup.LayoutParams.WRAP_CONTENT }
+            pill.forceLayout()
+            pill.requestLayout()
+            // Material's TabView/indicator also cache measure specs. Invalidate the
+            // existing chain, keeping the selected tab and scroll position intact.
+            var parent: android.view.ViewParent? = pill.parent
+            while (parent is View) {
+                parent.forceLayout()
+                parent.requestLayout()
+                if (parent is TabLayout) break
+                parent = parent.parent
+            }
         }
     }
 }
