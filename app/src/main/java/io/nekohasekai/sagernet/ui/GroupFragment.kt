@@ -65,6 +65,36 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     private var groupClassifyItem: MenuItem? = null
     private var groupClassifyAnimating = false
     private var groupSearchMode = false
+
+    private fun setGroupClassifyVisible(visible: Boolean, animate: Boolean = true) {
+        val item = groupClassifyItem ?: return
+        if (item.isVisible == visible && !groupClassifyAnimating) return
+        if (!visible) {
+            val view = toolbar.findViewById<View>(item.itemId)
+            if (animate && view?.isShown == true) {
+                groupClassifyAnimating = true
+                view.animate().alpha(0f).translationX(-dp2px(28).toFloat())
+                    .setDuration(180L).withEndAction {
+                        item.isVisible = false
+                        view.alpha = 1f
+                        view.translationX = 0f
+                        groupClassifyAnimating = false
+                    }.start()
+            } else item.isVisible = false
+            return
+        }
+        item.isVisible = true
+        if (!animate) return
+        toolbar.post {
+            val view = toolbar.findViewById<View>(item.itemId) ?: return@post
+            groupClassifyAnimating = true
+            view.alpha = 0f
+            view.translationX = -dp2px(28).toFloat()
+            view.animate().alpha(1f).translationX(0f).setDuration(220L)
+                .setInterpolator(android.view.animation.DecelerateInterpolator(1.5f))
+                .withEndAction { groupClassifyAnimating = false }.start()
+        }
+    }
     private val selectedForClassification = LinkedHashSet<Long>()
 
     companion object {
@@ -195,8 +225,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 override fun onQueryTextSubmit(query: String) = false
                 override fun onQueryTextChange(newText: String): Boolean {
                     groupSearchQuery = newText.trim()
-                    groupClassifyItem?.isVisible = groupSearchQuery.isNotEmpty() &&
-                        groupAdapter.searchMatches().size >= 2
+                    setGroupClassifyVisible(groupSearchQuery.isNotEmpty() &&
+                        groupAdapter.searchMatches().size >= 2)
                     groupAdapter.applyFilter()
                     return true
                 }
@@ -316,8 +346,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             setIcon(R.drawable.ic_action_done)
             title = getString(R.string.group_classify)
         }
-        groupClassifyItem?.isVisible = false
-        toolbar.menu.findItem(R.id.action_group_search)?.isVisible = false
+        setGroupClassifyVisible(false)
         groupAdapter.applyFilter()
     }
 
@@ -327,7 +356,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         groupSearchQuery = ""
         selectedForClassification.clear()
         groupAdapter.customSelection = false
-        groupClassifyItem?.isVisible = false
+        setGroupClassifyVisible(false)
         toolbar.menu.findItem(R.id.action_update_all)?.apply {
             isVisible = true
             setIcon(R.drawable.ic_baseline_update_24)
@@ -338,7 +367,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             setIcon(R.drawable.ic_av_playlist_add)
             title = getString(R.string.group_create)
         }
-        groupClassifyItem?.isVisible = false
+        setGroupClassifyVisible(false)
         toolbar.menu.findItem(R.id.action_group_search)?.isVisible = true
         groupAdapter.applyFilter()
     }
@@ -359,7 +388,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                     2 -> {
                         selectedForClassification.clear()
                         groupAdapter.customSelection = true
-                        groupClassifyItem?.isVisible = true
+                        setGroupClassifyVisible(false)
                         groupAdapter.notifyDataSetChanged()
                     }
                 }
@@ -587,7 +616,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             if (!group.displayName().contains(groupSearchQuery.trim(), ignoreCase = true)) return true
             if (selectedForClassification.contains(group.id)) selectedForClassification.remove(group.id)
             else selectedForClassification.add(group.id)
-            groupClassifyItem?.isVisible = selectedForClassification.isNotEmpty()
+            setGroupClassifyVisible(selectedForClassification.isNotEmpty())
             notifyDataSetChanged()
             return true
         }
@@ -673,7 +702,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             if (query.isNotEmpty()) {
                 list = list.filter { it.displayName().contains(query, ignoreCase = true) }
             } else if (groupSearchMode) {
-                groupClassifyItem?.isVisible = false
+                setGroupClassifyVisible(false)
             }
             val filter = filterSubscription
             if (filter != null) {
@@ -685,7 +714,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 else -> list
             }
             if (query.isNotEmpty()) {
-                groupClassifyItem?.isVisible = list.size >= 2
+                setGroupClassifyVisible(list.size >= 2)
             }
             groupList.clear()
             groupList.addAll(list)
