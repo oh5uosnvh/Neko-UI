@@ -8,6 +8,11 @@
         app:actionViewClass="androidx.appcompat.widget.SearchView"
         app:showAsAction="always|collapseActionView" />
     <item
+        android:id="@+id/action_group_classify"
+        android:title="@string/group_classify"
+        android:visible="false"
+        app:showAsAction="always" />
+    <item
         android:id="@+id/action_update_all"
         android:icon="@drawable/ic_baseline_update_24"
         android:title="@string/update_all_subscription"

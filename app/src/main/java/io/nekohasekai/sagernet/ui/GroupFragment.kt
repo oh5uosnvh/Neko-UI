@@ -63,6 +63,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     private var groupSearchView: androidx.appcompat.widget.SearchView? = null
     private var groupSearchItem: MenuItem? = null
     private var groupClassifyItem: MenuItem? = null
+    private var groupClassifyAnimating = false
     private var groupSearchMode = false
     private val selectedForClassification = LinkedHashSet<Long>()
 
@@ -175,7 +176,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         toolbar.inflateMenu(R.menu.add_group_menu)
         toolbar.setOnMenuItemClickListener(this)
         groupSearchItem = toolbar.menu.findItem(R.id.action_group_search)
-        groupClassifyItem = toolbar.menu.findItem(R.id.action_new_group)
+        groupClassifyItem = toolbar.menu.findItem(R.id.action_group_classify)
         groupSearchItem?.setOnActionExpandListener(object : MenuItem.OnActionExpandListener {
             override fun onMenuItemActionExpand(item: MenuItem): Boolean {
                 enterGroupSearchMode(item)
@@ -194,6 +195,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 override fun onQueryTextSubmit(query: String) = false
                 override fun onQueryTextChange(newText: String): Boolean {
                     groupSearchQuery = newText.trim()
+                    groupClassifyItem?.isVisible = groupSearchQuery.isNotEmpty() &&
+                        groupAdapter.searchMatches().size >= 2
                     groupAdapter.applyFilter()
                     return true
                 }
@@ -314,6 +317,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             title = getString(R.string.group_classify)
         }
         groupClassifyItem?.isVisible = false
+        toolbar.menu.findItem(R.id.action_group_search)?.isVisible = false
         groupAdapter.applyFilter()
     }
 
@@ -334,6 +338,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             setIcon(R.drawable.ic_av_playlist_add)
             title = getString(R.string.group_create)
         }
+        groupClassifyItem?.isVisible = false
+        toolbar.menu.findItem(R.id.action_group_search)?.isVisible = true
         groupAdapter.applyFilter()
     }
 
@@ -371,10 +377,17 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
     override fun onMenuItemClick(item: MenuItem): Boolean {
         when (item.itemId) {
+            R.id.action_group_classify -> {
+                if (groupAdapter.customSelection) saveClassification(selectedForClassification.toList())
+                else openClassificationChoice()
+            }
             R.id.action_new_group -> {
                 if (groupSearchMode) {
-                    if (groupAdapter.customSelection) saveClassification(selectedForClassification.toList())
-                    else openClassificationChoice()
+                    if (groupAdapter.customSelection) {
+                        saveClassification(selectedForClassification.toList())
+                    } else if (groupClassifyItem?.isVisible == true) {
+                        openClassificationChoice()
+                    }
                 } else {
                     startActivity(Intent(context, GroupSettingsActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -658,10 +671,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             var list = fullList.toList()
             val query = groupSearchQuery.trim()
             if (query.isNotEmpty()) {
-                val matched = list.filter { it.displayName().contains(query, ignoreCase = true) }
-                val unmatched = list.filterNot { it.displayName().contains(query, ignoreCase = true) }
-                list = matched + unmatched
-                groupClassifyItem?.isVisible = matched.isNotEmpty()
+                list = list.filter { it.displayName().contains(query, ignoreCase = true) }
             } else if (groupSearchMode) {
                 groupClassifyItem?.isVisible = false
             }
@@ -675,9 +685,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 else -> list
             }
             if (query.isNotEmpty()) {
-                val matched = list.filter { it.displayName().contains(query, ignoreCase = true) }
-                list = matched + list.filterNot { it.displayName().contains(query, ignoreCase = true) }
-                groupClassifyItem?.isVisible = matched.isNotEmpty()
+                groupClassifyItem?.isVisible = list.size >= 2
             }
             groupList.clear()
             groupList.addAll(list)
@@ -1051,18 +1059,13 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 return Instant.ofEpochSecond(seconds).atZone(ZoneId.systemDefault())
                     .toLocalDate().format(DateTimeFormatter.ISO_LOCAL_DATE)
             }
+            var usageText: String? = null
+            var expireLabel: String? = null
             if (subscription != null && subscription.bytesUsed > 0L) { // SIP008 & Open Online Config
-                groupTraffic.isVisible = true
-                groupTraffic.text = if (subscription.bytesRemaining > 0L) {
+                usageText = if (subscription.bytesRemaining > 0L) {
                     val total = subscription.bytesUsed + subscription.bytesRemaining
-                    app.getString(
-                        R.string.subscription_traffic, compactBytes(subscription.bytesUsed), compactBytes(total)
-                    )
-                } else {
-                    app.getString(
-                        R.string.subscription_used, compactBytes(subscription.bytesUsed)
-                    )
-                }
+                    app.getString(R.string.subscription_traffic, compactBytes(subscription.bytesUsed), compactBytes(total))
+                } else app.getString(R.string.subscription_used, compactBytes(subscription.bytesUsed))
                 groupStatus.setPadding(0)
             } else if (subscription != null && !subscription.subscriptionUserinfo.isNullOrBlank()) { // Raw
                 var text = ""
@@ -1095,23 +1098,24 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                         }
                     }
                     val expire = get("expire=([0-9]+)")?.toLongOrNull()
-                    expiryText(expire)?.let { groupExpire.text = it; groupExpire.isVisible = true }
+                    expireLabel = expiryText(expire)
                 } catch (_: NumberFormatException) {
                     // ignore
                 }
 
-                if (text.isNotEmpty()) {
-                    groupTraffic.isVisible = true
-                    groupTraffic.text = text
-                    groupStatus.setPadding(0)
-                }
+                if (text.isNotEmpty()) usageText = text
+            }
+            if (expireLabel == null) expireLabel = expiryText(subscription?.expiryDate?.toLong())
+            if (usageText != null || expireLabel != null) {
+                groupTraffic.isVisible = true
+                groupTraffic.text = listOfNotNull(
+                    usageText,
+                    expireLabel,
+                ).joinToString(" · ")
+                groupStatus.setPadding(0)
             } else {
                 groupTraffic.isVisible = false
                 groupStatus.setPadding(0, 0, 0, dp2px(4))
-            }
-            expiryText(subscription?.expiryDate?.toLong())?.let {
-                groupExpire.text = it
-                groupExpire.isVisible = true
             }
 
             groupUser.text = subscription?.username ?: ""

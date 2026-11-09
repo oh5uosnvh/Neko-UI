@@ -43,9 +43,12 @@
 
                 <TextView
                     android:id="@+id/group_name"
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_weight="1"
                     android:layout_marginEnd="8dp"
+                    android:maxLines="1"
+                    android:ellipsize="end"
                     android:textAppearance="?android:attr/textAppearanceMedium"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textStyle="bold"
@@ -141,8 +144,9 @@
 
                 <TextView
                     android:id="@+id/group_status"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:maxLines="2"
                     android:textAppearance="?android:attr/textAppearanceSmall"
                     android:textColor="?android:textColorSecondary"
                     tools:text="34 个配置 | 更新于 10-31" />
@@ -163,19 +167,19 @@
 
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/group_selected_indicator"
-        android:layout_width="42dp"
-        android:layout_height="42dp"
+        android:layout_width="30dp"
+        android:layout_height="30dp"
         android:layout_gravity="top|end"
-        android:layout_margin="10dp"
+        android:layout_margin="12dp"
         android:visibility="gone"
         app:cardBackgroundColor="?colorPrimary"
-        app:cardCornerRadius="21dp"
+        app:cardCornerRadius="15dp"
         app:cardElevation="0dp">
 
         <androidx.appcompat.widget.AppCompatImageView
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:padding="9dp"
+            android:padding="6dp"
             app:srcCompat="@drawable/ic_action_done" />
     </com.google.android.material.card.MaterialCardView>
 
