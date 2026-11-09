@@ -212,26 +212,38 @@ class ConfigurationFragment @JvmOverloads constructor(
         Logs.w("no MainActivity host found for overflow menu")
     }
 
-    /** Title click always locates the selected card smoothly, never toggles back to top. */
+    private val titleJumpSequence = SelectedJumpSequence()
+
+    /** Title click alternates selected card and this group's top, both in 500ms. */
     private fun scrollToSelectedProfile() {
         val fragment = getCurrentGroupFragment() ?: return
         val nodes = fragment.adapter ?: return
         val selectedProxy = selectedItem?.id ?: DataStore.selectedProxy
+        val visibleGroupId = adapter.groupList.getOrNull(groupPager.currentItem)?.id ?: 0L
+        val selectedHere = selectedProxy > 0L && selectedProxy in nodes.configurationIdList
+        val goTop = if (selectedHere) {
+            titleJumpSequence.returnToFirst(selectedProxy, visibleGroupId, visibleGroupId)
+        } else {
+            titleJumpSequence.reset()
+            false
+        }
         cancelSelectedCardJump()
-        if (selectedProxy > 0L && selectedProxy !in nodes.configurationIdList) {
+        if (selectedProxy > 0L && !selectedHere) {
             runOnDefaultDispatcher {
                 val groupId = SagerDatabase.proxyDao.getById(selectedProxy)?.groupId
                 onMainDispatcher {
                     if (isAdded && viewLifecycleOwnerLiveData.value != null && groupId != null &&
                         (selectedItem?.id ?: DataStore.selectedProxy) == selectedProxy) {
+                        titleJumpSequence.returnToFirst(selectedProxy, groupId, visibleGroupId)
                         requestSelectedCardJump(groupId, selectedProxy)
                     }
                 }
             }
             return
         }
-        val target = selectedProxy.takeIf { it in nodes.configurationIdList }
-            ?: nodes.configurationIdList.firstOrNull() ?: return
+        val target = if (goTop) nodes.configurationIdList.firstOrNull()
+            else selectedProxy.takeIf { it in nodes.configurationIdList } ?: nodes.configurationIdList.firstOrNull()
+        if (target == null) return
         selectedCardScroller = SelectedProfileScroller(fragment.configurationListView).also {
             it.scrollTo(target) { nodes.configurationIdList }
         }
@@ -747,6 +759,7 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     override fun onDestroyView() {
+        titleJumpSequence.reset()
         cancelSelectedCardJump()
         pageTransition?.let { groupPager.unregisterOnPageChangeCallback(it); it.close() }
         pageTransition = null

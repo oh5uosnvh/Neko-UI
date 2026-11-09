@@ -332,12 +332,7 @@ internal class FlMenuPopup(
                 addState(intArrayOf(android.R.attr.state_pressed), round(pressedColor))
                 addState(intArrayOf(), round(Color.TRANSPARENT))
             }
-            addView(TextView(context).apply {
-                text = "‹"
-                setTextColor(titleColor)
-                textSize = 18f
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, LinearLayout.LayoutParams(dp(20), dp(24)))
+            addView(SubmenuBackIcon(context, titleColor), LinearLayout.LayoutParams(dp(20), dp(24)))
             addView(TextView(context).apply {
                 text = title
                 setTextColor(titleColor)
