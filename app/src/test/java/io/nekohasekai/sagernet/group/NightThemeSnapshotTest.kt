@@ -52,9 +52,10 @@ class NightThemeSnapshotTest {
         val root = activity.window.decorView
         val content = FrameLayout(activity).apply { setBackgroundColor(Color.BLUE) }
         activity.setContentView(content)
-        root.measure(View.MeasureSpec.makeMeasureSpec(320, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(640, View.MeasureSpec.EXACTLY))
-        root.layout(0, 0, 320, 640)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(32))
+        assertTrue(root.width > 0 && root.height > 0)
+        val width = root.width
+        val height = root.height
         val old = NightThemeSnapshot.capture(root)!!
         val night = activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
         val session = NightThemeSnapshot.Session(100, activity, old, night)
@@ -64,12 +65,12 @@ class NightThemeSnapshotTest {
             assertEquals(1f, session.drawable!!.opacity, 0f)
             // View.draw(Canvas) alone does NOT deliver ViewRootImpl's OnDraw
             // notification. Reproduce the actual traversal (layout → preDraw → draw).
-            root.measure(View.MeasureSpec.makeMeasureSpec(320, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(640, View.MeasureSpec.EXACTLY))
-            root.layout(0, 0, 320, 640)
+            root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
+            root.layout(0, 0, width, height)
             root.viewTreeObserver.dispatchOnPreDraw()
             root.viewTreeObserver.dispatchOnDraw()
-            val output = Bitmap.createBitmap(320, 640, Bitmap.Config.ARGB_8888)
+            val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             root.draw(Canvas(output)); output.recycle()
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(32))
             assertEquals(NightThemeSnapshot.Phase.FADING, session.phase)
