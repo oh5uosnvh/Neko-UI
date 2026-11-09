@@ -214,6 +214,11 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private val titleJumpSequence = SelectedJumpSequence()
 
+    /** The ⊙ jump already completed the first leg of the title's two-step cycle. */
+    internal fun armTitleJumpAfterSelected(profileId: Long, groupId: Long) {
+        titleJumpSequence.returnToFirst(profileId, groupId, groupId)
+    }
+
     /** Title click alternates selected card and this group's top, both in 500ms. */
     private fun scrollToSelectedProfile() {
         val fragment = getCurrentGroupFragment() ?: return
@@ -226,6 +231,17 @@ class ConfigurationFragment @JvmOverloads constructor(
         } else {
             titleJumpSequence.reset()
             false
+        }
+        // 如果 ⊙ 的定位动画刚把卡片送进视口，标题点击只负责把这次
+        // “已定位”状态交给二次标题循环，不要先 cancel 动画再重算一遍。
+        // cancel 在这里会让 RecyclerView 从当前帧重新落位，表现为上下轻抖。
+        // 已经在当前视口的选定卡片不重复启动滚动。尤其是 ⊙ 刚完成定位后，
+        // 再点 Neko 不能从同一位置重新跑一遍动画造成上下微抖。
+        if (!goTop && selectedProxy > 0L) {
+            val lm = fragment.layoutManager as? LinearLayoutManager
+            val index = nodes.configurationIdList.indexOf(selectedProxy)
+            if (lm != null && index >= 0 && index in
+                lm.findFirstVisibleItemPosition()..lm.findLastVisibleItemPosition()) return
         }
         cancelSelectedCardJump()
         if (selectedProxy > 0L && !selectedHere) {
@@ -448,9 +464,26 @@ class ConfigurationFragment @JvmOverloads constructor(
         if (DataStore.configurationStore.getLong(Key.PROFILE_GROUP, -1L) != id) DataStore.selectedGroup = id
     }
     private var selectedGroupUi = 0L
+    private var pendingGroupSelection = 0L
     private var pageTransition: GroupPageTransition? = null
     private var pageRequestPosted = false
     private var pageTabListener: TabLayout.OnTabSelectedListener? = null
+
+    /** Called by the group-management page; survives a cold pager reload. */
+    internal fun selectGroupWhenReady(groupId: Long) {
+        pendingGroupSelection = groupId
+        view?.post { applyPendingGroupSelection() }
+    }
+
+    private fun applyPendingGroupSelection() {
+        val id = pendingGroupSelection
+        if (id <= 0L || !::adapter.isInitialized || !::groupPager.isInitialized) return
+        val position = adapter.groupList.indexOfFirst { it.id == id }
+        if (position < 0) return
+        pendingGroupSelection = 0L
+        DataStore.stageSelectedGroup(id)
+        requestGroupPage(position)
+    }
 
     /** Only user clicks animate; restoration/order alignment keeps setCurrentItem(..., false). */
     fun requestGroupPage(position: Int) {
@@ -654,6 +687,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
         groupPager.adapter = adapter
         groupPager.offscreenPageLimit = 1
+        view.post { applyPendingGroupSelection() }
 
         groupTabsMediator = TabLayoutMediator(tabLayout, groupPager) { tab, position ->
             val groupId = adapter.groupList.getOrNull(position)?.id
@@ -2176,6 +2210,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                                 tabLayout.isGone = hideTab
                                 toolbar.elevation = if (hideTab) 0F else dp2px(4).toFloat()
                                 groupPager.registerOnPageChangeCallback(updateSelectedCallback)
+                                applyPendingGroupSelection()
                             }
                         }
                     }

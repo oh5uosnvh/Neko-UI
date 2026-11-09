@@ -21,6 +21,10 @@
     <string name="group_name_required">需要分组名称</string>
     <string name="group_create">创建分组</string>
     <string name="group_create_subscription">添加订阅</string>
+    <string name="group_classify">归类</string>
+    <string name="group_classify_confirm">确认归类</string>
+    <string name="group_classify_cancel">取消归类</string>
+    <string name="group_classify_custom">自定义选择</string>
     <string name="group_edit">编辑分组</string>
     <string name="group_edit_subscription">编辑订阅</string>
     <string name="group_status_empty">空</string>
@@ -360,7 +364,7 @@
     <string name="update_subscription_warning">代理未连接, 您确定要继续更新吗\?</string>
     <string name="group_filter">筛选</string>
     <string name="subscription_used">已用 %s</string>
-    <string name="subscription_traffic">已用 %s / 剩余 %s</string>
+    <string name="subscription_traffic">已用 %s / %s</string>
     <string name="subscription_import">导入订阅</string>
     <string name="subscription_import_message">确认要导入订阅 %s？如果来源不可信, 您的 IP 和行为将被泄露.</string>
     <string name="profile_import">导入配置</string>

@@ -5,7 +5,6 @@ import android.os.Bundle
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
-import android.text.format.Formatter
 import android.view.MenuItem
 import android.view.View
 import android.graphics.Color
@@ -20,7 +19,6 @@ import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import android.view.ViewGroup
 import android.widget.LinearLayout
-import androidx.appcompat.widget.PopupMenu
 import androidx.appcompat.widget.Toolbar
 import androidx.core.view.*
 import androidx.recyclerview.widget.ItemTouchHelper
@@ -40,9 +38,10 @@ import io.nekohasekai.sagernet.widget.ListListener
 import io.nekohasekai.sagernet.widget.QRCodeDialog
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
 import kotlinx.coroutines.delay
-import moe.matsuri.nb4a.utils.Util
-import moe.matsuri.nb4a.utils.toBytesString
 import java.lang.NumberFormatException
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.*
 
 class GroupFragment : ToolbarFragment(R.layout.layout_group),
@@ -58,6 +57,14 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     private var filterPopup: AnimatedPopupWindow? = null
     private var filterSubscription: Boolean? = null
     private var sortMode = SORT_DEFAULT
+
+    // 分组页搜索模式：只匹配分组名称；搜索态不再显示原本的更新/新建按钮。
+    private var groupSearchQuery = ""
+    private var groupSearchView: androidx.appcompat.widget.SearchView? = null
+    private var groupSearchItem: MenuItem? = null
+    private var groupClassifyItem: MenuItem? = null
+    private var groupSearchMode = false
+    private val selectedForClassification = LinkedHashSet<Long>()
 
     companion object {
         const val EXTRA_TARGET_GROUP_ID = "target_group_id"
@@ -167,6 +174,31 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         toolbar.setTitle(R.string.menu_group)
         toolbar.inflateMenu(R.menu.add_group_menu)
         toolbar.setOnMenuItemClickListener(this)
+        groupSearchItem = toolbar.menu.findItem(R.id.action_group_search)
+        groupClassifyItem = toolbar.menu.findItem(R.id.action_new_group)
+        groupSearchItem?.setOnActionExpandListener(object : MenuItem.OnActionExpandListener {
+            override fun onMenuItemActionExpand(item: MenuItem): Boolean {
+                enterGroupSearchMode(item)
+                return true
+            }
+            override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
+                exitGroupSearchMode()
+                return true
+            }
+        })
+        (groupSearchItem?.actionView as? androidx.appcompat.widget.SearchView)?.let { search ->
+            groupSearchView = search
+            search.queryHint = getString(R.string.search)
+            search.findViewById<View>(androidx.appcompat.R.id.search_close_btn)?.isGone = true
+            search.setOnQueryTextListener(object : androidx.appcompat.widget.SearchView.OnQueryTextListener {
+                override fun onQueryTextSubmit(query: String) = false
+                override fun onQueryTextChange(newText: String): Boolean {
+                    groupSearchQuery = newText.trim()
+                    groupAdapter.applyFilter()
+                    return true
+                }
+            })
+        }
 
         groupListView = view.findViewById(R.id.group_list)
         layoutManager = FixedLinearLayoutManager(groupListView)
@@ -199,7 +231,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder
             ): Int {
                 val proxyGroup = (viewHolder as GroupHolder).proxyGroup
-                if (proxyGroup.ungrouped || proxyGroup.id in GroupUpdater.updating) {
+                if (groupSearchMode || groupAdapter.customSelection || proxyGroup.ungrouped ||
+                    proxyGroup.id in GroupUpdater.updating) {
                     return 0
                 }
                 return super.getSwipeDirs(recyclerView, viewHolder)
@@ -209,7 +242,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder
             ): Int {
                 val proxyGroup = (viewHolder as GroupHolder).proxyGroup
-                if (proxyGroup.ungrouped || proxyGroup.id in GroupUpdater.updating) {
+                if (groupSearchMode || groupAdapter.customSelection || proxyGroup.ungrouped ||
+                    proxyGroup.id in GroupUpdater.updating) {
                     return 0
                 }
                 return super.getDragDirs(recyclerView, viewHolder)
@@ -266,27 +300,102 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
     }
 
+    private fun enterGroupSearchMode(item: MenuItem) {
+        groupSearchMode = true
+        groupSearchQuery = groupSearchView?.query?.toString().orEmpty()
+        toolbar.menu.findItem(R.id.action_update_all)?.apply {
+            isVisible = true
+            setIcon(R.drawable.ic_navigation_close)
+            title = getString(android.R.string.cancel)
+        }
+        toolbar.menu.findItem(R.id.action_new_group)?.apply {
+            isVisible = true
+            setIcon(R.drawable.ic_action_done)
+            title = getString(R.string.group_classify)
+        }
+        groupClassifyItem?.isVisible = false
+        groupAdapter.applyFilter()
+    }
+
+    private fun exitGroupSearchMode() {
+        groupSearchMode = false
+        groupSearchView?.setQuery("", false)
+        groupSearchQuery = ""
+        selectedForClassification.clear()
+        groupAdapter.customSelection = false
+        groupClassifyItem?.isVisible = false
+        toolbar.menu.findItem(R.id.action_update_all)?.apply {
+            isVisible = true
+            setIcon(R.drawable.ic_baseline_update_24)
+            title = getString(R.string.update_all_subscription)
+        }
+        toolbar.menu.findItem(R.id.action_new_group)?.apply {
+            isVisible = true
+            setIcon(R.drawable.ic_av_playlist_add)
+            title = getString(R.string.group_create)
+        }
+        groupAdapter.applyFilter()
+    }
+
+    private fun openClassificationChoice() {
+        val matched = groupAdapter.searchMatches()
+        if (matched.isEmpty()) return
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.group_classify)
+            .setItems(arrayOf(
+                getString(R.string.group_classify_confirm),
+                getString(R.string.group_classify_cancel),
+                getString(R.string.group_classify_custom),
+            )) { _, which ->
+                when (which) {
+                    0 -> saveClassification(matched.map { it.id })
+                    1 -> Unit
+                    2 -> {
+                        selectedForClassification.clear()
+                        groupAdapter.customSelection = true
+                        groupClassifyItem?.isVisible = true
+                        groupAdapter.notifyDataSetChanged()
+                    }
+                }
+            }.show()
+    }
+
+    private fun saveClassification(ids: List<Long>) {
+        if (ids.isEmpty()) return
+        val selected = ids.toSet()
+        val reordered = groupAdapter.classifyOrder(selected)
+        GroupOrderStore.submit(reordered.map { it.id }) { result -> result.error?.let { Logs.w(it) } }
+        groupSearchItem?.collapseActionView()
+        (activity as? MainActivity)?.displayFragmentWithId(R.id.nav_group)
+    }
+
     override fun onMenuItemClick(item: MenuItem): Boolean {
         when (item.itemId) {
             R.id.action_new_group -> {
-                startActivity(Intent(context, GroupSettingsActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                    putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, 0L)
-                })
+                if (groupSearchMode) {
+                    if (groupAdapter.customSelection) saveClassification(selectedForClassification.toList())
+                    else openClassificationChoice()
+                } else {
+                    startActivity(Intent(context, GroupSettingsActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, 0L)
+                    })
+                }
             }
-
             R.id.action_update_all -> {
-                MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
-                    .setMessage(R.string.update_all_subscription)
-                    .setPositiveButton(R.string.yes) { _, _ ->
-                        SagerDatabase.groupDao.allGroups()
-                            .filter { it.type == GroupType.SUBSCRIPTION }
-                            .forEach {
-                                GroupUpdater.startUpdate(it, true)
-                            }
-                    }
-                    .setNegativeButton(R.string.no, null)
-                    .show()
+                if (groupSearchMode) {
+                    groupSearchItem?.collapseActionView()
+                } else {
+                    MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
+                        .setMessage(R.string.update_all_subscription)
+                        .setPositiveButton(R.string.yes) { _, _ ->
+                            SagerDatabase.groupDao.allGroups()
+                                .filter { it.type == GroupType.SUBSCRIPTION }
+                                .forEach { GroupUpdater.startUpdate(it, true) }
+                        }
+                        .setNegativeButton(R.string.no, null)
+                        .show()
+                }
             }
         }
         return true
@@ -449,6 +558,29 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         val groupList = ArrayList<ProxyGroup>()
 
         private var dataGeneration = 0
+        var customSelection = false
+
+        fun searchMatches(): List<ProxyGroup> {
+            val q = groupSearchQuery.trim()
+            if (q.isEmpty()) return emptyList()
+            return fullList
+                .filter { filterSubscription == null ||
+                    (it.type == GroupType.SUBSCRIPTION) == filterSubscription }
+                .filter { it.displayName().contains(q, ignoreCase = true) }
+        }
+
+        fun applyCustomSelection(group: ProxyGroup): Boolean {
+            if (!customSelection) return false
+            if (!group.displayName().contains(groupSearchQuery.trim(), ignoreCase = true)) return true
+            if (selectedForClassification.contains(group.id)) selectedForClassification.remove(group.id)
+            else selectedForClassification.add(group.id)
+            groupClassifyItem?.isVisible = selectedForClassification.isNotEmpty()
+            notifyDataSetChanged()
+            return true
+        }
+
+        fun classifyOrder(ids: Set<Long>): List<ProxyGroup> =
+            GroupClassification.stackSelected(fullList.toList()) { it.id in ids }
 
         fun submitGroups(groups: List<ProxyGroup>) {
             dataGeneration++
@@ -524,6 +656,15 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
         private fun rebuildVisible() {
             var list = fullList.toList()
+            val query = groupSearchQuery.trim()
+            if (query.isNotEmpty()) {
+                val matched = list.filter { it.displayName().contains(query, ignoreCase = true) }
+                val unmatched = list.filterNot { it.displayName().contains(query, ignoreCase = true) }
+                list = matched + unmatched
+                groupClassifyItem?.isVisible = matched.isNotEmpty()
+            } else if (groupSearchMode) {
+                groupClassifyItem?.isVisible = false
+            }
             val filter = filterSubscription
             if (filter != null) {
                 list = list.filter { (it.type == GroupType.SUBSCRIPTION) == filter }
@@ -532,6 +673,11 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 SORT_ASC -> sortGroups(list, ascending = true)
                 SORT_DESC -> sortGroups(list, ascending = false)
                 else -> list
+            }
+            if (query.isNotEmpty()) {
+                val matched = list.filter { it.displayName().contains(query, ignoreCase = true) }
+                list = matched + list.filterNot { it.displayName().contains(query, ignoreCase = true) }
+                groupClassifyItem?.isVisible = matched.isNotEmpty()
             }
             groupList.clear()
             groupList.addAll(list)
@@ -620,10 +766,11 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         }
 
         override fun undo(actions: List<Pair<Int, ProxyGroup>>) {
-            for ((index, item) in actions) {
-                groupList.add(index, item)
-                notifyItemInserted(index)
+            for ((_, item) in actions) {
+                if (fullList.none { it.id == item.id }) fullList.add(item)
             }
+            rebuildVisible()
+            notifyDataSetChanged()
             // 撤销 = 取消删除：把配置页刚移除的标签广播恢复
             runOnDefaultDispatcher {
                 for ((_, item) in actions) {
@@ -641,34 +788,25 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         }
 
         override suspend fun groupAdd(group: ProxyGroup) {
-            // 撤销恢复时本地已在（undo 已加回），跳过，避免重复添加
-            if (groupList.any { it.id == group.id }) return
-            groupList.add(group)
+            if (fullList.any { it.id == group.id }) return
+            fullList.add(group)
+            fullList.sortWith(compareBy({ it.userOrder }, { it.id }))
             delay(300L)
-
             onMainDispatcher {
                 undoManager.flush()
-                notifyItemInserted(groupList.size - 1)
-
-                if (group.type == GroupType.SUBSCRIPTION) {
-                    GroupUpdater.startUpdate(group, true)
-                }
+                rebuildVisible()
+                notifyDataSetChanged()
+                if (group.type == GroupType.SUBSCRIPTION) GroupUpdater.startUpdate(group, true)
             }
         }
 
         override suspend fun groupRemoved(groupId: Long) {
-            val index = groupList.indexOfFirst { it.id == groupId }
-            if (index == -1) return
             onMainDispatcher {
                 undoManager.flush()
-                if (SagerDatabase.groupDao.allGroups().size <= 2) {
-                    runOnDefaultDispatcher {
-                        reload()
-                    }
-                } else {
-                    groupList.removeAt(index)
-                    notifyItemRemoved(index)
-                }
+                fullList.removeAll { it.id == groupId }
+                rebuildVisible()
+                notifyDataSetChanged()
+                if (SagerDatabase.groupDao.allGroups().size <= 2) runOnDefaultDispatcher { reload() }
             }
         }
 
@@ -761,9 +899,12 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         val groupStatus = binding.groupStatus
         val groupTraffic = binding.groupTraffic
         val groupUser = binding.groupUser
+        val groupJumpButton = binding.groupJump
         val editButton = binding.edit
         val optionsButton = binding.options
         val updateButton = binding.groupUpdate
+        val groupExpire = binding.groupExpire
+        val selectedIndicator = binding.groupSelectedIndicator
         val subscriptionUpdateProgress = binding.subscriptionUpdateProgress
 
         private fun onMenuItemClick(item: MenuItem, menuGroup: ProxyGroup): Boolean {
@@ -805,11 +946,28 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         fun bind(group: ProxyGroup) {
             proxyGroup = group
 
-            itemView.setOnClickListener { }
+            selectedIndicator.isVisible = groupAdapter.customSelection &&
+                selectedForClassification.contains(proxyGroup.id)
+            if (groupAdapter.customSelection) {
+                groupJumpButton.isGone = true
+            }
+            itemView.setOnClickListener {
+                if (groupAdapter.applyCustomSelection(proxyGroup)) return@setOnClickListener
+            }
+            groupJumpButton.isGone = groupAdapter.customSelection || proxyGroup.ungrouped
+            groupJumpButton.setOnClickListener {
+                DataStore.stageSelectedGroup(proxyGroup.id)
+                (activity as? MainActivity)?.openConfigurationGroup(proxyGroup.id)
+            }
+            optionsButton.contentDescription = getString(R.string.delete)
 
             editButton.isGone = proxyGroup.ungrouped
+            optionsButton.isGone = groupAdapter.customSelection
+            editButton.isGone = groupAdapter.customSelection || proxyGroup.ungrouped
             updateButton.isInvisible = proxyGroup.type != GroupType.SUBSCRIPTION
             groupName.text = proxyGroup.displayName()
+            groupUser.isGone = true
+            groupUser.text = ""
 
             editButton.setOnClickListener {
                 startActivity(Intent(it.context, GroupSettingsActivity::class.java).apply {
@@ -822,17 +980,15 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             }
 
             optionsButton.setOnClickListener {
-                val menuGroup = proxyGroup
-
-                val popup = PopupMenu(requireContext(), it)
-                popup.menuInflater.inflate(R.menu.group_action_menu, popup.menu)
-
-                if (menuGroup.type != GroupType.SUBSCRIPTION) {
-                    popup.menu.removeItem(R.id.action_share_subscription)
-                }
-                io.nekohasekai.sagernet.widget.FlMenu.show(it, popup.menu) { item ->
-                    onMenuItemClick(item, menuGroup)
-                }
+                if (proxyGroup.ungrouped) return@setOnClickListener
+                MaterialAlertDialogBuilder(requireContext())
+                    .setTitle(R.string.confirm)
+                    .setMessage(R.string.group_delete_confirm_prompt)
+                    .setPositiveButton(R.string.yes) { _, _ ->
+                        runOnDefaultDispatcher { GroupManager.deleteGroup(proxyGroup.id) }
+                    }
+                    .setNegativeButton(R.string.no, null)
+                    .show()
             }
 
             if (proxyGroup.id in GroupUpdater.updating) {
@@ -854,32 +1010,56 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
                 updateButton.isInvisible = true
                 editButton.isGone = true
+                groupJumpButton.isGone = true
+                optionsButton.isGone = true
             } else {
                 (groupName.parent as LinearLayout).apply {
                     setPadding(paddingLeft, dp2px(15), paddingRight, paddingBottom)
                 }
 
                 subscriptionUpdateProgress.isVisible = false
-                updateButton.isInvisible = proxyGroup.type != GroupType.SUBSCRIPTION
-                editButton.isGone = proxyGroup.ungrouped
+                updateButton.isInvisible = groupAdapter.customSelection ||
+                    proxyGroup.type != GroupType.SUBSCRIPTION
+                groupJumpButton.isGone = groupAdapter.customSelection || proxyGroup.ungrouped
+                optionsButton.isGone = groupAdapter.customSelection
+                editButton.isGone = groupAdapter.customSelection || proxyGroup.ungrouped
             }
 
             val subscription = proxyGroup.subscription
+            groupTraffic.isVisible = false
+            groupTraffic.text = ""
+            groupExpire.isVisible = false
+            groupExpire.text = ""
+
+            fun compactBytes(value: Long): String {
+                if (value < 0L) return "0kb"
+                val units = arrayOf("kb", "MB", "GB", "TB", "PB")
+                var amount = value.toDouble() / 1024.0
+                var unit = 0
+                while (amount >= 1024.0 && unit < units.lastIndex) {
+                    amount /= 1024.0
+                    unit++
+                }
+                return if (amount >= 100.0 || amount == amount.toLong().toDouble())
+                    "${amount.toLong()}${units[unit]}"
+                else "${String.format(Locale.US, "%.2f", amount).trimEnd('0').trimEnd('.')}${units[unit]}"
+            }
+
+            fun expiryText(seconds: Long?): String? {
+                if (seconds == null || seconds <= 0L) return null
+                return Instant.ofEpochSecond(seconds).atZone(ZoneId.systemDefault())
+                    .toLocalDate().format(DateTimeFormatter.ISO_LOCAL_DATE)
+            }
             if (subscription != null && subscription.bytesUsed > 0L) { // SIP008 & Open Online Config
                 groupTraffic.isVisible = true
                 groupTraffic.text = if (subscription.bytesRemaining > 0L) {
+                    val total = subscription.bytesUsed + subscription.bytesRemaining
                     app.getString(
-                        R.string.subscription_traffic, Formatter.formatFileSize(
-                            app, subscription.bytesUsed
-                        ), Formatter.formatFileSize(
-                            app, subscription.bytesRemaining
-                        )
+                        R.string.subscription_traffic, compactBytes(subscription.bytesUsed), compactBytes(total)
                     )
                 } else {
                     app.getString(
-                        R.string.subscription_used, Formatter.formatFileSize(
-                            app, subscription.bytesUsed
-                        )
+                        R.string.subscription_used, compactBytes(subscription.bytesUsed)
                     )
                 }
                 groupStatus.setPadding(0)
@@ -906,20 +1086,15 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                         text += if (remain > 0) {
                             getString(
                                 R.string.subscription_traffic,
-                                used.toBytesString(),
-                                remain.toBytesString()
+                                compactBytes(used),
+                                compactBytes(total)
                             )
                         } else {
-                            getString(R.string.subscription_used, used.toBytesString())
+                            getString(R.string.subscription_used, compactBytes(used))
                         }
                     }
-                    get("expire=([0-9]+)")?.apply {
-                        text += "\n"
-                        text += getString(
-                            R.string.subscription_expire,
-                            Util.timeStamp2Text(this.toLong() * 1000)
-                        )
-                    }
+                    val expire = get("expire=([0-9]+)")?.toLongOrNull()
+                    expiryText(expire)?.let { groupExpire.text = it; groupExpire.isVisible = true }
                 } catch (_: NumberFormatException) {
                     // ignore
                 }
@@ -933,12 +1108,17 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 groupTraffic.isVisible = false
                 groupStatus.setPadding(0, 0, 0, dp2px(4))
             }
+            expiryText(subscription?.expiryDate?.toLong())?.let {
+                groupExpire.text = it
+                groupExpire.isVisible = true
+            }
 
             groupUser.text = subscription?.username ?: ""
 
             runOnDefaultDispatcher {
                 val size = PendingProfileDeletes.count(group.id)
                 onMainDispatcher {
+                    if (proxyGroup.id != group.id) return@onMainDispatcher
                     @Suppress("DEPRECATION") when (group.type) {
                         GroupType.BASIC -> {
                             if (size == 0L) {
@@ -949,15 +1129,14 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                         }
 
                         GroupType.SUBSCRIPTION -> {
-                            groupStatus.text = if (size == 0L) {
+                                        groupStatus.text = if (size == 0L) {
                                 getString(R.string.group_status_empty_subscription)
                             } else {
-                                val date = Date(group.subscription!!.lastUpdated * 1000L)
-                                getString(
-                                    R.string.group_status_proxies_subscription,
-                                    size,
-                                    "${date.month + 1} - ${date.date}"
-                                )
+                                val updated = group.subscription?.lastUpdated?.toLong()
+                                    ?.takeIf { it > 0L }
+                                    ?.let { Instant.ofEpochSecond(it).atZone(ZoneId.systemDefault()).toLocalDate().format(DateTimeFormatter.ISO_LOCAL_DATE) }
+                                    ?: "-"
+                                getString(R.string.group_status_proxies_subscription, size, updated)
                             }
 
                         }

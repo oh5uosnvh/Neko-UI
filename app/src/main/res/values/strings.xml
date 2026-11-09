@@ -48,6 +48,10 @@
     <string name="group_name_required">Group name required</string>
     <string name="group_create">Create group</string>
     <string name="group_create_subscription">Create subscription</string>
+    <string name="group_classify">Classify</string>
+    <string name="group_classify_confirm">Confirm classify</string>
+    <string name="group_classify_cancel">Cancel classify</string>
+    <string name="group_classify_custom">Custom selection</string>
     <string name="update_all_subscription">Update all subscriptions</string>
     <string name="group_edit">Edit group</string>
     <string name="group_edit_subscription">Edit subscription</string>
@@ -461,7 +465,7 @@
     <string name="subscription_direct_dns_invalid">Invalid custom direct DNS. Use https://, tls://, quic://, tcp://, udp:// or host[:port], separated by newlines or commas, or leave empty.</string>
     <string name="subscription_dns_config_invalid">%1$s: %2$s</string>
     <string name="subscription_used">%s Used</string>
-    <string name="subscription_traffic">%s Used / %s Remaining</string>
+    <string name="subscription_traffic">%s Used / %s Total</string>
     <string name="subscription_expire">Expire: %s</string>
     <string name="subscription_import">Import subscription</string>
     <string name="subscription_import_message">Confirm you want to import subscription %s? If you

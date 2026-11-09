@@ -590,6 +590,9 @@ internal class TopBarController(
                 } else if (jumpSequence.returnToFirst(selectedId, groupId, visibleId)) {
                     jumpToFirstGroup()
                 } else {
+                    // ⊙ 已经完成“选定分组 + 选定卡片”这一步；随后点 Neko
+                    // 标题应进入循环的返回顶部步，不得再重复启动选定卡片动画。
+                    host.armTitleJumpAfterSelected(selectedId, groupId)
                     host.requestSelectedCardJump(groupId, selectedId)
                 }
             }

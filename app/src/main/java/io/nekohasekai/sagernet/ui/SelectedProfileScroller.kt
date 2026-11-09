@@ -18,6 +18,9 @@ internal class SelectedProfileScroller(private val list: RecyclerView) : AutoClo
     private var observer: ViewTreeObserver? = null
     private var targetId = 0L
     private var ids: (() -> List<Long>)? = null
+
+    internal val isActive: Boolean
+        get() = pending != null || animator != null
     private val touch = object : RecyclerView.SimpleOnItemTouchListener() {
         override fun onInterceptTouchEvent(rv: RecyclerView, event: MotionEvent): Boolean {
             if (event.actionMasked == MotionEvent.ACTION_DOWN) cancel()

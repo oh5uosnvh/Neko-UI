@@ -625,6 +625,14 @@ class MainActivity : ThemedActivity(),
     private fun obtainFragment(@IdRes id: Int): ToolbarFragment =
         fragmentCache.getOrPut(id) { createFragment(id) ?: error("unknown nav id: $id") }
 
+    /** Open configuration page and make the requested group the visible pager page. */
+    fun openConfigurationGroup(groupId: Long) {
+        if (groupId <= 0L || !displayFragmentWithId(R.id.nav_configuration)) return
+        DataStore.stageSelectedGroup(groupId)
+        (fragmentCache[R.id.nav_configuration] as? ConfigurationFragment)
+            ?.selectGroupWhenReady(groupId)
+    }
+
     /** Load off-main before exposing a cold group page: its very first frame contains card zero. */
     fun openGroupAt(groupId: Long) {
         if (groupId <= 0L || supportFragmentManager.isStateSaved) return
