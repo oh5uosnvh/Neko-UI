@@ -979,13 +979,14 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 GroupUpdater.startUpdate(proxyGroup, true)
             }
 
+            val menuGroup = proxyGroup
             optionsButton.setOnClickListener {
-                if (proxyGroup.ungrouped) return@setOnClickListener
+                if (menuGroup.ungrouped) return@setOnClickListener
                 MaterialAlertDialogBuilder(requireContext())
                     .setTitle(R.string.confirm)
                     .setMessage(R.string.group_delete_confirm_prompt)
                     .setPositiveButton(R.string.yes) { _, _ ->
-                        runOnDefaultDispatcher { GroupManager.deleteGroup(proxyGroup.id) }
+                        runOnDefaultDispatcher { GroupManager.deleteGroup(menuGroup.id) }
                     }
                     .setNegativeButton(R.string.no, null)
                     .show()
