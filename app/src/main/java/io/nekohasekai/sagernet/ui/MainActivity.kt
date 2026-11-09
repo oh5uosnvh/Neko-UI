@@ -816,6 +816,13 @@ class MainActivity : ThemedActivity(),
         msg: String? = null,
     ) {
         DataStore.serviceState = state
+        val noProfile = state == BaseService.State.Stopped && msg == getString(R.string.profile_empty)
+        if (noProfile) {
+            // This start was rejected, not a fresh ON tap queued during cleanup.
+            latestToggleIntent = false
+            toggleStartRequest.cancel()
+            vpnPermissionRequestInFlight = false
+        }
         val currentEpoch = io.nekohasekai.sagernet.bg.ServiceStartPolicy.fence.snapshot()
         if (state == BaseService.State.Connecting || state == BaseService.State.Connected) {
             toggleStartRequest.acknowledgeStarted()
@@ -835,6 +842,7 @@ class MainActivity : ThemedActivity(),
         }
         if (!state.connected) invalidateControlLatency()
         binding.controlBar.changeState(state) // Only an actual service acknowledgement unlocks toggle.
+        if (noProfile) binding.controlBar.reset() // Clear optimistic ON and settle the stopped power button.
         refreshConfigurationProfileState()
         syncMainControls()
         renderConnectionProbe()

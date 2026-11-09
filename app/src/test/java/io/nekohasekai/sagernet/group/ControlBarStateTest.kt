@@ -139,6 +139,33 @@ class ControlBarStateTest {
         assertEquals(1f, bar.box(R.id.capsule_pair).alpha, 0f)
     }
 
+    @Test fun noProfileStartRejectionResetsOptimisticOnAndDoesNotReturnAfterAnimation() = withBar { bar, _, _ ->
+        val intents = mutableListOf<Boolean>()
+        bar.onToggleIntent = { intents.add(it) }
+        bar.changeState(BaseService.State.Stopped)
+        bar.box(R.id.capsule).performClick()
+        assertEquals(listOf(true), intents)
+        assertEquals(true, field(bar, "requestedConnected"))
+        // MainActivity receives Stopped + profile_empty and applies this rollback.
+        bar.changeState(BaseService.State.Stopping)
+        bar.changeState(BaseService.State.Stopped)
+        bar.reset()
+        assertNull(field(bar, "requestedConnected"))
+        assertEquals(false, field(bar, "togglePending"))
+        assertEquals(BaseService.State.Stopped, field(bar, "currentState"))
+        assertEquals(1f, bar.box(R.id.capsule_power_layer).alpha, 0f)
+        assertEquals(0f, bar.box(R.id.capsule_plane_layer).alpha, 0f)
+        assertEquals(bar.context.getString(R.string.control_bar_disconnected), bar.text(R.id.capsule_label).text.toString())
+        assertFalse(bar.box(R.id.capsule).isSelected)
+        assertTrue(bar.box(R.id.capsule).isEnabled)
+        advance(1000)
+        assertNoAnimation(bar)
+        assertEquals(listOf(true), intents)
+        // A subsequent deliberate tap is re-armed, not stuck OFF or auto-retried.
+        bar.box(R.id.capsule).performClick()
+        assertEquals(listOf(true, true), intents)
+    }
+
     @Test fun connectingKeepsPowerVisualWithoutAnimationButRetainsAccessibilityAndServiceLock() = withBar { bar, _, _ ->
         var toggles = 0
         bar.onToggle = { toggles++ }
