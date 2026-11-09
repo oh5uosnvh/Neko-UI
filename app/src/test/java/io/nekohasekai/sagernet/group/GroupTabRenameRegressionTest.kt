@@ -37,6 +37,8 @@ class GroupTabRenameRegressionTest {
         val ctx = ContextThemeWrapper(app.createConfigurationContext(cfg), R.style.Theme_SagerNet)
         val page = LayoutInflater.from(ctx).inflate(R.layout.layout_group_list, null)
         val tabs = page.findViewById<TabLayout>(R.id.group_tab)
+        // Production reveals the XML-GONE tabs after group loading.
+        tabs.visibility = View.VISIBLE
         repeat(16) { tabs.addTab(tabs.newTab().also { tab -> GroupTabPill.bindTab(tab, "分组${it + 1}") }) }
         return page to tabs
     }
