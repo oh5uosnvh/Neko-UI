@@ -31,11 +31,23 @@ public class XhttpBean extends AbstractBean {
     public String landingServer;  // 落地 server (展示用)
     public Integer landingPort;   // 落地 port (展示用)
 
-    /** auth 为空时，回退到 password 里冒号后的 key2。 */
+    /**
+     * auth 为空时，回退到 password 里冒号后的 key2。
+     *
+     * 注意：key2 的格式是 [0x31 = 49 长度前缀][49 字节 token] 共 100 hex。
+     * libcore 的 buildPrefix 会自己写 tokLen = byte(len(token))，所以这里必须
+     * 去掉首字节，否则 tokLen 会写成 50（0x32），比服务端期望的 49 多一个字节，
+     * 服务端校验直接失败 —— 表现为节点全部不可用。
+     */
     public String effectiveAuth() {
         if (auth != null && !auth.isEmpty()) return auth;
         if (password != null && password.contains(":")) {
-            return password.substring(password.indexOf(':') + 1);
+            String key2 = password.substring(password.indexOf(':') + 1);
+            // 100 hex 且以 31 开头 = [0x31 长度前缀][49B token]，剥掉前缀
+            if (key2.length() == 100 && key2.startsWith("31")) {
+                return key2.substring(2);
+            }
+            return key2;
         }
         return "";
     }
