@@ -121,4 +121,34 @@ class UserAgentContractTest {
         assertEquals("", RawUpdater.parseProfileTitleHeader("base64:!!!not-base64!!!"))
         assertEquals("", RawUpdater.parseProfileTitleHeader("   "))
     }
+
+    @Test
+    fun remoteNameExtractionCoversBodyHeaderAndEncodedTitle() {
+        assertEquals(
+            "示例机场",
+            RawUpdater.extractRemoteName("# profile-title: base64:56S65L6L5py65Zy6", "", ""),
+        )
+        assertEquals(
+            "Example Airport",
+            RawUpdater.extractRemoteName("", "Example%20Airport", ""),
+        )
+    }
+
+    @Test
+    fun dispositionDecoderAcceptsPlainAndRfc5987Filenames() {
+        assertEquals(
+            "Example.yaml",
+            moe.matsuri.nb4a.utils.Util.decodeFilename("attachment; filename=Example.yaml"),
+        )
+        assertEquals(
+            "机场.yaml",
+            moe.matsuri.nb4a.utils.Util.decodeFilename(
+                "attachment; filename*=UTF-8''%E6%9C%BA%E5%9C%BA.yaml",
+            ),
+        )
+        assertEquals(
+            "A+B.yaml",
+            moe.matsuri.nb4a.utils.Util.decodeFilename("attachment; filename*=UTF-8''A%2BB.yaml"),
+        )
+    }
 }

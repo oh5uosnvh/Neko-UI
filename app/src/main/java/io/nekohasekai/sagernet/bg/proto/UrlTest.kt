@@ -12,7 +12,13 @@ class UrlTest(private val context: CoroutineContext) {
     private val timeout = DataStore.connectionTestTimeout
 
     suspend fun doTest(profile: ProxyEntity): Int {
-        return TestInstance(profile, link, timeout).doTest(context)
+        // Build a fresh instance for each attempt: a failed cold-start attempt may
+        // have already closed its box/process pool, so it must never be reused.
+        return io.nekohasekai.sagernet.bg.retryColdStartProbe(
+            isSuccess = { it >= 0 },
+        ) {
+            TestInstance(profile, link, timeout).doTest(context)
+        }
     }
 
 }

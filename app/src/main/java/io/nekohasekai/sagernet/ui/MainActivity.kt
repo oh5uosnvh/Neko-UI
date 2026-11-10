@@ -45,6 +45,7 @@ import io.nekohasekai.sagernet.aidl.SpeedDisplayData
 import io.nekohasekai.sagernet.aidl.TrafficDataBatch
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.SagerConnection
+import io.nekohasekai.sagernet.bg.retryColdStartProbe
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupManager
 import io.nekohasekai.sagernet.database.ProfileManager
@@ -290,17 +291,9 @@ class MainActivity : ThemedActivity(),
         if (!DataStore.serviceState.connected || connection.service == null) {
             error("not started")
         }
-        // 魔改协议（x365 等）冷启动首测可能失败：延迟 700ms 重试一次
-        return try {
-            connection.service!!.urlTest()
-        } catch (first: Exception) {
-            Logs.w("urlTest cold-start retry: ${first.message}")
-            Thread.sleep(700)
-            if (!DataStore.serviceState.connected || connection.service == null) {
-                throw first
-            }
-            connection.service!!.urlTest()
-        }
+        // Retry is owned by the suspending caller (and by StartupConnectionProbe),
+        // so this synchronous Binder wrapper never sleeps through cancellation.
+        return connection.service!!.urlTest()
     }
 
     suspend fun importSubscription(uri: Uri, targetTagId: Long? = null) {
@@ -736,7 +729,9 @@ class MainActivity : ThemedActivity(),
         controlErrorDetail = null
         controlLatencyJob = lifecycleScope.launch {
             try {
-                val elapsed = withContext(Dispatchers.IO) { urlTest() }
+                val elapsed = retryColdStartProbe(isSuccess = { it >= 0 }) {
+                    withContext(Dispatchers.IO) { urlTest() }
+                }
                 if (controlLatencyGate.finish(request, DataStore.serviceState.connected,
                         DataStore.selectedProxy, DataStore.currentProfile)) {
                     startupProbe = startupProbe?.copy(elapsed = elapsed, phase = "connected", error = "")

@@ -19,6 +19,7 @@ open class AnimatedPopupWindow(
     private var immediate = false
     private var afterAnimatedDismiss: (() -> Unit)? = null
     private var anchorView: View? = null
+    private var scrimToken: Any? = null
     private val anchorAttach = object : View.OnAttachStateChangeListener {
         override fun onViewAttachedToWindow(v: View) = Unit
         override fun onViewDetachedFromWindow(v: View) = cancelImmediately()
@@ -52,10 +53,31 @@ open class AnimatedPopupWindow(
 
     private fun superDismiss() {
         anchorView?.removeOnAttachStateChangeListener(anchorAttach)
+        PopupScrimController.detach(scrimToken)
+        scrimToken = null
         immediate = true
         super.dismiss()
         immediate = false
         afterAnimatedDismiss = null
+    }
+
+    private fun attachScrim(anchor: View) {
+        if (scrimToken == null) scrimToken = PopupScrimController.attach(anchor)
+    }
+
+    override fun showAsDropDown(anchor: View, xoff: Int, yoff: Int) {
+        attachScrim(anchor)
+        super.showAsDropDown(anchor, xoff, yoff)
+    }
+
+    override fun showAsDropDown(anchor: View, xoff: Int, yoff: Int, gravity: Int) {
+        attachScrim(anchor)
+        super.showAsDropDown(anchor, xoff, yoff, gravity)
+    }
+
+    override fun showAtLocation(parent: View, gravity: Int, x: Int, y: Int) {
+        attachScrim(parent)
+        super.showAtLocation(parent, gravity, x, y)
     }
 
     /** Immediate lifecycle cancellation; no stale completion callback is run. */

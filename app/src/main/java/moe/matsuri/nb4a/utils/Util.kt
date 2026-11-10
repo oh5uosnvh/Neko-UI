@@ -65,7 +65,12 @@ object Util {
 
         // padding 自动处理，不用理
         // URLSafe 需要替换这两个，不要用 URL_SAFE 否则处理非 Safe 的时候会乱码
-        val str = b.replace("-", "+").replace("_", "/")
+        var str = b.replace("-", "+").replace("_", "/")
+        // Android's decoder is stricter than RFC 4648 for unpadded titles.
+        // Normalize padding here so subscription names and share links behave
+        // identically on API 21+.
+        val padding = (4 - str.length % 4) % 4
+        if (padding > 0) str += "=".repeat(padding)
 
         val flags = listOf(
             Base64.DEFAULT, // 多行
@@ -191,10 +196,23 @@ object Util {
         return ""
     }
 
+    /** Decode both RFC 5987 filename* and the common plain filename parameter. */
     fun decodeFilename(headerValue: String): String {
-        val regex = Regex("filename\\*=[^']*''(.+)")
-        val match = regex.find(headerValue)
-        val encoded = match?.groupValues?.get(1) ?: ""
-        return URLDecoder.decode(encoded, StandardCharsets.UTF_8.name())
+        if (headerValue.isBlank()) return ""
+        val extended = Regex("(?:^|;)\\s*filename\\*\\s*=\\s*([^;]+)", RegexOption.IGNORE_CASE)
+            .find(headerValue)?.groupValues?.get(1)?.trim()?.trim('"')
+        if (!extended.isNullOrBlank()) {
+            val value = extended.substringAfter("''", extended)
+            // URLDecoder treats '+' as a space, but '+' is literal in RFC5987.
+            return runCatching {
+                URLDecoder.decode(value.replace("+", "%2B"), StandardCharsets.UTF_8.name())
+            }.getOrDefault(value).trim()
+        }
+        val plain = Regex("(?:^|;)\\s*filename\\s*=\\s*(\"[^\"]*\"|[^;]+)", RegexOption.IGNORE_CASE)
+            .find(headerValue)?.groupValues?.get(1)?.trim()?.trim('"') ?: return ""
+        return if (plain.contains('%')) {
+            runCatching { URLDecoder.decode(plain, StandardCharsets.UTF_8.name()) }
+                .getOrDefault(plain).trim()
+        } else plain.trim()
     }
 }

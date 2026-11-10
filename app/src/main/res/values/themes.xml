@@ -175,9 +175,12 @@
     </style>
 
     <style name="ThemeOverlay.MaterialComponents.MaterialAlertDialog.SagerNet">
-        <!-- 弹窗浮层自带圆角底色（windowBackground = @drawable/bg_dialog），
-             页面底色与弹窗底色本就不同，背后不要再压暗 scrim。 -->
-        <item name="android:backgroundDimEnabled">false</item>
+        <!-- Keep a light focus layer behind every input/choice dialog. Android 12+
+             applies a true backdrop blur; older versions retain a subtle dim scrim. -->
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:backgroundDimAmount">0.18</item>
+        <item name="android:windowBlurBehindEnabled">true</item>
+        <item name="android:windowBlurBehindRadius">12dp</item>
         <!-- 弹窗动态展开/收起，与列表菜单一致。 -->
         <item name="android:windowAnimationStyle">@style/DialogWindowAnimation</item>
         <!-- 对话框的主题链不经过 app 主题的 switchStyle：这里显式携带全局绿色

@@ -132,18 +132,10 @@ object RawUpdater : GroupUpdater() {
                     (!urlHost.isNullOrBlank() &&
                             proxyGroup.name.equals(urlHost, ignoreCase = true))
             if (isDefaultName) {
-                // 解析优先级：YAML/正文 # profile-title: → 响应头 profile-title
-                // （支持 "xxx" 与 "base64:xxx"，URL-safe 与 padding 均可）→
-                // Content-Disposition filename 兜底。
-                var remoteName = parseBodyProfileTitle(content)
-                if (remoteName.isBlank()) {
-                    remoteName = parseProfileTitleHeader(
-                        titleHeader
-                    )
-                }
-                if (remoteName.isBlank()) {
-                    remoteName = Util.decodeFilename(dispositionHeader)
-                }
+                // Keep one extraction chain for all import paths.  Providers commonly
+                // return a plain `filename=` (not only RFC5987 filename*=), and some
+                // percent-encode profile-title; both used to make the real name vanish.
+                val remoteName = extractRemoteName(content, titleHeader, dispositionHeader)
                 if (remoteName.isNotBlank()) {
                     proxyGroup.name = GroupDisplayName.withoutFileSuffix(remoteName)
                     SagerDatabase.groupDao.updateGroup(proxyGroup)
@@ -319,17 +311,25 @@ object RawUpdater : GroupUpdater() {
     }
 
     fun findBodyHeader(content: String, name: String): String? {
-        return Regex("(?m)^\\s*#$name:\\s*(.+)$", RegexOption.IGNORE_CASE).find(content)?.groupValues?.get(1)?.trim()
+        // Clash comments are emitted as both `#profile-title:` and
+        // `# profile-title:`.  The old expression only accepted the former.
+        return Regex(
+            "(?m)^\\s*#\\s*${Regex.escape(name)}\\s*:\\s*(.+)$",
+            RegexOption.IGNORE_CASE,
+        ).find(content)?.groupValues?.get(1)?.trim()
     }
 
     fun parseBodyProfileTitle(content: String): String {
-        var title = findBodyHeader(content, "profile-title") ?: ""
-        if (title.startsWith("base64:")) {
-            title = runCatching {
-                title.removePrefix("base64:").trim().decodeBase64UrlSafe()
-            }.getOrDefault("").trim()
-        }
-        return title
+        return parseProfileTitleHeader(findBodyHeader(content, "profile-title").orEmpty())
+    }
+
+    /** Extract the provider's label without making the response format decide it. */
+    fun extractRemoteName(content: String, titleHeader: String, dispositionHeader: String): String {
+        return sequenceOf(
+            parseBodyProfileTitle(content),
+            parseProfileTitleHeader(titleHeader),
+            Util.decodeFilename(dispositionHeader).trim(),
+        ).firstOrNull { it.isNotBlank() }.orEmpty()
     }
 
     /**
@@ -340,8 +340,30 @@ object RawUpdater : GroupUpdater() {
      * 解码失败或结果为空白时返回空串，调用方继续走 Content-Disposition 兜底。
      */
     @android.annotation.SuppressLint("NewApi")
+    private fun decodeBase64Title(value: String): ByteArray {
+        val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        val normalized = value.replace('-', '+').replace('_', '/')
+            .filterNot { it.isWhitespace() }
+        require(normalized.isNotEmpty() && normalized.length % 4 != 1)
+        val output = java.io.ByteArrayOutputStream(normalized.length * 3 / 4)
+        var buffer = 0
+        var bits = 0
+        for (char in normalized) {
+            if (char == '=') break
+            val digit = alphabet.indexOf(char)
+            require(digit >= 0)
+            buffer = (buffer shl 6) or digit
+            bits += 6
+            if (bits >= 8) {
+                bits -= 8
+                output.write((buffer shr bits) and 0xff)
+            }
+        }
+        return output.toByteArray()
+    }
+
     fun parseProfileTitleHeader(rawHeader: String): String {
-        var title = rawHeader.trim()
+        var title = rawHeader.trim().trim('"')
         if (title.isBlank()) return ""
         if (title.startsWith("base64:", ignoreCase = true)) {
             var b64 = title.substring("base64:".length).trim()
@@ -350,14 +372,22 @@ object RawUpdater : GroupUpdater() {
             val padding = (4 - b64.length % 4) % 4
             b64 += "=".repeat(padding)
             title = try {
-                String(java.util.Base64.getDecoder().decode(b64), Charsets.UTF_8)
+                String(decodeBase64Title(b64), Charsets.UTF_8)
             } catch (_: Throwable) {
-                // IllegalArgumentException（非法 base64）或 NoSuchMethodError
-                // （理论上 API<26 无 java.util.Base64 时），一律按解析失败处理。
+                // IllegalArgumentException or malformed input: let the next
+                // fallback (Content-Disposition) decide the display name.
                 ""
             }
         }
-        return title.trim()
+        // A few subscription panels send profile-title as a URL-encoded value.
+        // Decode only when a percent escape is present; '+' in a normal title is
+        // data and must not become a space.
+        if (title.contains('%')) {
+            title = runCatching {
+                java.net.URLDecoder.decode(title, Charsets.UTF_8.name())
+            }.getOrDefault(title)
+        }
+        return title.trim().trim('"')
     }
 
     @Suppress("UNCHECKED_CAST")
