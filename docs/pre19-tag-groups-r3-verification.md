@@ -20,3 +20,5 @@
 
 ## CI门禁
 新增TagR3NativeGeometryTest继承同一布局/textcenter断言，在API28/35 native字体执行；group/ui/database三包全部运行，不跳过失败；全部通过再交原签名双架构候选。仍不覆盖正式pre19资产。
+
+首轮CI 42828795331：597项，595通过、2个真实session测试在关闭重开后的异步状态/布局等待断言失败；native几何全部通过，未交包。修正test fixture每次await至少drain主线程+layout一次，show/open明确确认当前root/成员ID集合及当前读取任务完成，而非仅看可已取消旧Job.isCompleted。原视口/成员集合断言不取消不改期望，复验16项session+handle+geometry全部通过。生产代码无新增变动。

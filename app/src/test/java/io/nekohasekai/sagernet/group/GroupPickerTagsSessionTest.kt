@@ -113,25 +113,39 @@ class GroupPickerTagsSessionTest {
         }
         fun await(condition: () -> Boolean) {
             val deadline = System.nanoTime() + 5_000_000_000L
-            while (!condition() && System.nanoTime() < deadline) {
+            do {
                 shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
-                frame()
+                frame() // Even an already-completed IO job can have a pending adapter/layout result.
+                if (condition()) return
                 Thread.yield()
-            }
+            } while (System.nanoTime() < deadline)
             assertTrue("Asynchronous picker update must complete", condition())
+        }
+        private fun pageDataReady(): Boolean {
+            val roots = environment.database.groupDao().allGroups().filterNot { PendingGroupDeletes.contains(it.id) }
+            if (adapter.ids != roots.map { it.id }) return false
+            val page = navigation.page
+            if (page is GroupPickerNavigation.Page.Members) {
+                val members = TagGroupStore.members(page.tagId)
+                if (memberAdapter.ids != roots.filter { it.id in members }.map { it.id }) return false
+            }
+            return ReflectionHelpers.getField<Job?>(session, "tagsRefreshing")?.isCompleted == true &&
+                !ReflectionHelpers.getField<Boolean>(session, "tagRefreshNeeded")
         }
         fun show() {
             call("show")
             frame()
             await { ReflectionHelpers.getField<Job?>(session, "refreshing")?.isCompleted == true &&
-                ReflectionHelpers.getField<Boolean>(session, "tagsLoaded") }
+                ReflectionHelpers.getField<Boolean>(session, "tagsLoaded") && pageDataReady() }
+            frame()
         }
-        fun tags() { call("navigateTags"); frame(); settleMotion() }
+        fun tags() { call("navigateTags"); frame(); await { pageDataReady() }; settleMotion() }
         fun open(id: Long) {
             ReflectionHelpers.callInstanceMethod<Void>(session, "openTag", ClassParameter.from(Long::class.javaPrimitiveType!!, id))
             frame()
-            await { ReflectionHelpers.getField<Job?>(session, "tagsRefreshing")?.isCompleted == true }
+            await { pageDataReady() }
             settleMotion()
+            frame()
         }
         fun dispatch(recycler: GroupPickerRecyclerView, action: Int, x: Float, y: Float) {
             val now = SystemClock.uptimeMillis()
