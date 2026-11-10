@@ -107,7 +107,6 @@ internal class FlMenuPopup(
     private var aboveAnchor = false
     private var pageAnimator: ValueAnimator? = null
     private var removed = false
-    private var scrimToken: Any? = null
     private val anchorAttach = object : View.OnAttachStateChangeListener {
         override fun onViewAttachedToWindow(v: View) = Unit
         override fun onViewDetachedFromWindow(v: View) = cancelImmediately()
@@ -137,8 +136,6 @@ internal class FlMenuPopup(
             // callbacks on a stale card/fragment.
             val item = if (exitCompleted) pendingItem else null
             removed = true
-            PopupScrimController.detach(scrimToken)
-            scrimToken = null
             pendingItem = null
             exitCompleted = false
             stopPageAnimation()
@@ -207,7 +204,6 @@ internal class FlMenuPopup(
         lastY = y
 
         setWindowSize(width, height)
-        scrimToken = PopupScrimController.attach(anchor)
         anchor.addOnAttachStateChangeListener(anchorAttach)
         try {
             showAtLocation(anchor.rootView, Gravity.TOP or Gravity.LEFT, x, y)

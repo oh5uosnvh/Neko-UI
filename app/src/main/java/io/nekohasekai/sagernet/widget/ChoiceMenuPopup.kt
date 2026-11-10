@@ -34,7 +34,6 @@ internal class ChoiceMenuPopup(
     private var pending: Int? = null
     private var exiting = false
     private var finished = false
-    private var scrimToken: Any? = null
 
     init {
         surface.addView(listView, FrameLayout.LayoutParams(
@@ -56,8 +55,6 @@ internal class ChoiceMenuPopup(
                 anchor.removeOnAttachStateChangeListener(this)
                 listView.onItemClickListener = null
                 listView.adapter = null
-                PopupScrimController.detach(scrimToken)
-                scrimToken = null
                 val callback = onClosed
                 onClosed = null
                 val choice = pending
@@ -112,7 +109,6 @@ internal class ChoiceMenuPopup(
             return
         }
         anchor.addOnAttachStateChangeListener(this)
-        scrimToken = PopupScrimController.attach(anchor)
         try {
             showAsDropDown(anchor, 0, 0, Gravity.START)
             PopupEntrance.animate(surface, isAboveAnchor, anchor)
@@ -137,8 +133,6 @@ internal class ChoiceMenuPopup(
     /** Rebind/detach is cancellation, including a selection still in its exit animation. */
     fun cancelImmediately() {
         pending = null
-        PopupScrimController.detach(scrimToken)
-        scrimToken = null
         PopupEntrance.cancel(surface)
         if (isShowing) removeWindow() else if (!finished) {
             finished = true
