@@ -58,42 +58,18 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     private var filterSubscription: Boolean? = null
     private var sortMode = SORT_DEFAULT
 
-    // 分组页搜索模式：只匹配分组名称；搜索态不再显示原本的更新/新建按钮。
+    // Search is a full-width row like the configuration page, never a collapsing menu action.
     private var groupSearchQuery = ""
-    private var groupSearchView: androidx.appcompat.widget.SearchView? = null
-    private var groupSearchItem: MenuItem? = null
-    private var groupClassifyItem: MenuItem? = null
-    private var groupClassifyAnimating = false
+    private var groupSearchBar: GroupSearchBar? = null
     private var groupSearchMode = false
+    private val searchBackCallback = object : androidx.activity.OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = exitGroupSearchMode()
+    }
 
-    private fun setGroupClassifyVisible(visible: Boolean, animate: Boolean = true) {
-        val item = groupClassifyItem ?: return
-        if (item.isVisible == visible && !groupClassifyAnimating) return
-        if (!visible) {
-            val view = toolbar.findViewById<View>(item.itemId)
-            if (animate && view?.isShown == true) {
-                groupClassifyAnimating = true
-                view.animate().alpha(0f).translationX(-dp2px(28).toFloat())
-                    .setDuration(180L).withEndAction {
-                        item.isVisible = false
-                        view.alpha = 1f
-                        view.translationX = 0f
-                        groupClassifyAnimating = false
-                    }.start()
-            } else item.isVisible = false
-            return
-        }
-        item.isVisible = true
-        if (!animate) return
-        toolbar.post {
-            val view = toolbar.findViewById<View>(item.itemId) ?: return@post
-            groupClassifyAnimating = true
-            view.alpha = 0f
-            view.translationX = -dp2px(28).toFloat()
-            view.animate().alpha(1f).translationX(0f).setDuration(220L)
-                .setInterpolator(android.view.animation.DecelerateInterpolator(1.5f))
-                .withEndAction { groupClassifyAnimating = false }.start()
-        }
+    private fun updateGroupSearchActions() {
+        if (!::groupAdapter.isInitialized) return
+        groupSearchBar?.render(groupSearchQuery, groupAdapter.searchMatches().size,
+            groupAdapter.customSelection, selectedForClassification.size)
     }
     private val selectedForClassification = LinkedHashSet<Long>()
 
@@ -180,6 +156,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
     override fun onHiddenChanged(hidden: Boolean) {
         super.onHiddenChanged(hidden)
+        searchBackCallback.isEnabled = groupSearchMode && !hidden
         if (hidden) { cancelGroupJump(); dismissFilterPicker() }
         else if (preparedGroupId > 0L) beginPreparedGroupJump()
     }
@@ -205,35 +182,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         toolbar.setTitle(R.string.menu_group)
         toolbar.inflateMenu(R.menu.add_group_menu)
         toolbar.setOnMenuItemClickListener(this)
-        groupSearchItem = toolbar.menu.findItem(R.id.action_group_search)
-        groupClassifyItem = toolbar.menu.findItem(R.id.action_group_classify)
-        groupSearchItem?.setOnActionExpandListener(object : MenuItem.OnActionExpandListener {
-            override fun onMenuItemActionExpand(item: MenuItem): Boolean {
-                enterGroupSearchMode(item)
-                return true
-            }
-            override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
-                exitGroupSearchMode()
-                return true
-            }
-        })
-        (groupSearchItem?.actionView as? androidx.appcompat.widget.SearchView)?.let { search ->
-            groupSearchView = search
-            search.queryHint = getString(R.string.search)
-            search.findViewById<View>(androidx.appcompat.R.id.search_close_btn)?.isGone = true
-            search.setOnQueryTextListener(object : androidx.appcompat.widget.SearchView.OnQueryTextListener {
-                override fun onQueryTextSubmit(query: String) = false
-                override fun onQueryTextChange(newText: String): Boolean {
-                    groupSearchQuery = newText.trim()
-                    if (::groupAdapter.isInitialized) {
-                        setGroupClassifyVisible(groupSearchQuery.isNotEmpty() &&
-                            groupAdapter.searchMatches().size >= 2)
-                        groupAdapter.applyFilter()
-                    }
-                    return true
-                }
-            })
-        }
+        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, searchBackCallback)
 
         groupListView = view.findViewById(R.id.group_list)
         layoutManager = FixedLinearLayoutManager(groupListView)
@@ -335,43 +284,34 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
     }
 
-    private fun enterGroupSearchMode(item: MenuItem) {
+    private fun enterGroupSearchMode() {
+        if (groupSearchMode) return
         groupSearchMode = true
-        groupSearchQuery = groupSearchView?.query?.toString().orEmpty()
-        toolbar.menu.findItem(R.id.action_update_all)?.apply {
-            isVisible = true
-            setIcon(R.drawable.ic_navigation_close)
-            title = getString(android.R.string.cancel)
+        searchBackCallback.isEnabled = !isHidden
+        groupSearchBar = GroupSearchBar(toolbar, requireContext()).also { bar ->
+            bar.attach(onQuery = { query ->
+                // Editing invalidates the previous manual selection, including any pending tick.
+                if (groupSearchQuery != query.trim()) {
+                    selectedForClassification.clear()
+                    groupAdapter.customSelection = false
+                }
+                groupSearchQuery = query.trim()
+                groupAdapter.applyFilter()
+            }, onClassify = ::openClassificationChoice, onClose = ::exitGroupSearchMode,
+                onConfirm = { saveClassification(selectedForClassification.toList()) })
         }
-        toolbar.menu.findItem(R.id.action_new_group)?.apply {
-            // 保留确认位，但未进入“自定义选择”前不显示 ✓。
-            isVisible = true
-            setIcon(R.drawable.ic_action_placeholder)
-            title = ""
-        }
-        setGroupClassifyVisible(false)
         groupAdapter.applyFilter()
     }
 
     private fun exitGroupSearchMode() {
+        if (!groupSearchMode) return
         groupSearchMode = false
-        groupSearchView?.setQuery("", false)
+        searchBackCallback.isEnabled = false
+        groupSearchBar?.detach()
+        groupSearchBar = null
         groupSearchQuery = ""
         selectedForClassification.clear()
         groupAdapter.customSelection = false
-        setGroupClassifyVisible(false)
-        toolbar.menu.findItem(R.id.action_update_all)?.apply {
-            isVisible = true
-            setIcon(R.drawable.ic_baseline_update_24)
-            title = getString(R.string.update_all_subscription)
-        }
-        toolbar.menu.findItem(R.id.action_new_group)?.apply {
-            isVisible = true
-            setIcon(R.drawable.ic_av_playlist_add)
-            title = getString(R.string.group_create)
-        }
-        setGroupClassifyVisible(false)
-        toolbar.menu.findItem(R.id.action_group_search)?.isVisible = true
         groupAdapter.applyFilter()
     }
 
@@ -391,13 +331,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                     2 -> {
                         selectedForClassification.clear()
                         groupAdapter.customSelection = true
-                        // 只有进入“自定义选择”后才显示预留的 ✓。
-                        toolbar.menu.findItem(R.id.action_new_group)?.apply {
-                            isVisible = true
-                            setIcon(R.drawable.ic_action_done)
-                            title = ""
-                        }
-                        setGroupClassifyVisible(false)
+                        updateGroupSearchActions()
                         groupAdapter.notifyDataSetChanged()
                     }
                 }
@@ -409,24 +343,15 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         val selected = ids.toSet()
         val reordered = groupAdapter.classifyOrder(selected)
         GroupOrderStore.submit(reordered.map { it.id }) { result -> result.error?.let { Logs.w(it) } }
-        groupSearchItem?.collapseActionView()
+        exitGroupSearchMode()
         (activity as? MainActivity)?.displayFragmentWithId(R.id.nav_group)
     }
 
     override fun onMenuItemClick(item: MenuItem): Boolean {
         when (item.itemId) {
-            R.id.action_group_classify -> {
-                if (groupAdapter.customSelection) saveClassification(selectedForClassification.toList())
-                else openClassificationChoice()
-            }
+            R.id.action_group_search -> enterGroupSearchMode()
             R.id.action_new_group -> {
-                if (groupSearchMode) {
-                    if (groupAdapter.customSelection) {
-                        saveClassification(selectedForClassification.toList())
-                    } else if (groupClassifyItem?.isVisible == true) {
-                        openClassificationChoice()
-                    }
-                } else {
+                if (!groupSearchMode) {
                     startActivity(Intent(context, GroupSettingsActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                         putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, 0L)
@@ -435,7 +360,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             }
             R.id.action_update_all -> {
                 if (groupSearchMode) {
-                    groupSearchItem?.collapseActionView()
+                    exitGroupSearchMode()
                 } else {
                     MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
                         .setMessage(R.string.update_all_subscription)
@@ -625,7 +550,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             if (!group.displayName().contains(groupSearchQuery.trim(), ignoreCase = true)) return true
             if (selectedForClassification.contains(group.id)) selectedForClassification.remove(group.id)
             else selectedForClassification.add(group.id)
-            setGroupClassifyVisible(selectedForClassification.isNotEmpty())
+            updateGroupSearchActions()
             notifyDataSetChanged()
             return true
         }
@@ -710,8 +635,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             val query = groupSearchQuery.trim()
             if (query.isNotEmpty()) {
                 list = list.filter { it.displayName().contains(query, ignoreCase = true) }
-            } else if (groupSearchMode) {
-                setGroupClassifyVisible(false)
             }
             val filter = filterSubscription
             if (filter != null) {
@@ -722,11 +645,10 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 SORT_DESC -> sortGroups(list, ascending = false)
                 else -> list
             }
-            if (query.isNotEmpty()) {
-                setGroupClassifyVisible(list.size >= 2)
-            }
             groupList.clear()
             groupList.addAll(list)
+            selectedForClassification.retainAll(list.map { it.id }.toSet())
+            updateGroupSearchActions()
         }
 
         fun applyFilter() {
@@ -914,6 +836,13 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     }
 
     override fun onDestroyView() {
+        groupSearchBar?.detach()
+        groupSearchBar = null
+        groupSearchMode = false
+        groupSearchQuery = ""
+        selectedForClassification.clear()
+        searchBackCallback.isEnabled = false
+        searchBackCallback.remove()
         cancelGroupJump()
         jump?.close()
         jump = null

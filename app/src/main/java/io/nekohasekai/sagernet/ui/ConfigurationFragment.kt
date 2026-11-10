@@ -152,6 +152,26 @@ import androidx.appcompat.app.AlertDialog
 import io.nekohasekai.sagernet.database.SubscriptionBean
 import kotlin.math.abs
 
+/** Full binds and live updates must both overwrite recycled traffic UI state. */
+internal fun bindProfileTraffic(
+    trafficText: TextView,
+    statisticsEnabled: Boolean,
+    twoColumn: Boolean,
+    tx: Long,
+    rx: Long,
+) {
+    val showTraffic = shouldShowProfileTraffic(statisticsEnabled, twoColumn, tx, rx)
+    trafficText.text = if (showTraffic) trafficText.context.getString(
+        R.string.traffic,
+        Formatter.formatFileSize(trafficText.context, rx),
+        Formatter.formatFileSize(trafficText.context, tx),
+    ) else ""
+    trafficText.isVisible = showTraffic
+    trafficText.translationY = if (showTraffic) {
+        2f * trafficText.resources.displayMetrics.density
+    } else 0f
+}
+
 class ConfigurationFragment @JvmOverloads constructor(
     val select: Boolean = false, val selectedItem: ProxyEntity? = null, val titleRes: Int = 0
 ) : ToolbarFragment(R.layout.layout_group_list),
@@ -2900,6 +2920,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             override fun onViewRecycled(holder: ConfigurationHolder) {
                 holder.resetLatencyDisplay()
+                bindProfileTraffic(holder.trafficText, false, false, 0L, 0L)
                 holder.lastSelfHasMiddleRow = null
                 holder.lastBoundTx = Long.MIN_VALUE
                 holder.lastBoundRx = Long.MIN_VALUE
@@ -2933,14 +2954,11 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                 val index = holder.bindingAdapterPosition
                 val previousHasMiddleRow = holder.lastSelfHasMiddleRow
-                val previouslyShowedTraffic = holder.lastBoundTx != Long.MIN_VALUE &&
-                        holder.lastBoundRx != Long.MIN_VALUE &&
-                        holder.lastBoundTx + holder.lastBoundRx != 0L
-                val showTraffic = cached.tx + cached.rx != 0L
-
-                if (previousHasMiddleRow == null || previouslyShowedTraffic != showTraffic) {
+                // Traffic never changes row geometry; apply the same binding for
+                // non-zero updates and resets to zero so hidden state is not stale.
+                if (previousHasMiddleRow == null) {
                     holder.bind(cached)
-                } else if (showTraffic) {
+                } else {
                     holder.bindTraffic(cached)
                 }
 
@@ -3628,10 +3646,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val tx = proxyEntity.tx
                 val secondary = requireContext().getColorAttr(android.R.attr.textColorSecondary)
 
-                // Traffic is inline with the title and is never a structural row.
-                // The setting controls visibility; zero values remain visible.
-                val showTraffic = !twoColumn && DataStore.profileTrafficStatistics
-                trafficText.translationY = if (showTraffic) 2f * resources.displayMetrics.density else 0f
+                // Traffic is inline, not structural; zero-byte profiles must remain hidden.
                 // Single-column statistics occupy title line two, never an additional row.
                 // The title always has two physical lines. Traffic is right-aligned
                 // inside line two and must not reduce the name to one line.
@@ -3657,13 +3672,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                 // Align first-line font box with the 48dp action icons, not the two-line block.
                 val firstLineCenter = (nameMetrics.bottom - nameMetrics.top) / 2
                 profileName.setPadding(0, ((24 * resources.displayMetrics.density).toInt() - firstLineCenter).coerceAtLeast(0), 0, 0)
-                trafficText.isVisible = showTraffic
                 trafficText.setTextColor(secondary)
-                trafficText.text = if (showTraffic) view.context.getString(
-                    R.string.traffic,
-                    Formatter.formatFileSize(view.context, rx),
-                    Formatter.formatFileSize(view.context, tx)
-                ) else ""
+                bindProfileTraffic(trafficText, DataStore.profileTrafficStatistics, twoColumn, tx, rx)
 
                 val showAddress = pf.alwaysShowAddress
                 val address = if (showAddress) bean.displayAddress() else ""
@@ -3775,19 +3785,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                     return
                 }
 
-                val traffic = view.context.getString(
-                    R.string.traffic,
-                    Formatter.formatFileSize(view.context, proxyEntity.rx),
-                    Formatter.formatFileSize(view.context, proxyEntity.tx)
-                )
-                val isDoubleColumn = layoutManager is FixedGridLayoutManager
-                if (!isDoubleColumn && DataStore.profileTrafficStatistics) {
-                    trafficText.text = traffic
-                    trafficText.isVisible = true
-                } else {
-                    trafficText.text = ""
-                    trafficText.isVisible = false
-                }
+                bindProfileTraffic(trafficText, DataStore.profileTrafficStatistics,
+                    layoutManager is FixedGridLayoutManager, proxyEntity.tx, proxyEntity.rx)
                 lastBoundTx = proxyEntity.tx
                 lastBoundRx = proxyEntity.rx
             }
