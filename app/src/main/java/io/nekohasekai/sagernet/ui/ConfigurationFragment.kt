@@ -2159,10 +2159,10 @@ class ConfigurationFragment @JvmOverloads constructor(
             groupPager.unregisterOnPageChangeCallback(updateSelectedCallback)
 
             runOnDefaultDispatcher {
-                var newGroupList = ArrayList(SagerDatabase.groupDao.allGroups())
+                var newGroupList = ArrayList(SagerDatabase.groupDao.allGroups().filterNot { io.nekohasekai.sagernet.database.PendingGroupDeletes.contains(it.id) })
                 if (newGroupList.isEmpty()) {
                     SagerDatabase.groupDao.createGroup(ProxyGroup(ungrouped = true))
-                    newGroupList = ArrayList(SagerDatabase.groupDao.allGroups())
+                    newGroupList = ArrayList(SagerDatabase.groupDao.allGroups().filterNot { io.nekohasekai.sagernet.database.PendingGroupDeletes.contains(it.id) })
                 }
                 newGroupList.find { it.ungrouped }?.let {
                     if (SagerDatabase.proxyDao.countByGroup(it.id) == 0L) {
@@ -2396,7 +2396,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         /** Group-only fallback after returning from management; no profile/DNS reload. */
         fun syncOrderFromDb() {
             runOnDefaultDispatcher {
-                val fresh = SagerDatabase.groupDao.allGroups().sortedWith(compareBy({ it.userOrder }, { it.id }))
+                val fresh = SagerDatabase.groupDao.allGroups().filterNot { io.nekohasekai.sagernet.database.PendingGroupDeletes.contains(it.id) }.sortedWith(compareBy({ it.userOrder }, { it.id }))
                 groupsReordered(fresh, emptyList())
             }
         }

@@ -33,9 +33,15 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupManager
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.database.TagGroup
+import io.nekohasekai.sagernet.database.TagGroupStore
+import io.nekohasekai.sagernet.database.PendingGroupDeletes
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+import io.nekohasekai.sagernet.ktx.runOnIoDispatcher
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import io.nekohasekai.sagernet.ktx.snackbar
 import io.nekohasekai.sagernet.widget.AnimatedPopupWindow
 import kotlinx.coroutines.CancellationException
@@ -661,7 +667,7 @@ internal class TopBarController(
     fun showGroupPicker(anchor: View) {
         dismissGroupPicker()
         val list = groups().toList()
-        if (list.isEmpty()) {
+        if (host.select && list.isEmpty()) {
             host.snackbar(R.string.jump_hint_none)
             return
         }
@@ -723,18 +729,73 @@ internal class TopBarController(
             settled = { onSettled() },
         )
         private val touch = ItemTouchHelper(drag)
-        private val container = FrameLayout(popupContext).apply {
-            // Only this fixed, non-scrolling frame paints the border. Leave an inset so
-            // children/recovery animations cannot draw over its top/bottom edges.
+        private val navigation = GroupPickerNavigation()
+        private var tagRows: List<TagGroup> = emptyList()
+        private var memberIds: Set<Long> = emptySet()
+        private var memberNeedsSelection = false
+        private var tagsLoaded = false
+        private var tagsFailed = false
+        private var tagsWatching: Job? = null
+        private var tagsRefreshing: Job? = null
+        private var tagGeneration = 0L
+        private var memberNames: Map<Long, String> = emptyMap()
+        private var nodeCounts: Map<Long, Long> = emptyMap()
+        private var rootViewport: PickerViewport? = null
+        private var tagViewport: PickerViewport? = null
+        private var availableHeight = 1
+        private var rowHeight = dp(52)
+        private val tagList = GroupPickerRecyclerView(popupContext)
+        private val memberList = GroupPickerRecyclerView(popupContext)
+        private val tagAdapter = TagPickerAdapter(popupContext,
+            themeColor(android.R.attr.textColorPrimary), { groupItemCard(false) }, { openTag(it) })
+        private val memberAdapter = GroupPickerAdapter(popupContext, emptyList(),
+            selectedId = { selectedItemGroupId() }, card = { groupItemCard(it) },
+            textColor = themeColor(android.R.attr.textColorPrimary),
+            secondaryColor = themeColor(android.R.attr.textColorSecondary),
+            onClick = { id -> if (!closed && navigation.page is GroupPickerNavigation.Page.Members) jumpToGroupId(id) },
+        ).apply { reorderable = false }
+        private val header = GroupPickerHeader(popupContext,
+            themeColor(android.R.attr.textColorPrimary), { groupItemCard(it) },
+            configuration = { navigateConfiguration() }, tags = { navigateTags() }, back = { backPage() })
+        private val empty = TextView(popupContext).apply {
+            textSize = 14f
+            setTextColor(themeColor(android.R.attr.textColorSecondary))
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+        }
+        private val pages = FrameLayout(popupContext).apply {
+            addView(list, FrameLayout.LayoutParams(-1, -1))
+            addView(tagList, FrameLayout.LayoutParams(-1, -1))
+            addView(memberList, FrameLayout.LayoutParams(-1, -1))
+            addView(empty, FrameLayout.LayoutParams(-1, -1))
+        }
+        private val content = LinearLayout(popupContext).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(header, LinearLayout.LayoutParams(-1, -2))
+            addView(pages, LinearLayout.LayoutParams(-1, 0, 1f))
+        }
+        private val container = GroupPickerSurface(popupContext).apply {
+            // Each level has its own retained RecyclerView: root scrolling/drag state is
+            // never discarded when entering a tag. Only this fixed frame paints the border.
             background = roundedCard()
             clipToOutline = true
             val border = resources.getDimensionPixelSize(R.dimen.card_stroke_width)
             setPadding(border, border, border, border)
-            addView(list, FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
-            ))
+            addView(content, FrameLayout.LayoutParams(-1, -1))
+            onBack = { backPage() }
         }
-        private val popup = AnimatedPopupWindow(container, pickerWidth(), 1, true, anchor).apply {
+        private val popup = object : AnimatedPopupWindow(container, pickerWidth(), 1, true, anchor) {
+            override fun dismiss() {
+                // Platform decor consumes BACK before content.dispatchKeyEvent, including
+                // predictive BACK. Outside touch / explicit teardown close the model first.
+                if (!closed && navigation.page != GroupPickerNavigation.Page.Configuration) {
+                    backPage()
+                    return
+                }
+                close()
+                super.dismiss()
+            }
+        }.apply {
             isOutsideTouchable = true
             elevation = dp(8).toFloat()
             inputMethodMode = PopupWindow.INPUT_METHOD_NOT_NEEDED
@@ -756,9 +817,31 @@ internal class TopBarController(
             list.requestFocus()
             touch.attachToRecyclerView(list)
             adapter.startDrag = { holder ->
-                if (!closed && !drag.isSelected) touch.startDrag(holder)
+                if (!closed && navigation.page == GroupPickerNavigation.Page.Configuration && !drag.isSelected) touch.startDrag(holder)
             }
             list.cancelDrag = { drag.cancelGesture() }
+            popup.setTouchInterceptor { view, event ->
+                val outside = event.actionMasked == MotionEvent.ACTION_OUTSIDE ||
+                    (event.actionMasked == MotionEvent.ACTION_DOWN &&
+                        (event.x < 0f || event.y < 0f || event.x >= view.width || event.y >= view.height))
+                if (outside) {
+                    // Mark this as a real close, not a platform BACK page-pop.
+                    dismissGroupPicker()
+                    true
+                } else false
+            }
+            for ((recycler, rows) in listOf(tagList to tagAdapter, memberList to memberAdapter)) {
+                recycler.layoutManager = LinearLayoutManager(popupContext)
+                recycler.adapter = rows
+                recycler.itemAnimator = null
+                recycler.isVerticalScrollBarEnabled = false
+                recycler.setPadding(0, dp(6), 0, dp(6))
+                recycler.clipToPadding = true
+                recycler.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
+                recycler.isFocusableInTouchMode = true
+            }
+            renderPage()
+            if (host.select) header.visibility = View.GONE
             popup.setOnDismissListener {
                 close()
                 if (groupPopup === popup) {
@@ -780,18 +863,19 @@ internal class TopBarController(
             val location = IntArray(2).also { anchor.getLocationOnScreen(it) }
             val below = (visible.bottom - location[1] - anchor.height - gap - dp(8)).coerceAtLeast(0)
             val above = (location[1] - visible.top - gap - dp(8)).coerceAtLeast(0)
-            val available = maxOf(below, above).coerceAtLeast(1)
-            // Measure a real row so large font sizes are included; the viewport itself has
-            // an explicit cap, rather than asking a WRAP_CONTENT scrolling child to cap it.
-            val probe = adapter.onCreateViewHolder(list, 0)
-            adapter.onBindViewHolder(probe, 0)
-            probe.itemView.measure(
-                View.MeasureSpec.makeMeasureSpec(popup.width, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-            )
-            val desired = probe.itemView.measuredHeight.toLong() * adapter.itemCount +
-                list.paddingTop + list.paddingBottom + container.paddingTop + container.paddingBottom
-            popup.height = desired.coerceAtMost(available.toLong()).coerceAtLeast(1).toInt()
+            availableHeight = maxOf(below, above).coerceAtLeast(1)
+            // Measure a real row so large font sizes are included. Keep the original
+            // root viewport cap plus the new fixed header, never a wrap-content scroller.
+            if (adapter.itemCount > 0) {
+                val probe = adapter.onCreateViewHolder(list, 0)
+                adapter.onBindViewHolder(probe, 0)
+                probe.itemView.measure(
+                    View.MeasureSpec.makeMeasureSpec(popup.width, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                )
+                rowHeight = probe.itemView.measuredHeight
+            }
+            resizePage()
             groupPopup = popup
             groupPickerSession = this
             GroupManager.addListener(this)
@@ -805,12 +889,185 @@ internal class TopBarController(
                     popup.isAboveAnchor, anchor)
                 // Reopening before a previous write's notification must not revive old order.
                 requestRefresh()
+                if (!host.select) watchTags()
             } catch (e: Exception) {
                 Logs.w(e)
                 close()
                 groupPopup = null
                 groupPickerSession = null
                 showFailure()
+            }
+        }
+
+        private fun rememberViewport() {
+            when (navigation.page) {
+                GroupPickerNavigation.Page.Configuration -> rootViewport = pickerViewport(list, adapter.ids) ?: rootViewport
+                GroupPickerNavigation.Page.Tags -> tagViewport = pickerViewport(tagList, tagAdapter.ids) ?: tagViewport
+                is GroupPickerNavigation.Page.Members -> Unit
+            }
+        }
+
+        private fun navigateConfiguration() {
+            if (closed || drag.isSelected) return
+            rememberViewport()
+            navigation.configuration()
+            renderPage()
+            rootViewport?.restore(list, adapter.ids)
+        }
+
+        private fun navigateTags() {
+            if (closed || drag.isSelected) return
+            rememberViewport()
+            navigation.tags()
+            renderPage()
+            tagViewport?.restore(tagList, tagAdapter.ids)
+            requestTagRefresh()
+        }
+
+        private fun openTag(id: Long) {
+            if (closed || navigation.page != GroupPickerNavigation.Page.Tags || tagRows.none { it.id == id }) return
+            rememberViewport()
+            navigation.members(id)
+            memberNeedsSelection = true
+            memberIds = emptySet()
+            memberNames = emptyMap()
+            memberAdapter.replace(emptyList())
+            renderPage()
+            requestTagRefresh(seedSelection = true)
+        }
+
+        private fun backPage() {
+            if (closed || drag.isSelected) return
+            rememberViewport()
+            if (!navigation.back()) {
+                dismissGroupPicker()
+                return
+            }
+            renderPage()
+            when (navigation.page) {
+                GroupPickerNavigation.Page.Configuration -> rootViewport?.restore(list, adapter.ids)
+                GroupPickerNavigation.Page.Tags -> tagViewport?.restore(tagList, tagAdapter.ids)
+                is GroupPickerNavigation.Page.Members -> Unit
+            }
+            // Invalidates a late third-level result after BACK, even without another DB change.
+            requestTagRefresh()
+        }
+
+        private fun renderPage() {
+            val page = navigation.page
+            val tag = (page as? GroupPickerNavigation.Page.Members)?.let { current -> tagRows.firstOrNull { it.id == current.tagId } }
+            header.bind(page, tag?.name)
+            // INVISIBLE keeps each retained viewport laid out while another page is on top.
+            list.visibility = if (page == GroupPickerNavigation.Page.Configuration) View.VISIBLE else View.INVISIBLE
+            tagList.visibility = if (page == GroupPickerNavigation.Page.Tags) View.VISIBLE else View.INVISIBLE
+            memberList.visibility = if (page is GroupPickerNavigation.Page.Members) View.VISIBLE else View.INVISIBLE
+            val count = when (page) {
+                GroupPickerNavigation.Page.Configuration -> adapter.itemCount
+                GroupPickerNavigation.Page.Tags -> tagAdapter.itemCount
+                is GroupPickerNavigation.Page.Members -> memberAdapter.itemCount
+            }
+            empty.visibility = if (count == 0) View.VISIBLE else View.GONE
+            empty.setText(when {
+                page == GroupPickerNavigation.Page.Configuration -> R.string.jump_hint_none
+                tagsFailed -> R.string.tag_picker_load_failed
+                !tagsLoaded -> R.string.tag_picker_loading
+                page == GroupPickerNavigation.Page.Tags -> R.string.tag_picker_empty_tags
+                else -> R.string.tag_picker_empty_members
+            })
+            resizePage()
+        }
+
+        private fun resizePage() {
+            // Root size remains exactly the original row count cap plus the fixed header.
+            header.measure(View.MeasureSpec.makeMeasureSpec(popup.width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            val count = when (navigation.page) {
+                GroupPickerNavigation.Page.Configuration -> adapter.itemCount
+                GroupPickerNavigation.Page.Tags -> tagAdapter.itemCount
+                is GroupPickerNavigation.Page.Members -> memberAdapter.itemCount
+            }.coerceAtLeast(1)
+            val headerHeight = if (header.visibility == View.GONE) 0 else header.measuredHeight
+            val desired = rowHeight.toLong() * count + headerHeight + list.paddingTop +
+                list.paddingBottom + container.paddingTop + container.paddingBottom
+            val height = desired.coerceAtMost(availableHeight.toLong()).coerceAtLeast(1).toInt()
+            if (popup.isShowing) {
+                if (popup.height != height) popup.update(popup.width, height)
+            } else popup.height = height
+        }
+
+        private fun watchTags() {
+            tagsWatching = runOnIoDispatcher {
+                try {
+                    combine(TagGroupStore.changes, PendingGroupDeletes.changes) { a, b -> a to b }.collectLatest {
+                        onMainDispatcher { if (!closed) { requestTagRefresh(); requestRefresh() } }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    onMainDispatcher { if (!closed) { tagsFailed = true; renderPage() } }
+                }
+            }
+        }
+
+        private fun requestTagRefresh(seedSelection: Boolean = false) {
+            if (closed) return
+            val generation = ++tagGeneration
+            val page = navigation.page
+            tagsRefreshing?.cancel()
+            tagsRefreshing = runOnIoDispatcher {
+                try {
+                    val revision = TagGroupStore.changes.value
+                    var tags = tagPickerTags(TagGroupStore.tags())
+                    val current = (page as? GroupPickerNavigation.Page.Members)?.let { TagGroupStore.get(it.tagId) }
+                    val ids = if (current != null) TagGroupStore.members(current.id) else emptySet()
+                    if (page is GroupPickerNavigation.Page.Members && current == null) tags = tags.filterNot { it.id == page.tagId }
+                    onMainDispatcher {
+                        if (closed || generation != tagGeneration || navigation.page != page) return@onMainDispatcher
+                        if (revision != TagGroupStore.changes.value) {
+                            requestTagRefresh(seedSelection)
+                            return@onMainDispatcher
+                        }
+                        tagsLoaded = true
+                        tagsFailed = false
+                        tagRows = tags
+                        tagAdapter.replace(tags, tagList)
+                        if (navigation.reconcile(tags)) {
+                            renderPage()
+                            tagViewport?.restore(tagList, tagAdapter.ids)
+                            return@onMainDispatcher
+                        }
+                        memberIds = ids
+                        val seed = seedSelection || memberNeedsSelection
+                        memberNeedsSelection = false
+                        refreshMemberRows(seed)
+                        renderPage() // rename updates third-level title immediately
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    onMainDispatcher {
+                        if (!closed && generation == tagGeneration) { tagsFailed = true; renderPage() }
+                    }
+                }
+            }
+        }
+
+        private fun refreshMemberRows(seedSelection: Boolean = false) {
+            if (closed || navigation.page !is GroupPickerNavigation.Page.Members) return
+            val fresh = tagPickerMembers(confirmed, memberIds).filterNot { PendingGroupDeletes.contains(it.id) }
+            val names = fresh.associate { it.id to it.displayName() }
+            if (memberAdapter.ids != fresh.map { it.id } || memberNames != names) {
+                val viewport = if (seedSelection) null else pickerViewport(memberList, memberAdapter.ids)
+                memberNames = names
+                memberAdapter.replace(fresh)
+                viewport?.restore(memberList, memberAdapter.ids)
+            }
+            memberAdapter.updateCounts(memberAdapter.ids.associateWith { nodeCounts[it] ?: 0L })
+            if (seedSelection) {
+                val selected = memberAdapter.ids.indexOf(selectedItemGroupId()).coerceAtLeast(0)
+                (memberList.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(selected, 0)
             }
         }
 
@@ -839,20 +1096,23 @@ internal class TopBarController(
 
         private fun replaceKeepingViewport(fresh: List<ProxyGroup>) {
             val names = fresh.associate { it.id to it.displayName() }
-            if (adapter.ids == fresh.map { it.id } && displayedNames == names) return
+            if (adapter.ids == fresh.map { it.id } && displayedNames == names) {
+                refreshMemberRows()
+                return
+            }
             displayedNames = names
             // A full row refresh must retain the user's exact pixel offset, not just the ID.
             // Capture only an already-laid-out anchor; otherwise keep show()'s pending first-frame seed.
-            val first = layout.findFirstVisibleItemPosition()
-            val anchorId = adapter.ids.getOrNull(first)
-            val anchorView = if (first >= 0) layout.findViewByPosition(first) else null
-            val offset = anchorView?.let { layout.getDecoratedTop(it) - list.paddingTop }
+            val viewport = if (navigation.page == GroupPickerNavigation.Page.Configuration)
+                pickerViewport(list, adapter.ids) else rootViewport
             adapter.replace(fresh)
-            if (anchorId != null && offset != null && fresh.isNotEmpty()) {
-                val moved = fresh.indexOfFirst { it.id == anchorId }
-                val position = if (moved >= 0) moved else first.coerceIn(0, fresh.lastIndex)
-                layout.scrollToPositionWithOffset(position, offset)
+            viewport?.restore(list, adapter.ids)
+            if (fresh.isNotEmpty() && viewport != null) {
+                val moved = adapter.ids.indexOf(viewport.id)
+                rootViewport = viewport.copy(position = if (moved >= 0) moved else viewport.position.coerceIn(0, fresh.lastIndex))
             }
+            refreshMemberRows()
+            renderPage()
         }
 
         private var displayedNames = initial.associate { it.id to it.displayName() }
@@ -906,7 +1166,7 @@ internal class TopBarController(
                 try {
                     val counts = PendingProfileDeletes.counts()
                     val fresh = SagerDatabase.groupDao.allGroups().filter {
-                        !it.ungrouped || (counts[it.id] ?: 0L) > 0L
+                        !PendingGroupDeletes.contains(it.id) && (!it.ungrouped || (counts[it.id] ?: 0L) > 0L)
                     }
                     onMainDispatcher {
                         if (closed || generation != refreshGeneration) return@onMainDispatcher
@@ -929,6 +1189,10 @@ internal class TopBarController(
         }
 
         private fun applyCounts(fresh: Map<Long, Long>) {
+            nodeCounts = fresh
+            if (navigation.page is GroupPickerNavigation.Page.Members) {
+                memberAdapter.updateCounts(memberAdapter.ids.associateWith { fresh[it] ?: 0L })
+            }
             val visible = adapter.ids.associateWith { fresh[it] ?: 0L }
             if (visible == displayedCounts) return
             displayedCounts = visible
@@ -961,6 +1225,9 @@ internal class TopBarController(
             list.removeCallbacks(settleRefresh)
             refreshing?.cancel()
             counting?.cancel()
+            tagsWatching?.cancel()
+            tagsRefreshing?.cancel()
+            container.onBack = null
             deferredResult?.second?.error?.let { showFailure() }
             deferredResult = null
             list.cancelDrag = null
@@ -970,6 +1237,8 @@ internal class TopBarController(
             list.itemAnimator?.endAnimations()
             touch.attachToRecyclerView(null)
             list.adapter = null
+            memberList.adapter = null
+            tagList.adapter = null
             deferredResult = null
         }
 

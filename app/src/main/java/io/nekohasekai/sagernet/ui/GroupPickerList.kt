@@ -11,6 +11,7 @@ import android.text.style.ForegroundColorSpan
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -77,6 +78,8 @@ internal class GroupPickerAdapter(
         }
     }
     var startDrag: ((Holder) -> Unit)? = null
+    /** Filtered tag members share selection/count binding, never an independent root order. */
+    var reorderable = true
     var dragging = false
         private set
     val ids: List<Long> get() = rows.map { it.id }
@@ -153,7 +156,7 @@ internal class GroupPickerAdapter(
         handle.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    if (holder.bindingAdapterPosition != RecyclerView.NO_POSITION) {
+                    if (reorderable && holder.bindingAdapterPosition != RecyclerView.NO_POSITION) {
                         startDrag?.invoke(holder)
                     }
                 }
@@ -167,6 +170,7 @@ internal class GroupPickerAdapter(
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val group = rows[position]
         holder.groupId = group.id
+        holder.handle.visibility = if (reorderable) View.VISIBLE else View.GONE
         val selected = group.id == selectedId()
         holder.row.isSelected = selected
         holder.nameCard.isSelected = selected

@@ -12,6 +12,16 @@
         android:title="@string/update_all_subscription"
         app:showAsAction="always" />
     <item
+        android:id="@+id/action_tag_groups"
+        android:icon="@drawable/ic_tag_group"
+        android:title="标签组"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/action_tag_remove_selected"
+        android:title="@string/tag_member_unclassify"
+        android:visible="false"
+        app:showAsAction="never" />
+    <item
         android:id="@+id/action_new_group"
         android:icon="@drawable/ic_av_playlist_add"
         android:title="@string/group_create"

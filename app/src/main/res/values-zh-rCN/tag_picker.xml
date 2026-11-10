@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tag_picker_configuration">配置</string>
+    <string name="tag_picker_tags">标签</string>
+    <string name="tag_picker_title">标签组</string>
+    <string name="tag_picker_back_to">返回：%1$s</string>
+    <string name="tag_picker_empty_tags">暂无标签组</string>
+    <string name="tag_picker_empty_members">暂无配置分组</string>
+    <string name="tag_picker_loading">加载中…</string>
+    <string name="tag_picker_load_failed">标签组加载失败</string>
+</resources>

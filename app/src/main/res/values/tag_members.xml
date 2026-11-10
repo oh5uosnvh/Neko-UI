@@ -1,0 +1,24 @@
+<resources>
+<string name="tag_member_empty">暂无配置分组\n点击搜索或 ☰+ 添加配置分组</string>
+<string name="tag_member_search">搜索配置</string>
+<string name="tag_member_manual">手动</string>
+<string name="tag_member_select">选择配置分组</string>
+<string name="tag_member_already">已归类</string>
+<string name="tag_member_discard">放弃当前选择吗？</string>
+<string name="tag_member_add_success">归类成功</string>
+<string name="tag_member_remove_title">确认移除该配置吗？</string>
+<string name="tag_member_remove_global">全局移除</string>
+<string name="tag_member_remove_local">仅在标签组移除</string>
+<string name="tag_member_removed">已将配置移出“%1$s”</string>
+<string name="tag_member_restored">已还原</string>
+<string name="tag_member_failed">操作失败，请重试</string>
+<string name="tag_member_no_new">匹配项已全部归类</string>
+<string name="tag_member_unclassify">批量取消归类</string>
+<string name="tag_member_add_new">新建分组</string>
+<string name="tag_member_add_clipboard">从剪贴板导入</string>
+<string name="tag_member_add_subscription">订阅链接</string>
+<string name="tag_member_missing">标签组已被删除</string>
+<string name="tag_member_update">更新当前标签组的订阅？</string>
+<string name="tag_member_update_failed">部分订阅更新失败，可点击卡片“更新”重试</string>
+<string name="tag_member_updating">正在更新</string>
+</resources>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tag_picker_configuration">Configuration</string>
+    <string name="tag_picker_tags">Tags</string>
+    <string name="tag_picker_title">Tag groups</string>
+    <string name="tag_picker_back_to">Back: %1$s</string>
+    <string name="tag_picker_empty_tags">No tag groups</string>
+    <string name="tag_picker_empty_members">No configuration groups</string>
+    <string name="tag_picker_loading">Loading…</string>
+    <string name="tag_picker_load_failed">Could not load tag groups</string>
+</resources>

@@ -303,7 +303,7 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    suspend fun importSubscription(uri: Uri) {
+    suspend fun importSubscription(uri: Uri, targetTagId: Long? = null) {
         val group: ProxyGroup
 
         val url = uri.getQueryParameter("url")
@@ -340,13 +340,17 @@ class MainActivity : ThemedActivity(),
 
         onMainDispatcher {
 
-            displayFragmentWithId(R.id.nav_group)
+            if (targetTagId == null) displayFragmentWithId(R.id.nav_group)
 
             MaterialAlertDialogBuilder(this@MainActivity).setTitle(R.string.subscription_import)
                 .setMessage(getString(R.string.subscription_import_message, name))
                 .setPositiveButton(R.string.yes) { _, _ ->
                     runOnDefaultDispatcher {
-                        finishImportSubscription(group)
+                        try { finishImportSubscription(group, targetTagId) }
+                        catch (error: Exception) {
+                            if (error is kotlinx.coroutines.CancellationException) throw error
+                            onMainDispatcher { snackbar(R.string.tag_member_failed).show() }
+                        }
                     }
                 }
                 .setNegativeButton(android.R.string.cancel, null)
@@ -356,8 +360,8 @@ class MainActivity : ThemedActivity(),
 
     }
 
-    private suspend fun finishImportSubscription(subscription: ProxyGroup) {
-        val created = GroupManager.createGroup(subscription)
+    private suspend fun finishImportSubscription(subscription: ProxyGroup, tagId: Long? = null) {
+        val created = GroupManager.createGroup(subscription, tagId)
         DataStore.selectedGroup = created.id
         DataStore.editingGroup = created.id
         GroupUpdater.startUpdate(created, true)
@@ -555,7 +559,8 @@ class MainActivity : ThemedActivity(),
         }
         transaction.setMaxLifecycle(fragment, Lifecycle.State.RESUMED)
         currentMainFragment = fragment
-        currentNavId = fragmentCache.entries.firstOrNull { it.value === fragment }?.key ?: R.id.nav_traffic
+        currentNavId = fragmentCache.entries.firstOrNull { it.value === fragment }?.key
+            ?: if (fragment is TagGroupFragment || fragment is GroupFragment) R.id.nav_group else R.id.nav_traffic
         navigation.setSelected(currentNavId)
         navigationCommitPending = true
         transaction.runOnCommit {
@@ -605,10 +610,12 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    private fun tagOf(fragment: ToolbarFragment): String? =
-        fragmentCache.entries.firstOrNull { it.value === fragment }?.let {
-            NAV_TAG_PREFIX + it.key
-        }
+    private fun tagOf(fragment: ToolbarFragment): String? = when {
+        fragment is TagGroupFragment -> TagGroupNavigation.FRAGMENT_TAG
+        fragment is GroupFragment && (fragment.arguments?.getLong("tag_id", 0L) ?: 0L) > 0L ->
+            "tag_members_${fragment.arguments?.getLong("tag_id")}_${fragment.arguments?.getBoolean("tag_edit") == true}"
+        else -> fragmentCache.entries.firstOrNull { it.value === fragment }?.let { NAV_TAG_PREFIX + it.key }
+    }
 
     private fun createFragment(@IdRes id: Int): ToolbarFragment? = when (id) {
         R.id.nav_configuration -> ConfigurationFragment()
@@ -657,8 +664,11 @@ class MainActivity : ThemedActivity(),
             (supportFragmentManager.findFragmentByTag(NAV_TAG_PREFIX + id) as? ToolbarFragment)
                 ?.let { fragmentCache[id] = it }
         }
-        // 清掉缓存外的残留顶层 Fragment（例如仪表盘页）
-        val kept = fragmentCache.values.toSet()
+        val currentTag = savedInstanceState.getString("main_tag_page")
+        val tagPage = currentTag?.let { supportFragmentManager.findFragmentByTag(it) as? ToolbarFragment }
+        TagGroupNavigation.restoreState(this, savedInstanceState)
+        // Retain a restored tag page; its roots remain separate from the standard nav cache.
+        val kept = fragmentCache.values.toSet() + listOfNotNull(tagPage)
         for (f in supportFragmentManager.fragments.toList()) {
             if (f is ToolbarFragment && kept.none { it === f }) {
                 supportFragmentManager.beginTransaction()
@@ -668,11 +678,11 @@ class MainActivity : ThemedActivity(),
             }
         }
         val lastId = savedInstanceState.getInt(STATE_NAV_ID, R.id.nav_configuration)
-        val restored = fragmentCache[lastId]
+        val restored = tagPage ?: fragmentCache[lastId]
         if (restored != null) {
             currentMainFragment = restored
             currentNavId = lastId
-            navigation.setSelected(lastId)
+            navigation.setSelected(currentNavId)
         } else if (lastId == R.id.nav_traffic) {
             // 之前停在仪表盘（不进缓存）：重新打开一次
             displayFragmentWithId(R.id.nav_traffic)
@@ -1015,6 +1025,13 @@ class MainActivity : ThemedActivity(),
     override fun onSaveInstanceState(outState: Bundle) {
         cancelNavigationWork()
         outState.putInt(STATE_NAV_ID, currentNavId)
+        TagGroupNavigation.saveState(this, outState)
+        currentMainFragment?.let { fragment ->
+            if (fragment is TagGroupFragment || (fragment is GroupFragment &&
+                    (fragment.arguments?.getLong("tag_id", 0L) ?: 0L) > 0L)) {
+                outState.putString("main_tag_page", tagOf(fragment))
+            }
+        }
         super.onSaveInstanceState(outState)
     }
 

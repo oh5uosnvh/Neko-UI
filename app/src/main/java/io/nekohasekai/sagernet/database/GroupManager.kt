@@ -2,7 +2,6 @@ package io.nekohasekai.sagernet.database
 
 import io.nekohasekai.sagernet.GroupType
 import io.nekohasekai.sagernet.bg.SubscriptionUpdater
-import io.nekohasekai.sagernet.ktx.applyDefaultValues
 
 object GroupManager {
 
@@ -84,9 +83,12 @@ object GroupManager {
         iterator { groupUpdated(groupId) }
     }
 
-    suspend fun createGroup(group: ProxyGroup): ProxyGroup {
-        group.userOrder = SagerDatabase.groupDao.nextOrder() ?: 1
-        group.id = SagerDatabase.groupDao.createGroup(group.applyDefaultValues())
+    suspend fun createGroup(group: ProxyGroup, tagId: Long? = null): ProxyGroup =
+        createGroup(group, tagId, emptyList())
+
+    /** Clipboard/import path: profiles, root group and optional classification commit together. */
+    suspend fun createGroup(group: ProxyGroup, tagId: Long?, profiles: List<ProxyEntity>): ProxyGroup {
+        SagerDatabase.instance.tagStore.createRootGroup(group, tagId, profiles)
         iterator { groupAdd(group) }
         if (group.type == GroupType.SUBSCRIPTION) {
             SubscriptionUpdater.reconfigureUpdater()
@@ -103,17 +105,13 @@ object GroupManager {
     }
 
     suspend fun deleteGroup(groupId: Long) {
-        SagerDatabase.instance.runInTransaction {
-            SagerDatabase.groupDao.deleteById(groupId)
-            SagerDatabase.proxyDao.deleteByGroup(groupId)
-        }
+        SagerDatabase.instance.tagStore.deleteRootGroups(listOf(groupId))
         iterator { groupRemoved(groupId) }
         SubscriptionUpdater.reconfigureUpdater()
     }
 
     suspend fun deleteGroup(group: List<ProxyGroup>) {
-        SagerDatabase.groupDao.deleteGroup(group)
-        SagerDatabase.proxyDao.deleteByGroup(group.map { it.id }.toLongArray())
+        SagerDatabase.instance.tagStore.deleteRootGroups(group.map { it.id })
         for (proxyGroup in group) iterator { groupRemoved(proxyGroup.id) }
         SubscriptionUpdater.reconfigureUpdater()
     }

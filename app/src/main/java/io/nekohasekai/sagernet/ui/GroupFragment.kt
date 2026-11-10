@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.collect
 import android.view.MenuItem
 import android.view.View
@@ -16,6 +17,7 @@ import android.view.MotionEvent
 import android.widget.TextView
 import android.widget.PopupWindow
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.core.graphics.ColorUtils
 import android.view.ViewGroup
 import android.widget.LinearLayout
@@ -62,13 +64,36 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     private var groupSearchQuery = ""
     private var groupSearchBar: GroupSearchBar? = null
     private var groupSearchMode = false
+    private var tagSearchBar: TagMemberSearchBar? = null
+    private var tagSearchActive = false
+    private var tagManualMode = false
+    private var tagRemovalSelection = false
+    private var tagBusy = false
+    private var tagMemberIds: Set<Long> = emptySet()
+    private var tagName = ""
+    private var tagEmptyView: TextView? = null
+    private var tagMutationGeneration = 0
+    private var tagReadGeneration = 0
+    private var pendingTagUndo: TagGroupStore.UndoRecord? = null
+    private val tagId: Long get() = arguments?.getLong("tag_id", 0L) ?: 0L
+    private val tagEdit: Boolean get() = arguments?.getBoolean("tag_edit", false) ?: false
+    private val inTag: Boolean get() = tagId > 0L
     private val searchBackCallback = object : androidx.activity.OnBackPressedCallback(false) {
-        override fun handleOnBackPressed() = exitGroupSearchMode()
+        override fun handleOnBackPressed() {
+            if (tagSearchActive) requestExitTagSearch()
+            else if (groupSearchMode) exitGroupSearchMode()
+            else if (inTag) openTagList()
+        }
     }
+
+    private fun openTagList() { TagGroupNavigation.open(activity) }
 
     private fun updateGroupSearchActions() {
         if (!::groupAdapter.isInitialized) return
-        groupSearchBar?.render(groupSearchQuery, groupAdapter.searchMatches().size,
+        if (inTag && tagSearchActive) {
+            val matches = groupAdapter.searchMatches().count { it.id !in tagMemberIds }
+            tagSearchBar?.render(tagManualMode, matches, selectedForClassification.size)
+        } else groupSearchBar?.render(groupSearchQuery, groupAdapter.searchMatches().size,
             groupAdapter.customSelection, selectedForClassification.size)
     }
     private val selectedForClassification = LinkedHashSet<Long>()
@@ -156,13 +181,13 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
     override fun onHiddenChanged(hidden: Boolean) {
         super.onHiddenChanged(hidden)
-        searchBackCallback.isEnabled = groupSearchMode && !hidden
+        searchBackCallback.isEnabled = (groupSearchMode || inTag) && !hidden
         if (hidden) { cancelGroupJump(); dismissFilterPicker() }
         else if (preparedGroupId > 0L) beginPreparedGroupJump()
     }
 
     private suspend fun loadGroups(): List<ProxyGroup> {
-        val groups = SagerDatabase.groupDao.allGroups().toMutableList()
+        val groups = SagerDatabase.groupDao.allGroups().filterNot { PendingGroupDeletes.contains(it.id) }.toMutableList()
         if (groups.isEmpty()) {
             SagerDatabase.groupDao.createGroup(ProxyGroup(ungrouped = true))
             groups.addAll(SagerDatabase.groupDao.allGroups())
@@ -183,6 +208,30 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         toolbar.inflateMenu(R.menu.add_group_menu)
         toolbar.setOnMenuItemClickListener(this)
         requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, searchBackCallback)
+        if (inTag) {
+            toolbar.setNavigationIcon(R.drawable.baseline_arrow_back_24)
+            toolbar.setNavigationOnClickListener { if (tagSearchActive) requestExitTagSearch() else openTagList() }
+            toolbar.menu.findItem(R.id.action_tag_groups)?.isVisible = false
+            toolbar.menu.findItem(R.id.action_group_search)?.isVisible = tagEdit
+            toolbar.menu.findItem(R.id.action_tag_remove_selected)?.isVisible = tagEdit
+            searchBackCallback.isEnabled = !isHidden
+        }
+        tagEmptyView = TextView(requireContext()).apply {
+            setText(R.string.tag_member_empty)
+            gravity = Gravity.CENTER
+            setTextColor(themeTextColor())
+            textSize = 15f
+            visibility = View.GONE
+        }.also { empty ->
+            val content = view.findViewById<android.widget.FrameLayout>(R.id.title_bar_content)
+            content.addView(empty, android.widget.FrameLayout.LayoutParams(-1, -1))
+        }
+        viewLifecycleOwner.lifecycleScope.launch {
+            TagGroupStore.changes.collect { if (inTag) refreshTagState() }
+        }
+        viewLifecycleOwner.lifecycleScope.launch {
+            PendingGroupDeletes.changes.collect { if (::groupAdapter.isInitialized) groupAdapter.reload() }
+        }
 
         groupListView = view.findViewById(R.id.group_list)
         layoutManager = FixedLinearLayoutManager(groupListView)
@@ -236,13 +285,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                 val index = viewHolder.bindingAdapterPosition
                 val group = (viewHolder as GroupHolder).proxyGroup
-                groupAdapter.remove(index)
-                undoManager.remove(index to group)
-                // 立即同步到配置页：滑动即广播移除（撤销时在 undo 中广播恢复，
-                // 正式 commit 的广播对此幂等），不再等撤销条 2 秒超时
-                runOnDefaultDispatcher {
-                    GroupManager.iterator { groupRemoved(group.id) }
-                }
+                if (index != RecyclerView.NO_POSITION) groupAdapter.notifyItemChanged(index)
+                requestRemoveGroup(group)
             }
 
             // 官方机制：长按卡片触发拖动排序（☷ 手柄已按需求移除）
@@ -282,6 +326,241 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         })
         itemTouchHelper.attachToRecyclerView(groupListView)
 
+    }
+
+    private suspend fun refreshTagState() {
+        val target = tagId
+        val token = ++tagReadGeneration
+        val revision = TagGroupStore.changes.value
+        val state = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            TagGroupStore.get(target) to TagGroupStore.members(target)
+        }
+        if (view == null || !inTag || target != tagId || token != tagReadGeneration) return
+        if (revision != TagGroupStore.changes.value) { refreshTagState(); return }
+        val tag = state.first
+        if (tag == null) {
+            if (!isHidden) { activity.snackbar(R.string.tag_member_missing).show(); openTagList() }
+            return
+        }
+        tagName = tag.name
+        tagMemberIds = state.second
+        toolbar.title = tagName
+        if (::groupAdapter.isInitialized) groupAdapter.applyFilter()
+    }
+
+    private fun enterTagSearch(remove: Boolean = false) {
+        if (!inTag || !tagEdit || tagSearchActive) return
+        tagSearchActive = true
+        tagRemovalSelection = remove
+        tagManualMode = remove
+        groupSearchMode = true
+        groupSearchQuery = ""
+        selectedForClassification.clear()
+        groupAdapter.customSelection = remove
+        tagSearchBar = TagMemberSearchBar(toolbar, requireContext()).also { bar ->
+            bar.attach(onQuery = { query ->
+                groupSearchQuery = query.trim()
+                groupAdapter.applyFilter()
+            }, onManual = {
+                tagManualMode = true
+                groupSearchQuery = ""
+                selectedForClassification.clear()
+                groupAdapter.customSelection = true
+                groupAdapter.applyFilter()
+            }, onClassify = {
+                mutateTagMembership(groupAdapter.searchMatches().map { it.id }, false)
+            }, onClose = ::requestExitTagSearch, onConfirm = {
+                mutateTagMembership(selectedForClassification.toList(), tagRemovalSelection)
+            })
+        }
+        groupAdapter.applyFilter()
+    }
+
+    private fun requestExitTagSearch() {
+        if (selectedForClassification.isNotEmpty()) {
+            MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.tag_member_discard)
+                .setPositiveButton(R.string.yes) { _, _ -> exitTagSearch() }
+                .setNegativeButton(android.R.string.cancel, null).show()
+        } else exitTagSearch()
+    }
+
+    private fun exitTagSearch() {
+        tagSearchBar?.detach(); tagSearchBar = null
+        tagSearchActive = false; tagManualMode = false; tagRemovalSelection = false
+        groupSearchMode = false; groupSearchQuery = ""
+        selectedForClassification.clear(); groupAdapter.customSelection = false
+        searchBackCallback.isEnabled = inTag && !isHidden
+        groupAdapter.applyFilter()
+    }
+
+    private fun mutateTagMembership(ids: Collection<Long>, remove: Boolean) {
+        if (tagBusy) return
+        val target = tagId
+        val valid = ids.filter { if (remove) it in tagMemberIds else it !in tagMemberIds }
+        if (valid.isEmpty()) { activity.snackbar(R.string.tag_member_no_new).show(); return }
+        tagBusy = true
+        val token = ++tagMutationGeneration
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val undo = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    if (remove) TagGroupStore.remove(target, valid) else TagGroupStore.add(target, valid)
+                }
+                if (token != tagMutationGeneration || view == null) return@launch
+                exitTagSearch()
+                refreshTagState()
+                showTagUndo(undo, if (remove) getString(R.string.tag_member_removed, tagName)
+                    else getString(R.string.tag_member_add_success))
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                if (view != null) activity.snackbar(R.string.tag_member_failed).show()
+                Logs.w(error)
+            } finally { if (token == tagMutationGeneration) tagBusy = false }
+        }
+    }
+
+    private fun showTagUndo(undo: TagGroupStore.UndoRecord?, message: String) {
+        pendingTagUndo = undo
+        val bar = activity.snackbar(message).setDuration(5000)
+        if (undo != null) bar.setAction(R.string.undo) {
+            runOnDefaultDispatcher {
+                try {
+                    undo.restore()
+                    onMainDispatcher { if (view != null) activity.snackbar(R.string.tag_member_restored).show() }
+                } catch (error: Exception) {
+                    onMainDispatcher { if (view != null) activity.snackbar(R.string.tag_member_failed).show() }
+                }
+            }
+        }
+        bar.show()
+    }
+
+    private fun requestRemoveGroup(group: ProxyGroup) {
+        if (group.ungrouped || group.id in GroupUpdater.updating) return
+        if (inTag) {
+            MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.tag_member_remove_title)
+                .setItems(arrayOf(getString(R.string.tag_member_remove_global),
+                    getString(R.string.tag_member_remove_local), getString(android.R.string.cancel))) { _, which ->
+                    if (which == 0) confirmGlobalRemoval(group)
+                    else if (which == 1) mutateTagMembership(listOf(group.id), true)
+                }.show()
+        } else confirmGlobalRemoval(group)
+    }
+
+    private fun confirmGlobalRemoval(group: ProxyGroup) {
+        MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
+            .setMessage(R.string.group_delete_confirm_prompt)
+            .setPositiveButton(R.string.yes) { _, _ ->
+                // Existing entities and every tag relation remain intact throughout the undo window.
+                val index = groupAdapter.groupList.indexOfFirst { it.id == group.id }
+                if (index < 0 || PendingGroupDeletes.contains(group.id)) return@setPositiveButton
+                PendingGroupDeletes.mark(group.id)
+                groupAdapter.remove(index)
+                undoManager.remove(index to group)
+                runOnDefaultDispatcher { GroupManager.iterator { groupRemoved(group.id) } }
+            }.setNegativeButton(android.R.string.cancel, null).show()
+    }
+
+    private fun updateTagSubscriptions() {
+        if (tagBusy) return
+        MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
+            .setMessage(R.string.tag_member_update).setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.yes) { _, _ ->
+                tagBusy = true
+                toolbar.menu.findItem(R.id.action_update_all)?.isEnabled = false
+                viewLifecycleOwner.lifecycleScope.launch {
+                    var failed = false
+                    try {
+                        val groups = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            val members = TagGroupStore.members(tagId)
+                            SagerDatabase.groupDao.allGroups().filter {
+                                it.id in members && !PendingGroupDeletes.contains(it.id) && it.type == GroupType.SUBSCRIPTION
+                            }
+                        }
+                        for (group in groups) {
+                            if (group.id in GroupUpdater.updating) continue
+                            try {
+                                val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    GroupUpdater.executeUpdate(group, true)
+                                }
+                                if (!ok) failed = true
+                            }
+                            catch (error: kotlinx.coroutines.CancellationException) {
+                                if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw error
+                            }
+                        }
+                        if (failed) activity.snackbar(R.string.tag_member_update_failed).show()
+                    } finally {
+                        tagBusy = false
+                        toolbar.menu.findItem(R.id.action_update_all)?.isEnabled = true
+                    }
+                }
+            }.show()
+    }
+
+    private fun createGroupInTag() {
+        MaterialAlertDialogBuilder(requireContext()).setItems(arrayOf(
+            getString(R.string.tag_member_add_new), getString(R.string.tag_member_add_clipboard),
+            getString(R.string.tag_member_add_subscription))) { _, which ->
+            when (which) {
+                0 -> openTaggedGroupSettings()
+                1 -> importTagClipboard()
+                2 -> {
+                    val input = android.widget.EditText(requireContext()).apply {
+                        inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+                    }
+                    val dialog = MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.tag_member_add_subscription)
+                        .setView(input).setPositiveButton(R.string.save, null)
+                        .setNegativeButton(android.R.string.cancel, null).create()
+                    dialog.setOnShowListener {
+                        input.requestFocus()
+                        dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+                        dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                            val link = input.text.toString().trim()
+                            if (link.isBlank()) { input.error = getString(R.string.tag_member_failed); return@setOnClickListener }
+                            openTaggedGroupSettings(link); dialog.dismiss()
+                        }
+                    }
+                    dialog.show()
+                }
+            }
+        }.show()
+    }
+
+    private fun openTaggedGroupSettings(link: String? = null) {
+        startActivity(Intent(requireContext(), GroupSettingsActivity::class.java).apply {
+            putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, 0L)
+            putExtra(GroupSettingsActivity.EXTRA_TAG_ID, tagId)
+            if (link != null) putExtra(GroupSettingsActivity.EXTRA_GROUP_SUBSCRIPTION_LINK, link)
+        })
+    }
+
+    private fun importTagClipboard() {
+        val text = SagerNet.getClipboardText().trim()
+        if (text.isBlank()) { activity.snackbar(R.string.clipboard_empty).show(); return }
+        val targetTag = tagId
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val profiles = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    io.nekohasekai.sagernet.group.RawUpdater.parseRaw(text)
+                }
+                if (profiles.isNullOrEmpty()) { activity.snackbar(R.string.no_proxies_found_in_clipboard).show(); return@launch }
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val group = ProxyGroup(name = getString(R.string.tag_member_add_clipboard))
+                    val entities = profiles.mapIndexed { index, bean ->
+                        ProxyEntity(userOrder = index + 1L).apply { putBean(bean) }
+                    }
+                    GroupManager.createGroup(group, targetTag, entities)
+                }
+                refreshTagState()
+                activity.snackbar(R.string.tag_member_add_success).show()
+            } catch (found: SubscriptionFoundException) {
+                if (found.link.startsWith("sn://")) activity.importSubscription(found.link.toUri(), targetTag)
+                else openTaggedGroupSettings(found.link)
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                Logs.w(error); activity.snackbar(R.string.tag_member_failed).show()
+            }
+        }
     }
 
     private fun enterGroupSearchMode() {
@@ -349,9 +628,12 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
     override fun onMenuItemClick(item: MenuItem): Boolean {
         when (item.itemId) {
-            R.id.action_group_search -> enterGroupSearchMode()
+            R.id.action_tag_groups -> openTagList()
+            R.id.action_tag_remove_selected -> enterTagSearch(remove = true)
+            R.id.action_group_search -> if (inTag) enterTagSearch() else enterGroupSearchMode()
             R.id.action_new_group -> {
-                if (!groupSearchMode) {
+                if (inTag) createGroupInTag()
+                else if (!groupSearchMode) {
                     startActivity(Intent(context, GroupSettingsActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                         putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, 0L)
@@ -359,7 +641,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 }
             }
             R.id.action_update_all -> {
-                if (groupSearchMode) {
+                if (inTag) updateTagSubscriptions()
+                else if (groupSearchMode) {
                     exitGroupSearchMode()
                 } else {
                     MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
@@ -547,6 +830,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
         fun applyCustomSelection(group: ProxyGroup): Boolean {
             if (!customSelection) return false
+            if (inTag && tagSearchActive && !tagRemovalSelection && group.id in tagMemberIds) return true
             if (!group.displayName().contains(groupSearchQuery.trim(), ignoreCase = true)) return true
             if (selectedForClassification.contains(group.id)) selectedForClassification.remove(group.id)
             else selectedForClassification.add(group.id)
@@ -631,9 +915,11 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         }
 
         private fun rebuildVisible() {
-            var list = fullList.toList()
+            var list = fullList.filterNot { PendingGroupDeletes.contains(it.id) }
             val query = groupSearchQuery.trim()
-            if (query.isNotEmpty()) {
+            if (inTag) list = TagMemberPolicy.visible(list, tagMemberIds, tagSearchActive,
+                tagManualMode, tagRemovalSelection, query)
+            else if (query.isNotEmpty()) {
                 list = list.filter { it.displayName().contains(query, ignoreCase = true) }
             }
             val filter = filterSubscription
@@ -649,6 +935,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             groupList.addAll(list)
             selectedForClassification.retainAll(list.map { it.id }.toSet())
             updateGroupSearchActions()
+            tagEmptyView?.isVisible = inTag && list.isEmpty()
+            tagEmptyView?.setText(if (tagSearchActive) R.string.no_proxies_found else R.string.tag_member_empty)
         }
 
         fun applyFilter() {
@@ -722,7 +1010,10 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             }
             if (!changed) return
             // Same FIFO writer as the popup: never persist stale whole group objects.
-            GroupOrderStore.submit(groupList.map { it.id }) { result ->
+            val rootOrder = fullList.sortedWith(compareBy({ it.userOrder }, { it.id })).map { it.id }
+            val order = if (inTag) GroupClassification.mergeSubsetOrder(rootOrder, groupList.map { it.id })
+                else groupList.map { it.id }
+            GroupOrderStore.submit(order) { result ->
                 result.error?.let { Logs.w(it) }
             }
         }
@@ -734,9 +1025,11 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         }
 
         override fun undo(actions: List<Pair<Int, ProxyGroup>>) {
+            PendingGroupDeletes.unmark(actions.map { it.second.id })
             for ((_, item) in actions) {
                 if (fullList.none { it.id == item.id }) fullList.add(item)
             }
+            fullList.sortWith(compareBy({ it.userOrder }, { it.id }))
             rebuildVisible()
             notifyDataSetChanged()
             // 撤销 = 取消删除：把配置页刚移除的标签广播恢复
@@ -750,27 +1043,26 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         override fun commit(actions: List<Pair<Int, ProxyGroup>>) {
             val groups = actions.map { it.second }
             runOnDefaultDispatcher {
-                GroupManager.deleteGroup(groups)
+                try { GroupManager.deleteGroup(groups) }
+                finally { PendingGroupDeletes.unmark(groups.map { it.id }) }
                 reload()
             }
         }
 
         override suspend fun groupAdd(group: ProxyGroup) {
-            if (fullList.any { it.id == group.id }) return
-            fullList.add(group)
-            fullList.sortWith(compareBy({ it.userOrder }, { it.id }))
-            delay(300L)
             onMainDispatcher {
-                undoManager.flush()
+                if (view == null || PendingGroupDeletes.contains(group.id) || fullList.any { it.id == group.id }) return@onMainDispatcher
+                fullList.add(group)
+                fullList.sortWith(compareBy({ it.userOrder }, { it.id }))
                 rebuildVisible()
                 notifyDataSetChanged()
-                if (group.type == GroupType.SUBSCRIPTION) GroupUpdater.startUpdate(group, true)
+                // Creation is updated by its owning save/import flow, never by every cached page.
             }
         }
 
         override suspend fun groupRemoved(groupId: Long) {
             onMainDispatcher {
-                undoManager.flush()
+                if (!PendingGroupDeletes.contains(groupId)) undoManager.flush()
                 fullList.removeAll { it.id == groupId }
                 rebuildVisible()
                 notifyDataSetChanged()
@@ -836,6 +1128,12 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     }
 
     override fun onDestroyView() {
+        tagMutationGeneration++
+        tagReadGeneration++
+        tagBusy = false
+        tagSearchBar?.detach(); tagSearchBar = null
+        tagSearchActive = false; tagManualMode = false; tagRemovalSelection = false
+        tagEmptyView = null
         groupSearchBar?.detach()
         groupSearchBar = null
         groupSearchMode = false
@@ -921,7 +1219,10 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             proxyGroup = group
 
             selectedIndicator.isVisible = groupAdapter.customSelection &&
-                selectedForClassification.contains(proxyGroup.id)
+                (selectedForClassification.contains(proxyGroup.id) ||
+                    (tagSearchActive && !tagRemovalSelection && proxyGroup.id in tagMemberIds))
+            itemView.contentDescription = if (tagSearchActive && proxyGroup.id in tagMemberIds)
+                "${proxyGroup.displayName()}，${getString(R.string.tag_member_already)}" else proxyGroup.displayName()
             if (groupAdapter.customSelection) {
                 groupJumpButton.isGone = true
             }
@@ -940,8 +1241,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             editButton.isGone = groupAdapter.customSelection || proxyGroup.ungrouped
             updateButton.isInvisible = proxyGroup.type != GroupType.SUBSCRIPTION
             groupName.text = proxyGroup.displayName()
-            groupUser.isGone = true
-            groupUser.text = ""
+            groupUser.isVisible = tagSearchActive && proxyGroup.id in tagMemberIds
+            groupUser.text = if (groupUser.isVisible) getString(R.string.tag_member_already) else ""
 
             editButton.setOnClickListener {
                 startActivity(Intent(it.context, GroupSettingsActivity::class.java).apply {
@@ -956,14 +1257,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             val menuGroup = proxyGroup
             optionsButton.setOnClickListener {
                 if (menuGroup.ungrouped) return@setOnClickListener
-                MaterialAlertDialogBuilder(requireContext())
-                    .setTitle(R.string.confirm)
-                    .setMessage(R.string.group_delete_confirm_prompt)
-                    .setPositiveButton(R.string.yes) { _, _ ->
-                        runOnDefaultDispatcher { GroupManager.deleteGroup(menuGroup.id) }
-                    }
-                    .setNegativeButton(R.string.no, null)
-                    .show()
+                requestRemoveGroup(menuGroup)
             }
 
             if (proxyGroup.id in GroupUpdater.updating) {
@@ -1083,7 +1377,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 groupStatus.setPadding(0, 0, 0, dp2px(4))
             }
 
-            groupUser.text = subscription?.username ?: ""
+            if (!tagSearchActive) groupUser.text = subscription?.username ?: ""
 
             runOnDefaultDispatcher {
                 val size = PendingProfileDeletes.count(group.id)

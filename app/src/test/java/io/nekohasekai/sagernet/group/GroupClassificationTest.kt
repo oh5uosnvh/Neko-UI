@@ -12,6 +12,13 @@ class GroupClassificationTest {
         )
     }
 
+    @Test fun tagDragOnlySwapsMemberSlotsWithoutPromotingSubsetToTop() {
+        assertEquals(listOf(5L, 2L, 1L, 4L, 3L, 6L),
+            GroupClassification.mergeSubsetOrder((1L..6L).toList(), listOf(5L, 1L, 3L)))
+        assertEquals(listOf(1L, 2L, 3L),
+            GroupClassification.mergeSubsetOrder(listOf(1L, 2L, 3L), listOf(88L)))
+    }
+
     @Test fun customSelectionCanExcludeSimilarNames() {
         val names = listOf("花云", "花云云", "其他")
         val selected = setOf(names[0])

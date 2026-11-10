@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tag_title">标签组</string>
+    <string name="tag_add">新增标签组</string>
+    <string name="tag_rename">修改标签组名称</string>
+    <string name="tag_name">名称</string>
+    <string name="tag_edit">编辑标签组</string>
+    <string name="tag_delete">删除标签组</string>
+    <string name="tag_back">返回分组</string>
+    <string name="tag_empty">暂无标签组\n点击 + 新增标签组</string>
+    <string name="tag_count">%1$d 个分组</string>
+    <string name="tag_name_empty">标签组名称不能为空</string>
+    <string name="tag_name_exists">标签组名称已存在</string>
+    <string name="tag_missing">该标签组已不存在</string>
+    <string name="tag_created">标签组创建成功</string>
+    <string name="tag_renamed">标签组名称已修改</string>
+    <string name="tag_delete_confirm">确认删除该标签组吗？</string>
+    <string name="tag_delete_explanation">删除标签组不会删除配置分组，仅会解除该标签组的归类关系。</string>
+    <string name="tag_deleted">已移除“%1$s”标签组</string>
+    <string name="tag_undo_countdown">已移除“%1$s”标签组 · %2$d 秒</string>
+    <string name="tag_undo">还原</string>
+    <string name="tag_restored">恢复成功</string>
+    <string name="tag_operation_failed">操作失败，请重试</string>
+</resources>

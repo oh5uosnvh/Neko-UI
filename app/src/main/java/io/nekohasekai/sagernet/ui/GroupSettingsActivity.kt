@@ -450,6 +450,7 @@ class GroupSettingsActivity(
     }
 
     companion object {
+        const val EXTRA_TAG_ID = "tag_id"
         const val EXTRA_GROUP_ID = "id"
         const val EXTRA_FROM_CLIPBOARD = "fromClipboard"
         const val EXTRA_GROUP_SUBSCRIPTION_LINK = "subscription_link"
@@ -534,7 +535,15 @@ class GroupSettingsActivity(
 
         val editingId = DataStore.editingId
         if (editingId == 0L) {
-            val newGroup = GroupManager.createGroup(ProxyGroup().apply { serialize() })
+            val newGroup = try {
+                GroupManager.createGroup(ProxyGroup().apply { serialize() },
+                    intent.getLongExtra(EXTRA_TAG_ID, 0L).takeIf { it > 0L })
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                Logs.w(error)
+                onMainDispatcher { Toast.makeText(this@GroupSettingsActivity, R.string.tag_member_failed, Toast.LENGTH_LONG).show() }
+                return
+            }
             // 问题3：新建分组后自动设为选中分组，回到配置页直接定位到它
             DataStore.selectedGroup = newGroup.id
             DataStore.editingGroup = newGroup.id

@@ -25,9 +25,10 @@ class UndoSnackbarManager<in T>(
     private val removedCallback = object : Snackbar.Callback() {
         override fun onDismissed(transientBottomBar: Snackbar?, event: Int) {
             if (last === transientBottomBar && event != DISMISS_EVENT_ACTION) {
-                callback.commit(recycleBin.toList())
+                val actions = recycleBin.toList()
                 recycleBin.clear()
                 last = null
+                callback.commit(actions)
             }
         }
     }
@@ -39,10 +40,13 @@ class UndoSnackbarManager<in T>(
         val count = recycleBin.size
         activity.snackbar(activity.resources.getQuantityString(R.plurals.removed, count, count))
             .apply {
+                duration = 5000
                 addCallback(removedCallback)
                 setAction(R.string.undo) {
-                    callback.undo(recycleBin.reversed())
+                    val actions = recycleBin.reversed().toList()
                     recycleBin.clear()
+                    last = null
+                    callback.undo(actions)
                 }
                 last = this
                 show()

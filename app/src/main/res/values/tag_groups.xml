@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="tag_add" type="id" />
+    <item name="tag_rename" type="id" />
+    <string name="tag_title">Tag groups</string>
+    <string name="tag_add">New tag group</string>
+    <string name="tag_rename">Rename tag group</string>
+    <string name="tag_name">Name</string>
+    <string name="tag_edit">Edit tag group</string>
+    <string name="tag_delete">Delete tag group</string>
+    <string name="tag_back">Back to groups</string>
+    <string name="tag_empty">No tag groups\nTap + to create a tag group</string>
+    <string name="tag_count">%1$d groups</string>
+    <string name="tag_name_empty">Tag group name cannot be empty</string>
+    <string name="tag_name_exists">Tag group name already exists</string>
+    <string name="tag_missing">This tag group no longer exists</string>
+    <string name="tag_created">Tag group created</string>
+    <string name="tag_renamed">Tag group renamed</string>
+    <string name="tag_delete_confirm">Delete this tag group?</string>
+    <string name="tag_delete_explanation">Deleting a tag group does not delete configuration groups. It only removes this tag group and its classification relationships.</string>
+    <string name="tag_deleted">Removed “%1$s” tag group</string>
+    <string name="tag_undo_countdown">Removed “%1$s” tag group · %2$d s</string>
+    <string name="tag_undo">Restore</string>
+    <string name="tag_restored">Restored successfully</string>
+    <string name="tag_operation_failed">Operation failed. Please try again.</string>
+</resources>
