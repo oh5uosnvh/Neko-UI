@@ -62,10 +62,11 @@ class GroupDatabaseMigrationTest {
         val indexMigration = indexField.get(null) as Migration
         repeat(2) { // Upgrade and next launch must both work without data loss.
             val room = Room.databaseBuilder(context, SagerDatabase::class.java, name)
-                .addMigrations(migration, indexMigration, SagerDatabase.MIGRATION_10_11_TAG_GROUPS).allowMainThreadQueries().build()
+                .addMigrations(migration, indexMigration, SagerDatabase.MIGRATION_10_11_TAG_GROUPS,
+                    SagerDatabase.MIGRATION_11_12_BUILTIN_ROUTES).allowMainThreadQueries().build()
             try {
                 val db = room.openHelper.writableDatabase
-                assertEquals(11, db.version)
+                assertEquals(12, db.version)
                 db.query("PRAGMA index_info(`groupOrderId`)").use { cursor ->
                     val columns = mutableListOf<String>()
                     while (cursor.moveToNext()) columns += cursor.getString(2)

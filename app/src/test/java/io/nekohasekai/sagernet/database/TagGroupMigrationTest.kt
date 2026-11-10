@@ -94,11 +94,12 @@ class TagGroupMigrationTest {
         try {
             repeat(2) { launch ->
                 val room = Room.databaseBuilder(context, SagerDatabase::class.java, name)
-                    .addMigrations(SagerDatabase.MIGRATION_10_11_TAG_GROUPS)
+                    .addMigrations(SagerDatabase.MIGRATION_10_11_TAG_GROUPS,
+                        SagerDatabase.MIGRATION_11_12_BUILTIN_ROUTES)
                     .allowMainThreadQueries().build()
                 try {
                     val sql = room.openHelper.writableDatabase // Room validates ALL tables/FKs/indices.
-                    assertEquals(11, sql.version)
+                    assertEquals(12, sql.version)
                     assertRootData(sql)
                     if (launch == 0) {
                         assertTrue(room.tagGroupDao().all().isEmpty())
@@ -133,7 +134,8 @@ class TagGroupMigrationTest {
         val context = RuntimeEnvironment.getApplication()
         fixture(name)
         val room = Room.databaseBuilder(context, SagerDatabase::class.java, name)
-            .addMigrations(SagerDatabase.MIGRATION_10_11_TAG_GROUPS).allowMainThreadQueries().build()
+            .addMigrations(SagerDatabase.MIGRATION_10_11_TAG_GROUPS,
+            SagerDatabase.MIGRATION_11_12_BUILTIN_ROUTES).allowMainThreadQueries().build()
         try {
             val sql = room.openHelper.writableDatabase
             val a = room.tagStore.create("a")
