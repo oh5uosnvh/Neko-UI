@@ -225,9 +225,11 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 override fun onQueryTextSubmit(query: String) = false
                 override fun onQueryTextChange(newText: String): Boolean {
                     groupSearchQuery = newText.trim()
-                    setGroupClassifyVisible(groupSearchQuery.isNotEmpty() &&
-                        groupAdapter.searchMatches().size >= 2)
-                    groupAdapter.applyFilter()
+                    if (::groupAdapter.isInitialized) {
+                        setGroupClassifyVisible(groupSearchQuery.isNotEmpty() &&
+                            groupAdapter.searchMatches().size >= 2)
+                        groupAdapter.applyFilter()
+                    }
                     return true
                 }
             })
@@ -342,9 +344,10 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             title = getString(android.R.string.cancel)
         }
         toolbar.menu.findItem(R.id.action_new_group)?.apply {
+            // 保留确认位，但未进入“自定义选择”前不显示 ✓。
             isVisible = true
-            setIcon(R.drawable.ic_action_done)
-            title = getString(R.string.group_classify)
+            setIcon(R.drawable.ic_action_placeholder)
+            title = ""
         }
         setGroupClassifyVisible(false)
         groupAdapter.applyFilter()
@@ -388,6 +391,12 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                     2 -> {
                         selectedForClassification.clear()
                         groupAdapter.customSelection = true
+                        // 只有进入“自定义选择”后才显示预留的 ✓。
+                        toolbar.menu.findItem(R.id.action_new_group)?.apply {
+                            isVisible = true
+                            setIcon(R.drawable.ic_action_done)
+                            title = ""
+                        }
                         setGroupClassifyVisible(false)
                         groupAdapter.notifyDataSetChanged()
                     }
@@ -940,7 +949,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         val editButton = binding.edit
         val optionsButton = binding.options
         val updateButton = binding.groupUpdate
-        val groupExpire = binding.groupExpire
         val selectedIndicator = binding.groupSelectedIndicator
         val subscriptionUpdateProgress = binding.subscriptionUpdateProgress
 
@@ -1066,9 +1074,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             val subscription = proxyGroup.subscription
             groupTraffic.isVisible = false
             groupTraffic.text = ""
-            groupExpire.isVisible = false
-            groupExpire.text = ""
-
             fun compactBytes(value: Long): String {
                 if (value < 0L) return "0kb"
                 val units = arrayOf("kb", "MB", "GB", "TB", "PB")
@@ -1090,7 +1095,9 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             }
             var usageText: String? = null
             var expireLabel: String? = null
-            if (subscription != null && subscription.bytesUsed > 0L) { // SIP008 & Open Online Config
+            if (subscription != null &&
+                (subscription.bytesUsed > 0L || subscription.bytesRemaining > 0L)
+            ) { // SIP008 & Open Online Config
                 usageText = if (subscription.bytesRemaining > 0L) {
                     val total = subscription.bytesUsed + subscription.bytesRemaining
                     app.getString(R.string.subscription_traffic, compactBytes(subscription.bytesUsed), compactBytes(total))
@@ -1168,7 +1175,10 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                             } else {
                                 val updated = group.subscription?.lastUpdated?.toLong()
                                     ?.takeIf { it > 0L }
-                                    ?.let { Instant.ofEpochSecond(it).atZone(ZoneId.systemDefault()).toLocalDate().format(DateTimeFormatter.ISO_LOCAL_DATE) }
+                                    ?.let {
+                                        Instant.ofEpochSecond(it).atZone(ZoneId.systemDefault())
+                                            .toLocalDate().format(DateTimeFormatter.ofPattern("MM-dd"))
+                                    }
                                     ?: "-"
                                 getString(R.string.group_status_proxies_subscription, size, updated)
                             }
