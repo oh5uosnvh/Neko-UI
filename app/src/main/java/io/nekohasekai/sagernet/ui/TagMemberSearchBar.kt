@@ -18,6 +18,7 @@ class TagMemberSearchBar(private val toolbar: Toolbar, private val context: Cont
     val row = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
+        isBaselineAligned = false
         setPadding(dp(6), 0, dp(6), 0)
     }
     private val ink = context.obtainStyledAttributes(intArrayOf(android.R.attr.textColorPrimary)).let {
@@ -37,7 +38,14 @@ class TagMemberSearchBar(private val toolbar: Toolbar, private val context: Cont
             visibility = View.GONE; layoutParams = LinearLayout.LayoutParams(0, 0)
         }
     }
-    val title = TextView(context).apply { textSize = 18f; setTextColor(ink); setText(R.string.tag_member_select); visibility = View.GONE }
+    val title = TextView(context).apply {
+        textSize = 18f
+        setTextColor(ink)
+        setText(R.string.tag_member_select)
+        gravity = Gravity.CENTER_VERTICAL
+        isSingleLine = true
+        visibility = View.GONE
+    }
     val manual = TextView(context).apply {
         setText(R.string.tag_member_manual); setTextColor(ink); textSize = 13f
         gravity = Gravity.CENTER; setPadding(dp(8), 0, dp(8), 0); isClickable = true

@@ -52,8 +52,8 @@ class GroupPickerDragTest {
             recycler.adapter = adapter
             recycler.itemAnimator = null
             recycler.cancelDrag = { callback.cancelGesture() }
-            touch.attachToRecyclerView(recycler)
-            adapter.startDrag = { downs++; touch.startDrag(it) }
+            callback.attach(recycler, touch)
+            adapter.startDrag = { if (callback.armHandle(it)) { downs++; touch.startDrag(it) } }
             activity.setContentView(recycler)
             layout()
         }

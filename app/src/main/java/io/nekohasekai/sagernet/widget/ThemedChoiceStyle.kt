@@ -40,6 +40,16 @@ object ThemedChoiceStyle {
         )
     }
 
+    /** Top-level header sits above scroll content: same visible tint, but never see-through. */
+    fun opaqueItemCard(context: Context, selected: Boolean): GradientDrawable {
+        val tint = if (selected) color(context, R.attr.colorPrimary)
+            else color(context, android.R.attr.textColorPrimary)
+        val fraction = if (selected) FILL_ALPHA else NEUTRAL_FILL_ALPHA
+        val foreground = ColorUtils.setAlphaComponent(tint, (Color.alpha(tint) * fraction).toInt())
+        val base = ColorUtils.setAlphaComponent(color(context, android.R.attr.colorBackground), 255)
+        return itemCard(context, selected).apply { setColor(ColorUtils.compositeColors(foreground, base)) }
+    }
+
     /** The label owns the card; the transparent row's insets keep every rounded edge visible. */
     fun bind(row: View, label: TextView, selected: Boolean) {
         row.isSelected = selected

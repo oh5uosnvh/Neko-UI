@@ -711,7 +711,8 @@ internal class TopBarController(
             settlePosted = false
             onSettled()
         }
-        private fun displayBusy() = drag.isDragging || list.isSettling
+        private fun displayBusy() = drag.isDragging || memberDrag.isDragging || list.isSettling || memberList.isSettling
+        private fun rootDragActive() = drag.isDragging || memberDrag.isDragging
         private fun awaitSettled() {
             if (!closed && !settlePosted) {
                 settlePosted = true
@@ -755,8 +756,8 @@ internal class TopBarController(
         private var tagWriteTail: Job? = null
         private val settleTags = object : Runnable {
             override fun run() {
-                if (closed || tagDrag.isDragging) return
-                if (tagList.isSettling) { tagList.postOnAnimation(this); return }
+                if (closed || tagDrag.isDragging || memberDrag.isDragging) return
+                if (tagList.isSettling || memberList.isSettling) { tagList.postOnAnimation(this); return }
                 pendingTagOrder?.let { pendingTagOrder = null; persistTags(it) }
                 if (tagRefreshNeeded && tagSaves == 0) requestTagRefresh()
             }
@@ -776,9 +777,12 @@ internal class TopBarController(
             textColor = themeColor(android.R.attr.textColorPrimary),
             secondaryColor = themeColor(android.R.attr.textColorSecondary),
             onClick = { id -> if (!closed && navigation.page is GroupPickerNavigation.Page.Members) jumpToGroupId(id) },
-        ).apply { reorderable = false }
+        )
+        private val memberDrag = GroupPickerDragCallback(memberAdapter,
+            commit = { persistMembers(it) }, cancelled = {}, settled = { onSettled(); awaitTagSettle() })
+        private val memberTouch = ItemTouchHelper(memberDrag)
         private val header = GroupPickerHeader(popupContext,
-            themeColor(android.R.attr.textColorPrimary), { groupItemCard(it) },
+            themeColor(android.R.attr.textColorPrimary), { groupHeaderCard(it) },
             configuration = { navigateConfiguration() }, tags = { navigateTags() }, back = { backPage() })
         private val empty = TextView(popupContext).apply {
             textSize = 14f
@@ -787,10 +791,10 @@ internal class TopBarController(
             setPadding(dp(12), dp(12), dp(12), dp(12))
         }
         private val tagHeader = GroupPickerHeader(popupContext,
-            themeColor(android.R.attr.textColorPrimary), { groupItemCard(it) },
+            themeColor(android.R.attr.textColorPrimary), { groupHeaderCard(it) },
             { navigateConfiguration() }, { navigateTags() }, { backPage() })
         private val memberHeader = GroupPickerHeader(popupContext,
-            themeColor(android.R.attr.textColorPrimary), { groupItemCard(it) },
+            themeColor(android.R.attr.textColorPrimary), { groupHeaderCard(it) },
             { navigateConfiguration() }, { navigateTags() }, { backPage() })
         private fun pageView(title: GroupPickerHeader, recycler: RecyclerView) = LinearLayout(popupContext).apply {
             orientation = LinearLayout.VERTICAL
@@ -814,8 +818,11 @@ internal class TopBarController(
             if (!closed) { updatePageVisibility(); resizePage() }
         }
         private val container = GroupPickerSurface(popupContext).apply {
-            // Cards/header are the top surface. No extra bottom background strip or outline crop.
-            clipToOutline = false
+            // The original opaque Neko menu FRAME remains; only header buttons are top surfaces.
+            background = roundedCard()
+            clipToOutline = true
+            val border = resources.getDimensionPixelSize(R.dimen.card_stroke_width)
+            setPadding(border, border, border, border)
             addView(pages, FrameLayout.LayoutParams(-1, -1))
             onBack = { backPage() }
         }
@@ -850,9 +857,10 @@ internal class TopBarController(
             list.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
             list.isFocusableInTouchMode = true
             list.requestFocus()
-            touch.attachToRecyclerView(list)
+            drag.attach(list, touch)
             adapter.startDrag = { holder ->
-                if (!closed && navigation.page == GroupPickerNavigation.Page.Configuration && !drag.isSelected) touch.startDrag(holder)
+                if (!closed && !pageSlide.isRunning && navigation.page == GroupPickerNavigation.Page.Configuration &&
+                    drag.armHandle(holder)) touch.startDrag(holder)
             }
             list.cancelDrag = { drag.cancelGesture() }
             popup.setTouchInterceptor { view, event ->
@@ -876,12 +884,19 @@ internal class TopBarController(
                 recycler.isFocusableInTouchMode = true
             }
             tagList.itemAnimator = groupPickerItemAnimator()
-            tagTouch.attachToRecyclerView(tagList)
+            tagDrag.attach(tagList, tagTouch)
             tagAdapter.startDrag = { holder ->
                 if (!closed && !pageSlide.isRunning && navigation.page == GroupPickerNavigation.Page.Tags &&
-                    !tagDrag.isSelected) tagTouch.startDrag(holder)
+                    tagDrag.armHandle(holder)) tagTouch.startDrag(holder)
             }
             tagList.cancelDrag = { tagDrag.cancelGesture() }
+            memberList.itemAnimator = groupPickerItemAnimator()
+            memberDrag.attach(memberList, memberTouch)
+            memberAdapter.startDrag = { holder ->
+                if (!closed && !pageSlide.isRunning && navigation.page is GroupPickerNavigation.Page.Members &&
+                    memberDrag.armHandle(holder)) memberTouch.startDrag(holder)
+            }
+            memberList.cancelDrag = { memberDrag.cancelGesture() }
             renderPage()
             if (host.select) header.visibility = View.GONE
             popup.setOnDismissListener {
@@ -958,7 +973,7 @@ internal class TopBarController(
         }
 
         private fun navigateConfiguration() {
-            if (closed || drag.isSelected || tagDrag.isDragging) return
+            if (closed || drag.isSelected || tagDrag.isDragging || memberDrag.isDragging) return
             rememberViewport()
             navigation.configuration()
             renderPage()
@@ -966,7 +981,7 @@ internal class TopBarController(
         }
 
         private fun navigateTags() {
-            if (closed || drag.isSelected || tagDrag.isDragging) return
+            if (closed || drag.isSelected || tagDrag.isDragging || memberDrag.isDragging) return
             rememberViewport()
             navigation.tags()
             renderPage()
@@ -988,7 +1003,7 @@ internal class TopBarController(
         }
 
         private fun backPage() {
-            if (closed || drag.isSelected || tagDrag.isDragging) return
+            if (closed || drag.isSelected || tagDrag.isDragging || memberDrag.isDragging) return
             rememberViewport()
             if (!navigation.back()) {
                 dismissGroupPicker()
@@ -1134,9 +1149,9 @@ internal class TopBarController(
 
         private fun requestTagRefresh(seedSelection: Boolean = false) {
             if (closed) return
-            if (tagDrag.isDragging || tagList.isSettling || pendingTagOrder != null || tagSaves > 0) {
+            if (tagDrag.isDragging || memberDrag.isDragging || tagList.isSettling || memberList.isSettling || pendingTagOrder != null || tagSaves > 0) {
                 tagRefreshNeeded = true
-                if (!tagDrag.isDragging && tagSaves == 0) awaitTagSettle()
+                if (!tagDrag.isDragging && !memberDrag.isDragging && tagSaves == 0) awaitTagSettle()
                 return
             }
             tagRefreshNeeded = false
@@ -1162,9 +1177,9 @@ internal class TopBarController(
                             requestTagRefresh(seedSelection)
                             return@onMainDispatcher
                         }
-                        if (tagDrag.isDragging || tagList.isSettling || pendingTagOrder != null || tagSaves > 0) {
+                        if (tagDrag.isDragging || memberDrag.isDragging || tagList.isSettling || memberList.isSettling || pendingTagOrder != null || tagSaves > 0) {
                             tagRefreshNeeded = true
-                            if (!tagDrag.isDragging && tagSaves == 0) awaitTagSettle()
+                            if (!tagDrag.isDragging && !memberDrag.isDragging && tagSaves == 0) awaitTagSettle()
                             return@onMainDispatcher
                         }
                         tagsLoaded = true
@@ -1203,6 +1218,11 @@ internal class TopBarController(
 
         private fun refreshMemberRows(seedSelection: Boolean = false) {
             if (closed || navigation.page !is GroupPickerNavigation.Page.Members) return
+            if (memberDrag.isDragging || memberList.isSettling) {
+                tagRefreshNeeded = true
+                if (!memberDrag.isDragging) awaitTagSettle()
+                return
+            }
             val fresh = tagPickerMembers(confirmed, memberIds).filterNot { PendingGroupDeletes.contains(it.id) }
             val names = fresh.associate { it.id to it.displayName() }
             if (memberAdapter.ids != fresh.map { it.id } || memberNames != names) {
@@ -1218,12 +1238,21 @@ internal class TopBarController(
             }
         }
 
+        private fun persistMembers(ids: List<Long>) {
+            // Reorder only member slots, not mergeOrder (which would prepend the subset).
+            // confirmed also includes the latest optimistic root commit, so quick member
+            // gestures cannot accidentally erase a root drag still queued in the writer.
+            persist(GroupClassification.mergeSubsetOrder(confirmed.map { it.id }, ids))
+        }
+
         private fun persist(ids: List<Long>) {
             // An older result waiting for an in-progress drag is now superseded, but its
             // failure still needs a visible acknowledgement rather than being lost silently.
             deferredResult?.second?.error?.let { showFailure() }
             deferredResult = null
             deferredOrder = null
+            val byId = confirmed.associateBy { it.id }
+            confirmed = GroupOrderStore.mergeOrder(confirmed.map { it.id }, ids).mapNotNull { byId[it] }
             val generation = ++editGeneration
             pendingSaves++
             GroupOrderStore.submit(ids) { result ->
@@ -1280,10 +1309,10 @@ internal class TopBarController(
         }
 
         private fun onSettled() {
-            if (closed || drag.isDragging) return
+            if (closed || rootDragActive()) return
             val hasResult = deferredResult != null || deferredOrder != null
             if (!hasResult && (!refreshNeeded || pendingSaves > 0)) return
-            if (list.isSettling) {
+            if (list.isSettling || memberList.isSettling) {
                 awaitSettled()
                 return
             }
@@ -1302,7 +1331,7 @@ internal class TopBarController(
             if (closed) return
             refreshNeeded = true
             if (displayBusy() || pendingSaves > 0) {
-                if (!drag.isDragging && pendingSaves == 0) awaitSettled()
+                if (!rootDragActive() && pendingSaves == 0) awaitSettled()
                 return
             }
             refreshNeeded = false
@@ -1319,7 +1348,7 @@ internal class TopBarController(
                         if (closed || generation != refreshGeneration) return@onMainDispatcher
                         if (displayBusy() || pendingSaves > 0 || edits != editGeneration) {
                             refreshNeeded = true
-                            if (!drag.isDragging && pendingSaves == 0) awaitSettled()
+                            if (!rootDragActive() && pendingSaves == 0) awaitSettled()
                         } else {
                             confirmed = fresh
                             replaceKeepingViewport(fresh)
@@ -1372,6 +1401,7 @@ internal class TopBarController(
             pageSlide.cancel()
             tagList.removeCallbacks(settleTags)
             tagList.cancelDrag = null
+            tagList.dragTouch = null
             tagAdapter.startDrag = null
             // clearView and close may both arrive. Shared callback snapshots are idempotent.
             tagDrag.close()
@@ -1388,7 +1418,14 @@ internal class TopBarController(
             deferredResult?.second?.error?.let { showFailure() }
             deferredResult = null
             list.cancelDrag = null
+            list.dragTouch = null
             adapter.startDrag = null
+            memberList.cancelDrag = null
+            memberList.dragTouch = null
+            memberAdapter.startDrag = null
+            memberDrag.close()
+            memberList.itemAnimator?.endAnimations()
+            memberTouch.attachToRecyclerView(null)
             // Explicit finalization is idempotent with a late clearView/exit animation.
             drag.close()
             list.itemAnimator?.endAnimations()
@@ -1401,11 +1438,11 @@ internal class TopBarController(
 
         override suspend fun groupsReordered(groups: List<ProxyGroup>, changed: List<ProxyGroup>) = onMainDispatcher {
             if (closed) return@onMainDispatcher
-            confirmed = visibleOrder(groups)
             if (pendingSaves > 0) return@onMainDispatcher // the latest own receipt reconciles once
+            confirmed = visibleOrder(groups)
             if (displayBusy()) {
                 deferredOrder = confirmed
-                if (!drag.isDragging) awaitSettled()
+                if (!rootDragActive()) awaitSettled()
             } else replaceKeepingViewport(confirmed)
         }
 
@@ -1445,6 +1482,9 @@ internal class TopBarController(
      */
     private fun groupItemCard(selected: Boolean): Drawable =
         io.nekohasekai.sagernet.widget.ThemedChoiceStyle.itemCard(context, selected)
+
+    private fun groupHeaderCard(selected: Boolean): Drawable =
+        io.nekohasekai.sagernet.widget.ThemedChoiceStyle.opaqueItemCard(context, selected)
 
     private fun roundedCard(): Drawable = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE

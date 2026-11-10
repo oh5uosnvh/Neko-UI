@@ -39,12 +39,15 @@ internal fun groupPickerItemAnimator() = DefaultItemAnimator().apply {
 /** Observe cancellation of the entire gesture, not the synthetic child CANCEL on interception. */
 internal class GroupPickerRecyclerView(context: Context) : RecyclerView(context) {
     var cancelDrag: (() -> Unit)? = null
+    /** Runs before ItemTouchHelper sees DOWN (and its automatic recovery-row grab). */
+    var dragTouch: ((MotionEvent) -> Unit)? = null
 
     // notifyItemMoved is pending until the next layout, BEFORE ItemAnimator.isRunning is true.
     val isSettling: Boolean
         get() = isComputingLayout || hasPendingAdapterUpdates() || itemAnimator?.isRunning == true
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        dragTouch?.invoke(event)
         if (event.actionMasked == MotionEvent.ACTION_CANCEL) cancelDrag?.invoke()
         return super.dispatchTouchEvent(event)
     }
@@ -87,8 +90,9 @@ internal class GroupPickerAdapter(
         }
     }
     var startDrag: ((Holder) -> Unit)? = null
-    /** Filtered tag members share selection/count binding, never an independent root order. */
+    /** Members reorder their slots in the complete root order, never a separate order. */
     var reorderable = true
+    private var suppressClick = false
     var dragging = false
         private set
     override val ids: List<Long> get() = rows.map { it.id }
@@ -160,11 +164,16 @@ internal class GroupPickerAdapter(
         val holder = Holder(row, nameCard, label, handle)
         row.setOnClickListener {
             // A holder can move without rebinding. Never capture an adapter position here.
-            if (!dragging && rows.any { it.id == holder.groupId }) onClick(holder.groupId)
+            if (!dragging && !suppressClick && rows.any { it.id == holder.groupId }) onClick(holder.groupId)
+        }
+        row.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN && !dragging) suppressClick = false
+            false
         }
         handle.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    suppressClick = true
                     if (reorderable && holder.bindingAdapterPosition != RecyclerView.NO_POSITION) {
                         startDrag?.invoke(holder)
                     }
@@ -262,8 +271,52 @@ internal class GroupPickerDragCallback(
     private var selectedHolder: RecyclerView.ViewHolder? = null
     private var cancelledGesture = false
     private var closed = false
+    private var armedHolder: RecyclerView.ViewHolder? = null
+    private var handleGestureOpen = false
+    private var recoveryMayGrab = false
     val isDragging: Boolean get() = before != null
     val isSelected: Boolean get() = selectedHolder != null
+
+    /**
+     * ItemTouchHelper's DOWN/recover path calls select() WITHOUT checking drag flags.
+     * Merely disabling long-press or returning 0 from getDragDirs cannot stop a body
+     * touch from grabbing the recovering row. Retire recovery before dispatching a
+     * fresh DOWN, so the body reaches RecyclerView normally and the handle receives
+     * its own DOWN. Never end neighbour ItemAnimator animations for ordinary scrolling.
+     */
+    fun attach(recycler: GroupPickerRecyclerView, touch: ItemTouchHelper) {
+        recycler.dragTouch = { event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    armedHolder = null
+                    handleGestureOpen = true
+                    if (!closed && recoveryMayGrab && !isSelected) {
+                        recoveryMayGrab = false
+                        touch.attachToRecyclerView(null)
+                        // There need not be a recover animation (e.g. a detached holder).
+                        finish()
+                        touch.attachToRecyclerView(recycler)
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    handleGestureOpen = false
+                    armedHolder = null
+                }
+            }
+        }
+        touch.attachToRecyclerView(recycler)
+    }
+
+    /** Called only by the inline handle's ACTION_DOWN listener. */
+    fun armHandle(holder: RecyclerView.ViewHolder): Boolean {
+        if (closed || isSelected || !handleGestureOpen ||
+            holder.bindingAdapterPosition == RecyclerView.NO_POSITION) return false
+        armedHolder = holder
+        return true
+    }
+
+    override fun getDragDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder): Int =
+        if (!closed && handleGestureOpen && armedHolder === viewHolder) ItemTouchHelper.UP or ItemTouchHelper.DOWN else 0
 
     override fun isLongPressDragEnabled() = false
     override fun isItemViewSwipeEnabled() = false
@@ -273,7 +326,8 @@ internal class GroupPickerDragCallback(
         GroupDragScroll.pixels(recyclerView, viewSizeOutOfBounds)
 
     override fun onSelectedChanged(viewHolder: RecyclerView.ViewHolder?, actionState: Int) {
-        if (!closed && actionState == ItemTouchHelper.ACTION_STATE_DRAG && viewHolder != null) {
+        if (!closed && handleGestureOpen && armedHolder === viewHolder &&
+            actionState == ItemTouchHelper.ACTION_STATE_DRAG && viewHolder != null) {
             // A new down can arrive during the previous recovery animation. Settle it first;
             // a late clearView for its holder must not commit this new gesture.
             if (before != null) finish(notifySettled = false)
@@ -281,6 +335,7 @@ internal class GroupPickerDragCallback(
             cancelledGesture = false
             activeHolder = viewHolder
             selectedHolder = viewHolder
+            recoveryMayGrab = true
             adapter.prepareDrag(viewHolder)
             adapter.updateDraggingState(true)
         } else if (actionState == ItemTouchHelper.ACTION_STATE_IDLE) {
@@ -291,7 +346,8 @@ internal class GroupPickerDragCallback(
 
     override fun onMove(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder,
                         target: RecyclerView.ViewHolder): Boolean {
-        if (closed || before == null) return false
+        if (closed || before == null || cancelledGesture || !handleGestureOpen ||
+            armedHolder !== viewHolder || activeHolder !== viewHolder) return false
         // Settle any previous step before starting the next move; this prevents upward
         // multi-row drags from stacking unfinished neighbour translations, while keeping
         // the ItemAnimator alive for the current step.
@@ -309,11 +365,15 @@ internal class GroupPickerDragCallback(
     }
 
     fun cancelGesture() {
+        handleGestureOpen = false
+        armedHolder = null
         if (before != null) cancelledGesture = true
     }
 
     fun close() {
         closed = true
+        handleGestureOpen = false
+        armedHolder = null
         finish()
     }
 

@@ -13,6 +13,8 @@ import android.widget.PopupWindow
 import android.widget.TextView
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import io.nekohasekai.sagernet.ui.GroupClassification
 import io.nekohasekai.sagernet.database.PendingGroupDeletes
 import io.nekohasekai.sagernet.ui.GroupPickerDragCallback
 import io.nekohasekai.sagernet.ui.GroupPickerHeader
@@ -131,6 +133,26 @@ class GroupPickerTagsSessionTest {
             await { ReflectionHelpers.getField<Job?>(session, "tagsRefreshing")?.isCompleted == true }
             settleMotion()
         }
+        fun dispatch(recycler: GroupPickerRecyclerView, action: Int, x: Float, y: Float) {
+            val now = SystemClock.uptimeMillis()
+            val event = MotionEvent.obtain(now, now, action, x, y, 0)
+            try { recycler.dispatchTouchEvent(event) } finally { event.recycle() }
+        }
+        fun memberDown(holder: GroupPickerAdapter.Holder): Pair<Float, Float> {
+            var x = holder.handle.width/2f
+            var y = holder.handle.height/2f
+            var node: View = holder.handle
+            while (node !== memberList) {
+                x += node.left + node.translationX
+                y += node.top + node.translationY
+                val parent = node.parent as View
+                x -= parent.scrollX; y -= parent.scrollY
+                node = parent
+            }
+            dispatch(memberList, MotionEvent.ACTION_DOWN, x, y)
+            return x to y
+        }
+        fun rootWrites() = ReflectionHelpers.getField<Int>(session, "pendingSaves")
         fun descendants(view: View = popup.contentView): List<View> = listOf(view) + if (view is ViewGroup)
             (0 until view.childCount).flatMap { descendants(view.getChildAt(it)) } else emptyList()
         override fun close() {
@@ -197,8 +219,14 @@ class GroupPickerTagsSessionTest {
             assertEquals(entries.getChildAt(0).width, entries.getChildAt(1).width)
             assertEquals(header.bottom, (f.list.parent as View).top)
             assertTrue("Root list is measured below, not overlaid by, the top buttons", f.list.height > 0)
-            assertFalse(f.popup.contentView.clipToOutline)
-            assertNull("No extra enclosing background strip", f.popup.contentView.background)
+            assertTrue("Original rounded menu frame clips only outer perimeter", f.popup.contentView.clipToOutline)
+            val frame = f.popup.contentView.background as android.graphics.drawable.GradientDrawable
+            assertEquals("Menu is opaque so content below cannot bleed through", 255,
+                android.graphics.Color.alpha(frame.color!!.defaultColor))
+            for (i in 0 until entries.childCount) {
+                val button = entries.getChildAt(i).background as android.graphics.drawable.GradientDrawable
+                assertEquals("Top-level buttons are opaque", 255, android.graphics.Color.alpha(button.color!!.defaultColor))
+            }
             val first = (f.list.layoutManager as LinearLayoutManager).findFirstVisibleItemPosition()
             assertTrue(f.list.findViewHolderForAdapterPosition(first)!!.itemView.top >= f.list.paddingTop)
             f.call("navigateTags"); f.frame()
@@ -289,11 +317,11 @@ class GroupPickerTagsSessionTest {
             assertEquals(rootViewport, pickerViewport(f.list, f.adapter.ids))
             f.tags(); f.open(tags[0].id)
             assertEquals(listOf(f.roots[3].id, f.roots[19].id, f.roots[30].id), f.memberAdapter.ids)
-            assertFalse(f.memberAdapter.reorderable)
+            assertTrue(f.memberAdapter.reorderable)
             val selected = f.memberAdapter.onCreateViewHolder(f.memberList, 0)
             f.memberAdapter.onBindViewHolder(selected, 1)
             assertTrue(selected.row.isSelected)
-            assertEquals(View.GONE, selected.handle.visibility)
+            assertEquals(View.VISIBLE, selected.handle.visibility)
         }
     }
 
@@ -310,7 +338,7 @@ class GroupPickerTagsSessionTest {
             f.tags()
             f.open(tag.id)
             assertEquals(listOf(f.roots[3].id, f.roots[19].id, f.roots[30].id), f.memberAdapter.ids)
-            assertFalse(f.memberAdapter.reorderable)
+            assertTrue(f.memberAdapter.reorderable)
             f.popup.dismiss() // same virtual entry point used by PopupDecorView / predictive BACK
             f.frame()
             assertTrue(f.popup.isShowing)
@@ -323,6 +351,116 @@ class GroupPickerTagsSessionTest {
             assertEquals(top, layout.findViewByPosition(27)!!.top)
             assertEquals(f.roots[19].id, DataStore.selectedGroup)
             assertEquals(f.roots.map { it.id }, f.environment.database.groupDao().allGroups().map { it.id })
+        }
+    }
+
+    @Test fun memberHandlePersistsCompleteRootSlotsOnceAndSynchronizesRootAndOtherTags() {
+        Fixture().use { f ->
+            val tag = TagGroupStore.create("Members")
+            val other = TagGroupStore.create("Overlap")
+            val original = f.roots.map { it.id }
+            val members = listOf(original[1], original[3], original[5])
+            TagGroupStore.add(tag.id, members)
+            TagGroupStore.add(other.id, listOf(original[3], original[5], original[8]))
+            f.show(); f.tags(); f.open(tag.id)
+            assertTrue(f.memberAdapter.reorderable)
+            val callback = ReflectionHelpers.getField<GroupPickerDragCallback>(f.session, "memberDrag")
+            val holder = f.memberList.findViewHolderForAdapterPosition(0) as GroupPickerAdapter.Holder
+            val target = f.memberList.findViewHolderForAdapterPosition(2) as GroupPickerAdapter.Holder
+            assertEquals(View.VISIBLE, holder.handle.visibility)
+            val (x, y) = f.memberDown(holder)
+            assertTrue(callback.isSelected)
+            assertTrue(callback.onMove(f.memberList, holder, target))
+            val subset = listOf(members[1], members[2], members[0])
+            val expected = GroupClassification.mergeSubsetOrder(original, subset)
+            val listener = object : GroupManager.Listener {
+                var receipts = 0
+                override suspend fun groupAdd(group: ProxyGroup) = Unit
+                override suspend fun groupUpdated(group: ProxyGroup) = Unit
+                override suspend fun groupUpdated(groupId: Long) = Unit
+                override suspend fun groupRemoved(groupId: Long) = Unit
+                override suspend fun groupsReordered(groups: List<ProxyGroup>, changed: List<ProxyGroup>) { receipts++ }
+            }
+            GroupManager.addListener(listener)
+            try {
+                f.dispatch(f.memberList, MotionEvent.ACTION_UP, x, y)
+                callback.clearView(f.memberList, holder)
+                f.await { f.rootWrites() == 0 && f.environment.database.groupDao().allGroups().map { it.id } == expected &&
+                    f.adapter.ids == expected && f.memberAdapter.ids == subset }
+                callback.clearView(f.memberList, holder)
+                assertEquals("One member gesture goes through the shared durable root writer once", 1, listener.receipts)
+                original.forEachIndexed { index, id ->
+                    if (id !in members) assertEquals("Non-member keeps its root slot $index", id, expected[index])
+                }
+                assertEquals(f.roots[19].id, DataStore.selectedGroup)
+                f.call("backPage"); f.settleMotion(); f.open(other.id)
+                assertEquals(expected.filter { it in setOf(original[3], original[5], original[8]) }, f.memberAdapter.ids)
+                f.reopen()
+                assertEquals(expected, f.adapter.ids)
+                assertEquals(expected.filter { it in setOf(original[3], original[5], original[8]) }, f.memberAdapter.ids)
+                assertEquals(1, listener.receipts)
+            } finally { GroupManager.removeListener(listener) }
+        }
+    }
+
+    @Test fun rapidMemberGesturesMergeAgainstLatestQueuedRootOrder() {
+        Fixture().use { f ->
+            val tag = TagGroupStore.create("Members")
+            val original = f.roots.map { it.id }
+            val members = listOf(original[1], original[3], original[5])
+            TagGroupStore.add(tag.id, members)
+            f.show(); f.tags(); f.open(tag.id)
+            (f.memberList.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(0, 0)
+            f.frame()
+            val callback = ReflectionHelpers.getField<GroupPickerDragCallback>(f.session, "memberDrag")
+            fun step(from: Int, to: Int) {
+                val holder = f.memberList.findViewHolderForAdapterPosition(from) as GroupPickerAdapter.Holder
+                val target = f.memberList.findViewHolderForAdapterPosition(to) as GroupPickerAdapter.Holder
+                val (x, y) = f.memberDown(holder)
+                assertTrue("real visible member handle must permit the next queued reorder", callback.onMove(f.memberList, holder, target))
+                f.dispatch(f.memberList, MotionEvent.ACTION_UP, x, y)
+                callback.clearView(f.memberList, holder)
+                // Layout only: no main-looper delivery of the first writer receipt yet.
+                f.memberList.itemAnimator?.endAnimations()
+                f.frame()
+            }
+            step(0, 2)
+            assertTrue(f.rootWrites() > 0)
+            step(0, 1)
+            val subset = listOf(members[2], members[1], members[0])
+            val expected = GroupClassification.mergeSubsetOrder(original, subset)
+            f.await { f.rootWrites() == 0 && f.environment.database.groupDao().allGroups().map { it.id } == expected &&
+                f.adapter.ids == expected && f.memberAdapter.ids == subset }
+            original.forEachIndexed { index, id -> if (id !in members) assertEquals(id, expected[index]) }
+        }
+    }
+
+    @Test fun memberCancelledDragDoesNotWriteAndCloseFinalizesOneRootCommit() {
+        for (cancel in listOf(true, false)) Fixture().use { f ->
+            val tag = TagGroupStore.create("Members")
+            val original = f.roots.map { it.id }
+            val members = listOf(original[1], original[3], original[5])
+            TagGroupStore.add(tag.id, members)
+            f.show(); f.tags(); f.open(tag.id)
+            val callback = ReflectionHelpers.getField<GroupPickerDragCallback>(f.session, "memberDrag")
+            val holder = f.memberList.findViewHolderForAdapterPosition(0) as GroupPickerAdapter.Holder
+            val target = f.memberList.findViewHolderForAdapterPosition(2) as GroupPickerAdapter.Holder
+            val (x, y) = f.memberDown(holder)
+            assertTrue(callback.onMove(f.memberList, holder, target))
+            val subset = f.memberAdapter.ids
+            if (cancel) f.dispatch(f.memberList, MotionEvent.ACTION_CANCEL, x, y)
+            f.topbar.dismissGroupPicker(immediate = true)
+            callback.clearView(f.memberList, holder)
+            callback.close()
+            val expected = if (cancel) original else GroupClassification.mergeSubsetOrder(original, subset)
+            f.await { f.rootWrites() == 0 && f.environment.database.groupDao().allGroups().map { it.id } == expected }
+            assertNull(f.memberList.adapter)
+            assertNull(f.memberAdapter.startDrag)
+            assertNull(f.memberList.dragTouch)
+            assertEquals(f.roots[19].id, DataStore.selectedGroup)
+            f.reopen()
+            assertEquals(expected, f.adapter.ids)
+            assertEquals(if (cancel) members else subset, f.memberAdapter.ids)
         }
     }
 

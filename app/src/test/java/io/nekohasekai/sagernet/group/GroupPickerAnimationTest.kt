@@ -5,6 +5,8 @@ import android.app.Application
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Looper
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -55,11 +57,15 @@ class GroupPickerAnimationTest {
             ProxyGroup(id = it, userOrder = it, name = "Group $it")
         }, { 2L }, { ColorDrawable(Color.GRAY) }, Color.BLACK, Color.DKGRAY, {})
         val drag = GroupPickerDragCallback(adapter, { commits.add(it) }, { cancellations++ }, {})
+        val touch = ItemTouchHelper(drag)
 
         init {
             recycler.layoutManager = LinearLayoutManager(controller.get())
             recycler.itemAnimator = animator
             recycler.adapter = adapter
+            drag.attach(recycler, touch)
+            recycler.cancelDrag = { drag.cancelGesture() }
+            adapter.startDrag = { if (drag.armHandle(it)) touch.startDrag(it) }
             adapter.registerAdapterDataObserver(object : RecyclerView.AdapterDataObserver() {
                 override fun onChanged() { changes++ }
                 override fun onItemRangeChanged(start: Int, count: Int, payload: Any?) { changes++ }
@@ -85,8 +91,22 @@ class GroupPickerAnimationTest {
                 remaining -= step
             }
         }
+        fun event(action: Int, x: Float, y: Float) {
+            val now = SystemClock.uptimeMillis()
+            val event = MotionEvent.obtain(now, now, action, x, y, 0)
+            try { recycler.dispatchTouchEvent(event) } finally { event.recycle() }
+        }
+        fun downOnHandle(holder: GroupPickerAdapter.Holder) {
+            // A neighbour may still have a move translation from the previous gesture.
+            val handle = IntArray(2).also { holder.handle.getLocationOnScreen(it) }
+            val origin = IntArray(2).also { recycler.getLocationOnScreen(it) }
+            event(MotionEvent.ACTION_DOWN,
+                handle[0] - origin[0] + holder.handle.width / 2f,
+                handle[1] - origin[1] + holder.handle.height / 2f)
+            assertTrue(drag.isSelected)
+        }
         fun move() {
-            drag.onSelectedChanged(holder(1), ItemTouchHelper.ACTION_STATE_DRAG)
+            downOnHandle(holder(1))
             assertTrue(drag.onMove(recycler, holder(1), holder(3)))
             layout()
             animator.runPendingAnimations()
@@ -94,6 +114,9 @@ class GroupPickerAnimationTest {
         override fun close() {
             drag.close()
             animator.endAnimations()
+            recycler.dragTouch = null
+            adapter.startDrag = null
+            touch.attachToRecyclerView(null)
             recycler.adapter = null
             controller.pause().stop().destroy()
         }
@@ -161,8 +184,8 @@ class GroupPickerAnimationTest {
             f.move()
             val old = f.holder(1)
             val next = f.holder(2)
-            f.drag.onSelectedChanged(null, ItemTouchHelper.ACTION_STATE_IDLE)
-            f.drag.onSelectedChanged(next, ItemTouchHelper.ACTION_STATE_DRAG)
+            f.event(MotionEvent.ACTION_UP, 400f, 100f)
+            f.downOnHandle(next)
             assertEquals(0f, next.itemView.translationY, 0.01f)
             f.drag.clearView(f.recycler, old)
             assertTrue(f.drag.isDragging)
