@@ -590,6 +590,11 @@ class GroupSettingsActivity(
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.profile_config_menu, menu)
+        menu.findItem(R.id.action_apply)?.icon = menu.findItem(R.id.action_apply)?.icon?.let {
+            androidx.core.graphics.drawable.DrawableCompat.wrap(it).mutate().also { icon ->
+                androidx.core.graphics.drawable.DrawableCompat.setTint(icon, ToolbarIconPalette.foreground(this))
+            }
+        }
         return true
     }
 

@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.ui
 
 import android.content.Intent
+import android.text.TextUtils
 import android.os.Bundle
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -1248,6 +1249,10 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             groupName.text = proxyGroup.displayName()
             groupUser.isVisible = tagSearchActive && proxyGroup.id in tagMemberIds
             groupUser.text = if (groupUser.isVisible) getString(R.string.tag_member_already) else ""
+            // Keep the status summary on one line while the classification label
+            // occupies the far-right slot of the same lower row.
+            groupStatus.maxLines = if (tagSearchActive) 1 else 2
+            groupStatus.ellipsize = TextUtils.TruncateAt.END
 
             editButton.setOnClickListener {
                 startActivity(Intent(it.context, GroupSettingsActivity::class.java).apply {
@@ -1292,7 +1297,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 }
 
                 subscriptionUpdateProgress.isVisible = false
-                updateButton.isInvisible = groupAdapter.customSelection ||
+                updateButton.isGone = groupAdapter.customSelection || tagSearchActive ||
                     proxyGroup.type != GroupType.SUBSCRIPTION
                 groupJumpButton.isGone = groupAdapter.customSelection || proxyGroup.ungrouped
                 optionsButton.isGone = groupAdapter.customSelection

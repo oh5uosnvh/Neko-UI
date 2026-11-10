@@ -138,29 +138,15 @@
             <!-- Classification status belongs to the same information row, never over the top actions. -->
             <TextView
                 android:id="@+id/group_user"
-                android:layout_width="wrap_content"
+                android:layout_width="64dp"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="4dp"
+                android:gravity="center"
+                android:maxLines="1"
+                android:ellipsize="end"
                 android:textAppearance="?android:attr/textAppearanceSmall"
                 android:textColor="?android:attr/textColorSecondary"
                 tools:text="已归类" />
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/group_selected_indicator"
-                android:layout_width="30dp"
-                android:layout_height="30dp"
-                android:layout_marginEnd="4dp"
-                android:visibility="gone"
-                app:cardBackgroundColor="?colorPrimary"
-                app:cardCornerRadius="15dp"
-                app:cardElevation="0dp">
-
-                <androidx.appcompat.widget.AppCompatImageView
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:padding="6dp"
-                    app:srcCompat="@drawable/ic_action_done" />
-            </com.google.android.material.card.MaterialCardView>
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/group_update"
@@ -173,6 +159,25 @@
         </LinearLayout>
 
     </LinearLayout>
+
+    <!-- Selection belongs to the card's first row, as in the original picker layout. -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/group_selected_indicator"
+        android:layout_width="30dp"
+        android:layout_height="30dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="12dp"
+        android:visibility="gone"
+        app:cardBackgroundColor="?colorPrimary"
+        app:cardCornerRadius="15dp"
+        app:cardElevation="0dp">
+
+        <androidx.appcompat.widget.AppCompatImageView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="6dp"
+            app:srcCompat="@drawable/ic_action_done" />
+    </com.google.android.material.card.MaterialCardView>
 
     </FrameLayout>
 

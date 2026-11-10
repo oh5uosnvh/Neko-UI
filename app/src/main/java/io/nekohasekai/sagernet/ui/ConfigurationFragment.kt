@@ -507,6 +507,10 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     /** Only user clicks animate; restoration/order alignment keeps setCurrentItem(..., false). */
     fun requestGroupPage(position: Int) {
+        // Group navigation from search results (including the ⊙ jump action)
+        // leaves the search scope; do not restore a stale search toolbar when
+        // returning to the configuration page.
+        topBar.collapseSearch()
         val groupId = adapter.groupList.getOrNull(position)?.id ?: return
         pageTransition?.let { it.request(groupId); return }
         pageRequests.request(groupId)

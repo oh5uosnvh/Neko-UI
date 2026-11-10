@@ -77,6 +77,8 @@ internal class GroupPickerHeader(
     back: () -> Unit,
 ) : LinearLayout(context) {
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+    private lateinit var configurationEntry: TextView
+    private lateinit var tagsEntry: TextView
     private val entries = LinearLayout(context).apply {
         orientation = HORIZONTAL
         fun entry(label: Int, selected: Boolean, action: () -> Unit) = TextView(context).apply {
@@ -91,8 +93,10 @@ internal class GroupPickerHeader(
             isFocusable = true
             setOnClickListener { action() }
         }
-        addView(entry(R.string.tag_picker_configuration, true, configuration), LayoutParams(0, -1, 1f))
-        addView(entry(R.string.tag_picker_tags, false, tags), LayoutParams(0, -1, 1f))
+        configurationEntry = entry(R.string.tag_picker_configuration, true, configuration)
+        tagsEntry = entry(R.string.tag_picker_tags, false, tags)
+        addView(configurationEntry, LayoutParams(0, -1, 1f))
+        addView(tagsEntry, LayoutParams(0, -1, 1f))
     }
     private val title = TextView(context).apply {
         textSize = 15f
@@ -124,13 +128,20 @@ internal class GroupPickerHeader(
         minimumHeight = dp(52)
         addView(entries, LayoutParams(-1, dp(48)))
         addView(backRow, LayoutParams(-1, dp(48)))
-        bind(GroupPickerNavigation.Page.Configuration, null)
+        // Initial state is already configured by the entry defaults; bind() is
+        // called after construction when the actual page is known.
     }
     fun bind(page: GroupPickerNavigation.Page, tagName: String?) {
-        val root = page == GroupPickerNavigation.Page.Configuration
-        entries.visibility = if (root) View.VISIBLE else View.GONE
-        backRow.visibility = if (root) View.GONE else View.VISIBLE
-        icon.visibility = if (page is GroupPickerNavigation.Page.Members) View.VISIBLE else View.GONE
+        val members = page is GroupPickerNavigation.Page.Members
+        // Keep the two-scope switch visible on the configuration and tag pages.
+        // The member page gets the dedicated back/title row to avoid duplicate headers.
+        entries.visibility = if (members) View.GONE else View.VISIBLE
+        backRow.visibility = if (members) View.VISIBLE else View.GONE
+        configurationEntry.isSelected = page == GroupPickerNavigation.Page.Configuration
+        tagsEntry.isSelected = page is GroupPickerNavigation.Page.Tags
+        configurationEntry.background = card(configurationEntry.isSelected)
+        tagsEntry.background = card(tagsEntry.isSelected)
+        icon.visibility = if (members) View.VISIBLE else View.GONE
         title.text = tagName ?: context.getString(R.string.tag_picker_title)
         backRow.contentDescription = context.getString(R.string.tag_picker_back_to, title.text)
     }

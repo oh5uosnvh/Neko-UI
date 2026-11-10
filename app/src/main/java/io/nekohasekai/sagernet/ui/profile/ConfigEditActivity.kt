@@ -177,6 +177,11 @@ class ConfigEditActivity : ThemedActivity() {
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.profile_apply_menu, menu)
+        menu.findItem(R.id.action_apply)?.icon = menu.findItem(R.id.action_apply)?.icon?.let {
+            androidx.core.graphics.drawable.DrawableCompat.wrap(it).mutate().also { icon ->
+                androidx.core.graphics.drawable.DrawableCompat.setTint(icon, io.nekohasekai.sagernet.ui.ToolbarIconPalette.foreground(this))
+            }
+        }
         return true
     }
 

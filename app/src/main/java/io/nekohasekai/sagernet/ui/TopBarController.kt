@@ -672,6 +672,7 @@ internal class TopBarController(
 
     fun showGroupPicker(anchor: View) {
         dismissGroupPicker()
+        reconcilePickerContext()
         val list = groups().toList()
         if (host.select && list.isEmpty()) {
             host.snackbar(R.string.jump_hint_none)
@@ -686,8 +687,21 @@ internal class TopBarController(
             host.snackbar(R.string.jump_hint_none)
             return
         }
+        // Publish the user's choice before closing the popup. Reopening can then
+        // reconcile a retained tag page against the actually visible root group.
+        if (!host.select) DataStore.stageSelectedGroup(id)
         dismissGroupPicker()
         host.requestGroupPage(index)
+    }
+
+    private fun reconcilePickerContext() {
+        if (host.select) return
+        val page = pickerNavigation.page as? GroupPickerNavigation.Page.Members ?: return
+        val selected = DataStore.selectedGroup
+        val stillInTag = try {
+            selected > 0L && selected in TagGroupStore.members(page.tagId)
+        } catch (_: Exception) { false }
+        if (!stillInTag) pickerNavigation.configuration()
     }
 
     /** Owns only display state. The process-wide writer outlives this popup/fragment. */
@@ -898,7 +912,6 @@ internal class TopBarController(
             }
             memberList.cancelDrag = { memberDrag.cancelGesture() }
             renderPage()
-            if (host.select) header.visibility = View.GONE
             popup.setOnDismissListener {
                 close()
                 if (groupPopup === popup) {
@@ -939,15 +952,19 @@ internal class TopBarController(
             try {
                 // Seed the first layout before attaching the popup. Posting this scroll
                 // would render row zero for one frame before jumping to the selected ID.
-                val position = adapter.ids.indexOf(selectedItemGroupId())
-                if (rootViewport != null) rootViewport?.restore(list, adapter.ids)
-                else if (position >= 0) layout.scrollToPositionWithOffset(position, 0)
+                val selectedId = selectedItemGroupId()
+                val position = adapter.ids.indexOf(selectedId)
+                // The selected root group is authoritative on every open. A viewport
+                // captured while browsing a tag must never hide the current root choice.
+                if (position >= 0) layout.scrollToPositionWithOffset(position, 0)
                 popup.showAsDropDown(anchor, pickerOffsetX(anchor, popup.width), gap)
                 io.nekohasekai.sagernet.widget.PopupEntrance.animate(container,
                     popup.isAboveAnchor, anchor)
                 // Reopening before a previous write's notification must not revive old order.
                 requestRefresh()
-                if (!host.select) watchTags()
+                // Tag changes must refresh both the normal picker and the
+                // configuration-selection picker; the scope switch is shared.
+                watchTags()
             } catch (e: Exception) {
                 Logs.w(e)
                 close()

@@ -175,6 +175,11 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
         // shared menu item
         menu.findItem(R.id.action_custom_outbound_json)?.isVisible = true
         menu.findItem(R.id.action_custom_config_json)?.isVisible = true
+        menu.findItem(R.id.action_apply)?.icon = menu.findItem(R.id.action_apply)?.icon?.let {
+            androidx.core.graphics.drawable.DrawableCompat.wrap(it).mutate().also { icon ->
+                androidx.core.graphics.drawable.DrawableCompat.setTint(icon, io.nekohasekai.sagernet.ui.ToolbarIconPalette.foreground(this))
+            }
+        }
         return true
     }
 

@@ -66,7 +66,7 @@ class GroupSearchBar(private val toolbar: Toolbar, private val context: Context 
     // Width grows from zero; clipping and positive translation reveal the pill leftwards from X.
     val classifySlot = FrameLayout(context).apply { clipChildren = true }
     val close = icon(R.drawable.ic_topbar_close, android.R.string.cancel)
-    val confirm = icon(R.drawable.ic_action_done, R.string.group_classify_confirm).apply {
+    val confirm = icon(R.drawable.ic_action_done_toolbar, R.string.group_classify_confirm).apply {
         visibility = View.INVISIBLE // not GONE: the far-right slot exists even for an empty query
         isEnabled = false
     }

@@ -90,7 +90,7 @@ class TagMemberSearchBar(private val toolbar: Toolbar, private val context: Cont
         manual.visibility = if (manualMode) View.GONE else View.VISIBLE
         classify.visibility = if (!manualMode && newMatches > 0) View.VISIBLE else View.GONE
         classify.isEnabled = newMatches > 0
-        done.setImageResource(if (manualMode) R.drawable.ic_action_done else R.drawable.ic_topbar_close)
+        done.setImageResource(if (manualMode) R.drawable.ic_action_done_toolbar else R.drawable.ic_topbar_close)
         done.contentDescription = context.getString(if (manualMode) R.string.group_classify_confirm else android.R.string.cancel)
         done.isEnabled = !manualMode || selected > 0
         done.alpha = if (done.isEnabled) 1f else .38f

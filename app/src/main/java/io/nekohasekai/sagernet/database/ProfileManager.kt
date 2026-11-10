@@ -228,12 +228,33 @@ object ProfileManager {
                 if (isNewOrAdopted || reset) rule.name = item.name
                 // Built-ins are enabled by default; reset also restores this state.
                 if (isNewOrAdopted || reset) rule.enabled = true
-                if (reset && item.remoteUrl == null) {
-                    rule.domains = item.domains
-                    rule.ip = item.ip
-                    rule.port = item.port
-                    rule.network = item.network
+                if (reset) {
+                    // Reset every fixed card's target, not only its visible name.
+                    // In particular, a manually selected profile must return to the
+                    // catalog default (proxy/direct/block) after reset.
                     rule.outbound = item.outbound
+                    rule.sourceUrl = item.remoteUrl.orEmpty()
+                    if (item.remoteUrl == null) {
+                        rule.domains = item.domains
+                        rule.ip = item.ip
+                        rule.port = item.port
+                        rule.sourcePort = ""
+                        rule.network = item.network
+                        rule.source = ""
+                        rule.protocol = ""
+                        rule.ruleset = item.ruleset
+                        rule.packages = emptySet()
+                        rule.cachedRuleCount = 0
+                        rule.skippedRuleCount = 0
+                        rule.subscriptionState = ""
+                        rule.lastUpdateError = ""
+                    } else {
+                        // Keep parsed domains/IPs as the usable old cache, but reset
+                        // provider state and never retain a manually selected outbound.
+                        rule.ruleset = item.ruleset
+                        rule.subscriptionState = if (rule.cachedRuleCount > 0) "stale" else ""
+                        rule.lastUpdateError = ""
+                    }
                 }
                 if (restoreCatalogOrder) rule.userOrder = index.toLong()
                 rule.builtinKey = item.key

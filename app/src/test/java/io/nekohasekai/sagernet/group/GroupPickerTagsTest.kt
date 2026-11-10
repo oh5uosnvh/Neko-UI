@@ -81,11 +81,9 @@ class GroupPickerTagsTest {
             assertEquals(1, tags)
             assertEquals(0, configuration)
             header.bind(GroupPickerNavigation.Page.Tags, null)
-            assertEquals(View.GONE, entries.visibility)
+            assertEquals(View.VISIBLE, entries.visibility)
+            assertEquals(View.GONE, header.getChildAt(1).visibility)
             val backRow = header.getChildAt(1) as LinearLayout
-            assertEquals(context.getString(R.string.tag_picker_title),
-                descendants(backRow).filterIsInstance<TextView>().single().text.toString())
-            assertEquals(View.GONE, descendants(backRow).filterIsInstance<ImageView>().single().visibility)
             header.bind(GroupPickerNavigation.Page.Members(42L), "Flower")
             assertEquals(View.VISIBLE, descendants(backRow).filterIsInstance<ImageView>().single().visibility)
             assertNotNull(descendants(backRow).filterIsInstance<ImageView>().single().drawable)
