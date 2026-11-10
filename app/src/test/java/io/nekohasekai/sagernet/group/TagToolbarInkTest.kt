@@ -38,8 +38,11 @@ class TagToolbarInkTest {
                 val bitmap=Bitmap.createBitmap(48,48,Bitmap.Config.ARGB_8888)
                 icon.setBounds(0,0,48,48); icon.draw(Canvas(bitmap))
                 val pixels=IntArray(48*48); bitmap.getPixels(pixels,0,48,0,0,48,48)
-                assertTrue("actual opaque icon ink must exist for $id",pixels.any {android.graphics.Color.alpha(it)>240})
-                assertTrue("page ink, not fixed white resource",pixels.filter{android.graphics.Color.alpha(it)>240}.all{
+                val inkAlpha = android.graphics.Color.alpha(ink)
+                assertTrue("theme foreground must remain readable", inkAlpha >= 160)
+                val strong = pixels.filter { android.graphics.Color.alpha(it) >= inkAlpha - 4 }
+                assertTrue("actual near-theme-alpha icon ink must exist for $id (theme alpha=$inkAlpha)", strong.isNotEmpty())
+                assertTrue("page ink, not fixed white resource",strong.all{
                     (it and 0xFFFFFF)==(ink and 0xFFFFFF)
                 })
                 if(id==R.id.action_tag_groups) {

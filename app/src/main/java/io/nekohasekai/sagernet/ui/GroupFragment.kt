@@ -249,6 +249,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             { groupAdapter.groupList.map { it.id } },
             { !isHidden && view.translationX == 0f && isResumed },
             ::highlightGroup, ::clearJumpHighlight)
+        val hadPreparedGroups = preparedGroups != null
         preparedGroups?.let { groupAdapter.submitGroups(it) }
         preparedGroups = null
         if (preparedGroupId > 0L) {
@@ -326,6 +327,9 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             }
         })
         itemTouchHelper.attachToRecyclerView(groupListView)
+        // DEFAULT/M Main.immediate may execute inline: launch only after the host field,
+        // RecyclerView, listeners and undo owner have all been initialized.
+        if (!hadPreparedGroups) viewLifecycleOwner.lifecycleScope.launch { groupAdapter.reload() }
 
     }
 
@@ -913,7 +917,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
         init {
             setHasStableIds(true)
-            if (preparedGroups == null) viewLifecycleOwner.lifecycleScope.launch { reload() }
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): GroupHolder {

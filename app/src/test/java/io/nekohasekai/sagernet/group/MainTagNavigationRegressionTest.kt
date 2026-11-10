@@ -360,6 +360,29 @@ class MainTagNavigationRegressionTest {
         }
     }
 
+    @Test fun repeatedColdMemberPagesNeverLoadBeforeHostAdapterAndUndoOwnerAssignment() {
+        Fixture().use { f ->
+            val tag = io.nekohasekai.sagernet.database.TagGroupStore.create("Cold repeat")
+            io.nekohasekai.sagernet.database.TagGroupStore.add(tag.id, listOf(f.root.groupAdapter.groupList.first().id))
+            val tags = f.openTags()
+            f.awaitIo { tags.requireView().findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.tag_list).adapter!!.itemCount == 1 }
+            f.assertMotion(f.root.requireView(), tags.requireView(), true); f.settle()
+            repeat(6) {
+                val old = f.current!!.requireView()
+                val member = f.openMembers(tag.id)
+                f.awaitIo { member.groupAdapter.itemCount == 1 }
+                assertNotNull(member.undoManager)
+                assertSame(member.groupAdapter, member.groupListView.adapter)
+                f.assertMotion(old, member.requireView(), true); f.settle()
+                val outgoing = member.requireView()
+                f.activity.onBackPressedDispatcher.onBackPressed(); f.awaitTags()
+                val target = f.current as TagGroupFragment
+                f.awaitIo { target.requireView().findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.tag_list).adapter!!.itemCount == 1 }
+                f.assertMotion(outgoing, target.requireView(), false); f.settle()
+            }
+        }
+    }
+
     @Test fun selectingGroupMenuWhileOnTagsResolvesRootButSelectingActualRootIsIdempotent() {
         Fixture().use { f ->
             val tags = f.openTags()

@@ -24,3 +24,9 @@
 
 ## 出包门禁
 标准CI仍执行group/ui/database完整套件与新native图标test，全部通过后才交付双架构原签名候选APK。不声称所有真实设备100%无bug；提供自动回归证明与真机验收点。
+
+## CI首轮阻塞与纠正
+CI 42811075772 共580项，577项通过、3项失败，未交包。
+- 真导航三级冷启动揭示实际源码竞态：GroupAdapter构造中的Main.immediate协程可在宿主groupAdapter赋值前完成IO并访问字段。移除构造中的launch，在GroupFragment.onViewCreated的所有者/undo/RecyclerView初始化末尾再launch。新增连续6次冷启动成员页的真实回归。
+- 两个native图标测试错误要求alpha>240，但主题前景可能是87%黑色；改为要求接近主题自身alpha的像素实际存在、RGB精确一致且主题alpha>=160，并保留尺寸/透明内孔检查，不取消或跳过像素验收。
+修复后本机121项相关回归全部通过，待标准CI复验图标native和全套。
