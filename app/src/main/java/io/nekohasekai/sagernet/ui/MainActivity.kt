@@ -461,7 +461,7 @@ class MainActivity : ThemedActivity(),
 
     fun onNavigationItemSelected(item: MenuItem): Boolean {
         if (!item.isVisible || !item.isEnabled) return false
-        if (item.itemId == currentNavId && currentMainFragment != null) {
+        if (item.itemId == currentNavId && currentMainFragment === fragmentCache[item.itemId]) {
             cancelPendingPageNavigation()
             navigation.dismiss()
             return true
@@ -809,7 +809,7 @@ class MainActivity : ThemedActivity(),
         navigation.cancel()
         pendingGroupNavigation?.cancel()
         pendingGroupNavigation = null
-        if (id == currentNavId && currentMainFragment != null) {
+        if (id == currentNavId && currentMainFragment === fragmentCache[id] && currentMainFragment != null) {
             cancelPendingPageNavigation()
             return true
         }

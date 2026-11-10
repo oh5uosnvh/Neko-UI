@@ -86,7 +86,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         }
     }
 
-    private fun openTagList() { TagGroupNavigation.open(activity) }
+    private fun openTagList() { TagGroupNavigation.open(activity, forward = !inTag) }
 
     private fun updateGroupSearchActions() {
         if (!::groupAdapter.isInitialized) return
@@ -216,6 +216,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             toolbar.menu.findItem(R.id.action_tag_remove_selected)?.isVisible = tagEdit
             searchBackCallback.isEnabled = !isHidden
         }
+        ToolbarIconPalette.apply(toolbar, requireContext())
         tagEmptyView = TextView(requireContext()).apply {
             setText(R.string.tag_member_empty)
             gravity = Gravity.CENTER
@@ -420,7 +421,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
     private fun showTagUndo(undo: TagGroupStore.UndoRecord?, message: String) {
         pendingTagUndo = undo
-        val bar = activity.snackbar(message).setDuration(5000)
+        val bar = activity.snackbar(message)
         if (undo != null) bar.setAction(R.string.undo) {
             runOnDefaultDispatcher {
                 try {
@@ -497,39 +498,11 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             }.show()
     }
 
-    private fun createGroupInTag() {
-        MaterialAlertDialogBuilder(requireContext()).setItems(arrayOf(
-            getString(R.string.tag_member_add_new), getString(R.string.tag_member_add_clipboard),
-            getString(R.string.tag_member_add_subscription))) { _, which ->
-            when (which) {
-                0 -> openTaggedGroupSettings()
-                1 -> importTagClipboard()
-                2 -> {
-                    val input = android.widget.EditText(requireContext()).apply {
-                        inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
-                    }
-                    val dialog = MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.tag_member_add_subscription)
-                        .setView(input).setPositiveButton(R.string.save, null)
-                        .setNegativeButton(android.R.string.cancel, null).create()
-                    dialog.setOnShowListener {
-                        input.requestFocus()
-                        dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
-                        dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                            val link = input.text.toString().trim()
-                            if (link.isBlank()) { input.error = getString(R.string.tag_member_failed); return@setOnClickListener }
-                            openTaggedGroupSettings(link); dialog.dismiss()
-                        }
-                    }
-                    dialog.show()
-                }
-            }
-        }.show()
-    }
-
     private fun openTaggedGroupSettings(link: String? = null) {
         startActivity(Intent(requireContext(), GroupSettingsActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, 0L)
-            putExtra(GroupSettingsActivity.EXTRA_TAG_ID, tagId)
+            if (inTag) putExtra(GroupSettingsActivity.EXTRA_TAG_ID, tagId)
             if (link != null) putExtra(GroupSettingsActivity.EXTRA_GROUP_SUBSCRIPTION_LINK, link)
         })
     }
@@ -632,13 +605,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             R.id.action_tag_remove_selected -> enterTagSearch(remove = true)
             R.id.action_group_search -> if (inTag) enterTagSearch() else enterGroupSearchMode()
             R.id.action_new_group -> {
-                if (inTag) createGroupInTag()
-                else if (!groupSearchMode) {
-                    startActivity(Intent(context, GroupSettingsActivity::class.java).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                        putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, 0L)
-                    })
-                }
+                if (!groupSearchMode) openTaggedGroupSettings()
             }
             R.id.action_update_all -> {
                 if (inTag) updateTagSubscriptions()

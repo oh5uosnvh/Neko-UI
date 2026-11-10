@@ -28,6 +28,7 @@ internal class NavigationPageContent(private val root: View, private val navId: 
             R.id.nav_group, R.id.nav_route -> {
                 val id = if (navId == R.id.nav_group) R.id.group_list else R.id.route_list
                 adapter = root.findViewById<RecyclerView>(id)?.adapter
+                    ?: if (navId == R.id.nav_group) root.findViewById<RecyclerView>(R.id.tag_list)?.adapter else null
                 // Route has a permanent documentation row even before its async DB result.
                 loaded = (adapter?.itemCount ?: 0) > if (navId == R.id.nav_group) 0 else 1
                 adapter?.registerAdapterDataObserver(changes)
@@ -43,6 +44,10 @@ internal class NavigationPageContent(private val root: View, private val navId: 
     }
 
     fun isReady(): Boolean {
+        if (!loaded) {
+            // An explicitly drawn empty result is ready too; don't let tag pages hit the timeout valve.
+            loaded = root.findViewById<View>(R.id.tag_empty)?.visibility == View.VISIBLE
+        }
         if (!loaded) return false
         if (navId == R.id.nav_about) {
             val cards = root.findViewById<RecyclerView>(

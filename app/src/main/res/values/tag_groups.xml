@@ -19,7 +19,6 @@
     <string name="tag_delete_confirm">Delete this tag group?</string>
     <string name="tag_delete_explanation">Deleting a tag group does not delete configuration groups. It only removes this tag group and its classification relationships.</string>
     <string name="tag_deleted">Removed “%1$s” tag group</string>
-    <string name="tag_undo_countdown">Removed “%1$s” tag group · %2$d s</string>
     <string name="tag_undo">Restore</string>
     <string name="tag_restored">Restored successfully</string>
     <string name="tag_operation_failed">Operation failed. Please try again.</string>

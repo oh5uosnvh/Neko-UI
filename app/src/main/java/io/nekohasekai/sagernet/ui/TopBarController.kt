@@ -121,6 +121,12 @@ internal class TopBarController(
 
     private var groupPopup: AnimatedPopupWindow? = null
     private var groupPickerSession: PickerSession? = null
+    // Controller/lifecycle scoped, never retained Views or PopupWindows.
+    private val pickerNavigation = GroupPickerNavigation()
+    private var pickerRootViewport: PickerViewport? = null
+    private var pickerTagViewport: PickerViewport? = null
+    private val pickerMemberViewports = HashMap<Long, PickerViewport>()
+    private var pickerTagWriteTail: Job? = null
 
     /** ⊙ 点击循环进度：false=下次去选定节点分组，true=下次去第一个分组 */
     private val jumpSequence = SelectedJumpSequence()
@@ -729,7 +735,7 @@ internal class TopBarController(
             settled = { onSettled() },
         )
         private val touch = ItemTouchHelper(drag)
-        private val navigation = GroupPickerNavigation()
+        private val navigation = if (host.select) GroupPickerNavigation() else pickerNavigation
         private var tagRows: List<TagGroup> = emptyList()
         private var memberIds: Set<Long> = emptySet()
         private var memberNeedsSelection = false
@@ -740,14 +746,31 @@ internal class TopBarController(
         private var tagGeneration = 0L
         private var memberNames: Map<Long, String> = emptyMap()
         private var nodeCounts: Map<Long, Long> = emptyMap()
-        private var rootViewport: PickerViewport? = null
-        private var tagViewport: PickerViewport? = null
+        private var rootViewport: PickerViewport? = pickerRootViewport
+        private var tagViewport: PickerViewport? = pickerTagViewport
+        private var restoringMembers = navigation.page is GroupPickerNavigation.Page.Members
+        private var tagRefreshNeeded = false
+        private var pendingTagOrder: List<Long>? = null
+        private var tagSaves = 0
+        private var tagWriteTail: Job? = null
+        private val settleTags = object : Runnable {
+            override fun run() {
+                if (closed || tagDrag.isDragging) return
+                if (tagList.isSettling) { tagList.postOnAnimation(this); return }
+                pendingTagOrder?.let { pendingTagOrder = null; persistTags(it) }
+                if (tagRefreshNeeded && tagSaves == 0) requestTagRefresh()
+            }
+        }
         private var availableHeight = 1
         private var rowHeight = dp(52)
         private val tagList = GroupPickerRecyclerView(popupContext)
         private val memberList = GroupPickerRecyclerView(popupContext)
         private val tagAdapter = TagPickerAdapter(popupContext,
-            themeColor(android.R.attr.textColorPrimary), { groupItemCard(false) }, { openTag(it) })
+            themeColor(android.R.attr.textColorPrimary), { groupItemCard(false) }, { openTag(it) },
+            themeColor(android.R.attr.textColorSecondary))
+        private val tagDrag = GroupPickerDragCallback(tagAdapter,
+            commit = { pendingTagOrder = it }, cancelled = {}, settled = { awaitTagSettle() })
+        private val tagTouch = ItemTouchHelper(tagDrag)
         private val memberAdapter = GroupPickerAdapter(popupContext, emptyList(),
             selectedId = { selectedItemGroupId() }, card = { groupItemCard(it) },
             textColor = themeColor(android.R.attr.textColorPrimary),
@@ -763,25 +786,37 @@ internal class TopBarController(
             gravity = Gravity.CENTER
             setPadding(dp(12), dp(12), dp(12), dp(12))
         }
-        private val pages = FrameLayout(popupContext).apply {
-            addView(list, FrameLayout.LayoutParams(-1, -1))
-            addView(tagList, FrameLayout.LayoutParams(-1, -1))
-            addView(memberList, FrameLayout.LayoutParams(-1, -1))
-            addView(empty, FrameLayout.LayoutParams(-1, -1))
-        }
-        private val content = LinearLayout(popupContext).apply {
+        private val tagHeader = GroupPickerHeader(popupContext,
+            themeColor(android.R.attr.textColorPrimary), { groupItemCard(it) },
+            { navigateConfiguration() }, { navigateTags() }, { backPage() })
+        private val memberHeader = GroupPickerHeader(popupContext,
+            themeColor(android.R.attr.textColorPrimary), { groupItemCard(it) },
+            { navigateConfiguration() }, { navigateTags() }, { backPage() })
+        private fun pageView(title: GroupPickerHeader, recycler: RecyclerView) = LinearLayout(popupContext).apply {
             orientation = LinearLayout.VERTICAL
-            addView(header, LinearLayout.LayoutParams(-1, -2))
-            addView(pages, LinearLayout.LayoutParams(-1, 0, 1f))
+            // Real vertical measurement, not two overlapping MATCH_PARENT FrameLayout children.
+            addView(title, LinearLayout.LayoutParams(-1, -2))
+            addView(FrameLayout(popupContext).apply {
+                addView(recycler, FrameLayout.LayoutParams(-1, -1))
+            }, LinearLayout.LayoutParams(-1, 0, 1f))
+        }
+        private val rootPage = pageView(header, list)
+        private val tagsPage = pageView(tagHeader, tagList)
+        private val membersPage = pageView(memberHeader, memberList)
+        private val pages = FrameLayout(popupContext).apply {
+            clipChildren = true // clip the moving PAGE at its edge, never rounded row outlines
+            addView(rootPage, FrameLayout.LayoutParams(-1, -1))
+            addView(tagsPage, FrameLayout.LayoutParams(-1, -1))
+            addView(membersPage, FrameLayout.LayoutParams(-1, -1))
+        }
+        private var renderedPage = navigation.page
+        private val pageSlide = PageSlideTransition {
+            if (!closed) { updatePageVisibility(); resizePage() }
         }
         private val container = GroupPickerSurface(popupContext).apply {
-            // Each level has its own retained RecyclerView: root scrolling/drag state is
-            // never discarded when entering a tag. Only this fixed frame paints the border.
-            background = roundedCard()
-            clipToOutline = true
-            val border = resources.getDimensionPixelSize(R.dimen.card_stroke_width)
-            setPadding(border, border, border, border)
-            addView(content, FrameLayout.LayoutParams(-1, -1))
+            // Cards/header are the top surface. No extra bottom background strip or outline crop.
+            clipToOutline = false
+            addView(pages, FrameLayout.LayoutParams(-1, -1))
             onBack = { backPage() }
         }
         private val popup = object : AnimatedPopupWindow(container, pickerWidth(), 1, true, anchor) {
@@ -840,6 +875,13 @@ internal class TopBarController(
                 recycler.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
                 recycler.isFocusableInTouchMode = true
             }
+            tagList.itemAnimator = groupPickerItemAnimator()
+            tagTouch.attachToRecyclerView(tagList)
+            tagAdapter.startDrag = { holder ->
+                if (!closed && !pageSlide.isRunning && navigation.page == GroupPickerNavigation.Page.Tags &&
+                    !tagDrag.isSelected) tagTouch.startDrag(holder)
+            }
+            tagList.cancelDrag = { tagDrag.cancelGesture() }
             renderPage()
             if (host.select) header.visibility = View.GONE
             popup.setOnDismissListener {
@@ -883,7 +925,8 @@ internal class TopBarController(
                 // Seed the first layout before attaching the popup. Posting this scroll
                 // would render row zero for one frame before jumping to the selected ID.
                 val position = adapter.ids.indexOf(selectedItemGroupId())
-                if (position >= 0) layout.scrollToPositionWithOffset(position, 0)
+                if (rootViewport != null) rootViewport?.restore(list, adapter.ids)
+                else if (position >= 0) layout.scrollToPositionWithOffset(position, 0)
                 popup.showAsDropDown(anchor, pickerOffsetX(anchor, popup.width), gap)
                 io.nekohasekai.sagernet.widget.PopupEntrance.animate(container,
                     popup.isAboveAnchor, anchor)
@@ -903,12 +946,19 @@ internal class TopBarController(
             when (navigation.page) {
                 GroupPickerNavigation.Page.Configuration -> rootViewport = pickerViewport(list, adapter.ids) ?: rootViewport
                 GroupPickerNavigation.Page.Tags -> tagViewport = pickerViewport(tagList, tagAdapter.ids) ?: tagViewport
-                is GroupPickerNavigation.Page.Members -> Unit
+                is GroupPickerNavigation.Page.Members -> {
+                    val tagId = (navigation.page as GroupPickerNavigation.Page.Members).tagId
+                    pickerViewport(memberList, memberAdapter.ids)?.let { pickerMemberViewports[tagId] = it }
+                }
+            }
+            if (!host.select) {
+                pickerRootViewport = rootViewport
+                pickerTagViewport = tagViewport
             }
         }
 
         private fun navigateConfiguration() {
-            if (closed || drag.isSelected) return
+            if (closed || drag.isSelected || tagDrag.isDragging) return
             rememberViewport()
             navigation.configuration()
             renderPage()
@@ -916,7 +966,7 @@ internal class TopBarController(
         }
 
         private fun navigateTags() {
-            if (closed || drag.isSelected) return
+            if (closed || drag.isSelected || tagDrag.isDragging) return
             rememberViewport()
             navigation.tags()
             renderPage()
@@ -925,19 +975,20 @@ internal class TopBarController(
         }
 
         private fun openTag(id: Long) {
-            if (closed || navigation.page != GroupPickerNavigation.Page.Tags || tagRows.none { it.id == id }) return
+            if (closed || tagDrag.isDragging || navigation.page != GroupPickerNavigation.Page.Tags || tagRows.none { it.id == id }) return
             rememberViewport()
             navigation.members(id)
-            memberNeedsSelection = true
+            restoringMembers = true
+            memberNeedsSelection = pickerMemberViewports[id] == null
             memberIds = emptySet()
             memberNames = emptyMap()
             memberAdapter.replace(emptyList())
             renderPage()
-            requestTagRefresh(seedSelection = true)
+            requestTagRefresh(seedSelection = memberNeedsSelection)
         }
 
         private fun backPage() {
-            if (closed || drag.isSelected) return
+            if (closed || drag.isSelected || tagDrag.isDragging) return
             rememberViewport()
             if (!navigation.back()) {
                 dismissGroupPicker()
@@ -953,19 +1004,59 @@ internal class TopBarController(
             requestTagRefresh()
         }
 
+        private fun pageView(page: GroupPickerNavigation.Page): View = when (page) {
+            GroupPickerNavigation.Page.Configuration -> rootPage
+            GroupPickerNavigation.Page.Tags -> tagsPage
+            is GroupPickerNavigation.Page.Members -> membersPage
+        }
+
+        private fun updatePageVisibility() {
+            val active = pageView(navigation.page)
+            for (view in listOf(rootPage, tagsPage, membersPage)) {
+                view.visibility = if (view === active) View.VISIBLE else View.INVISIBLE
+            }
+            active.bringToFront()
+        }
+
         private fun renderPage() {
             val page = navigation.page
             val tag = (page as? GroupPickerNavigation.Page.Members)?.let { current -> tagRows.firstOrNull { it.id == current.tagId } }
-            header.bind(page, tag?.name)
-            // INVISIBLE keeps each retained viewport laid out while another page is on top.
-            list.visibility = if (page == GroupPickerNavigation.Page.Configuration) View.VISIBLE else View.INVISIBLE
-            tagList.visibility = if (page == GroupPickerNavigation.Page.Tags) View.VISIBLE else View.INVISIBLE
-            memberList.visibility = if (page is GroupPickerNavigation.Page.Members) View.VISIBLE else View.INVISIBLE
+            header.bind(GroupPickerNavigation.Page.Configuration, null)
+            tagHeader.bind(GroupPickerNavigation.Page.Tags, null)
+            memberHeader.bind(page, tag?.name)
+            val previous = renderedPage
+            if (previous != page) {
+                // Reuse the project's shared full-width transition. Both pages are REAL views,
+                // just like ▶ submenus; no crossfade/snapshot and neither list is rebuilt.
+                pageSlide.cancel()
+                renderedPage = page
+                val outgoing = pageView(previous)
+                val incoming = pageView(page)
+                if (popup.isShowing && incoming !== outgoing) {
+                    outgoing.visibility = View.VISIBLE
+                    incoming.visibility = View.VISIBLE
+                    incoming.bringToFront()
+                    val depth = { value: GroupPickerNavigation.Page -> when (value) {
+                        GroupPickerNavigation.Page.Configuration -> 0
+                        GroupPickerNavigation.Page.Tags -> 1
+                        is GroupPickerNavigation.Page.Members -> 2
+                    } }
+                    val motion = if (depth(page) > depth(previous)) R.animator.page_slide_forward
+                        else R.animator.page_slide_backward
+                    val exit = pageSlide.create(outgoing, false, motion)
+                    val enter = pageSlide.create(incoming, true, motion)
+                    exit?.start()
+                    enter?.start()
+                } else updatePageVisibility()
+            } else if (!pageSlide.isRunning) updatePageVisibility()
             val count = when (page) {
                 GroupPickerNavigation.Page.Configuration -> adapter.itemCount
                 GroupPickerNavigation.Page.Tags -> tagAdapter.itemCount
                 is GroupPickerNavigation.Page.Members -> memberAdapter.itemCount
             }
+            val frame = (pageView(page) as LinearLayout).getChildAt(1) as FrameLayout
+            (empty.parent as? ViewGroup)?.let { if (it !== frame) it.removeView(empty) }
+            if (empty.parent == null) frame.addView(empty, FrameLayout.LayoutParams(-1, -1))
             empty.visibility = if (count == 0) View.VISIBLE else View.GONE
             empty.setText(when {
                 page == GroupPickerNavigation.Page.Configuration -> R.string.jump_hint_none
@@ -979,15 +1070,22 @@ internal class TopBarController(
 
         private fun resizePage() {
             // Root size remains exactly the original row count cap plus the fixed header.
-            header.measure(View.MeasureSpec.makeMeasureSpec(popup.width, View.MeasureSpec.EXACTLY),
+            val title = when (navigation.page) {
+                GroupPickerNavigation.Page.Configuration -> header
+                GroupPickerNavigation.Page.Tags -> tagHeader
+                is GroupPickerNavigation.Page.Members -> memberHeader
+            }
+            title.measure(View.MeasureSpec.makeMeasureSpec(popup.width, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
             val count = when (navigation.page) {
                 GroupPickerNavigation.Page.Configuration -> adapter.itemCount
                 GroupPickerNavigation.Page.Tags -> tagAdapter.itemCount
                 is GroupPickerNavigation.Page.Members -> memberAdapter.itemCount
             }.coerceAtLeast(1)
-            val headerHeight = if (header.visibility == View.GONE) 0 else header.measuredHeight
-            val desired = rowHeight.toLong() * count + headerHeight + list.paddingTop +
+            val headerHeight = if (title.visibility == View.GONE) 0 else title.measuredHeight
+            // Keep retained root viewport geometry stable while a shorter child page is shown.
+            val rows = maxOf(count, adapter.itemCount).coerceAtLeast(1)
+            val desired = rowHeight.toLong() * rows + headerHeight + list.paddingTop +
                 list.paddingBottom + container.paddingTop + container.paddingBottom
             val height = desired.coerceAtMost(availableHeight.toLong()).coerceAtLeast(1).toInt()
             if (popup.isShowing) {
@@ -1010,37 +1108,86 @@ internal class TopBarController(
             }
         }
 
+        private fun awaitTagSettle() {
+            tagList.removeCallbacks(settleTags)
+            if (!closed) tagList.postOnAnimation(settleTags)
+        }
+
+        private fun persistTags(ids: List<Long>) {
+            tagSaves++
+            val predecessor = pickerTagWriteTail
+            // Do not cancel accepted writes on close: one settled gesture is one durable write.
+            val job = runOnIoDispatcher {
+                var error: Exception? = null
+                try { predecessor?.join(); TagGroupStore.reorder(ids) }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { error = e; Logs.w(e) }
+                onMainDispatcher {
+                    tagSaves--
+                    if (error != null) showFailure()
+                    if (!closed) { tagRefreshNeeded = true; awaitTagSettle() }
+                }
+            }
+            tagWriteTail = job
+            pickerTagWriteTail = job
+        }
+
         private fun requestTagRefresh(seedSelection: Boolean = false) {
             if (closed) return
+            if (tagDrag.isDragging || tagList.isSettling || pendingTagOrder != null || tagSaves > 0) {
+                tagRefreshNeeded = true
+                if (!tagDrag.isDragging && tagSaves == 0) awaitTagSettle()
+                return
+            }
+            tagRefreshNeeded = false
             val generation = ++tagGeneration
             val page = navigation.page
             tagsRefreshing?.cancel()
             tagsRefreshing = runOnIoDispatcher {
                 try {
+                    pickerTagWriteTail?.join()
                     val revision = TagGroupStore.changes.value
+                    val deleteRevision = PendingGroupDeletes.changes.value
                     var tags = tagPickerTags(TagGroupStore.tags())
+                    val existingGroups = SagerDatabase.groupDao.allGroups().asSequence()
+                        .filterNot { PendingGroupDeletes.contains(it.id) }.map { it.id }.toSet()
+                    val memberships = tags.associate { it.id to TagGroupStore.members(it.id) }
+                    val memberCounts = memberships.mapValues { (_, ids) -> ids.count { it in existingGroups }.toLong() }
                     val current = (page as? GroupPickerNavigation.Page.Members)?.let { TagGroupStore.get(it.tagId) }
-                    val ids = if (current != null) TagGroupStore.members(current.id) else emptySet()
+                    val ids = if (current != null) memberships[current.id].orEmpty() else emptySet()
                     if (page is GroupPickerNavigation.Page.Members && current == null) tags = tags.filterNot { it.id == page.tagId }
                     onMainDispatcher {
                         if (closed || generation != tagGeneration || navigation.page != page) return@onMainDispatcher
-                        if (revision != TagGroupStore.changes.value) {
+                        if (revision != TagGroupStore.changes.value || deleteRevision != PendingGroupDeletes.changes.value) {
                             requestTagRefresh(seedSelection)
+                            return@onMainDispatcher
+                        }
+                        if (tagDrag.isDragging || tagList.isSettling || pendingTagOrder != null || tagSaves > 0) {
+                            tagRefreshNeeded = true
+                            if (!tagDrag.isDragging && tagSaves == 0) awaitTagSettle()
                             return@onMainDispatcher
                         }
                         tagsLoaded = true
                         tagsFailed = false
                         tagRows = tags
-                        tagAdapter.replace(tags, tagList)
+                        val restoringTags = tagAdapter.itemCount == 0
+                        tagAdapter.replace(tags, tagList, memberCounts)
+                        if (restoringTags) tagViewport?.restore(tagList, tagAdapter.ids)
+                        pickerMemberViewports.keys.retainAll(tags.map { it.id }.toSet())
                         if (navigation.reconcile(tags)) {
+                            restoringMembers = false
                             renderPage()
                             tagViewport?.restore(tagList, tagAdapter.ids)
                             return@onMainDispatcher
                         }
                         memberIds = ids
-                        val seed = seedSelection || memberNeedsSelection
+                        val memberId = (navigation.page as? GroupPickerNavigation.Page.Members)?.tagId
+                        val remembered = memberId?.let { pickerMemberViewports[it] }
+                        val seed = (seedSelection || memberNeedsSelection || restoringMembers) && remembered == null
                         memberNeedsSelection = false
                         refreshMemberRows(seed)
+                        if (restoringMembers && remembered != null) remembered.restore(memberList, memberAdapter.ids)
+                        restoringMembers = false
                         renderPage() // rename updates third-level title immediately
                     }
                 } catch (e: CancellationException) {
@@ -1220,7 +1367,17 @@ internal class TopBarController(
 
         fun close() {
             if (closed) return
+            rememberViewport()
             closed = true
+            pageSlide.cancel()
+            tagList.removeCallbacks(settleTags)
+            tagList.cancelDrag = null
+            tagAdapter.startDrag = null
+            // clearView and close may both arrive. Shared callback snapshots are idempotent.
+            tagDrag.close()
+            pendingTagOrder?.let { pendingTagOrder = null; persistTags(it) }
+            tagList.itemAnimator?.endAnimations()
+            tagTouch.attachToRecyclerView(null)
             GroupManager.removeListener(this)
             list.removeCallbacks(settleRefresh)
             refreshing?.cancel()

@@ -40,7 +40,6 @@ class UndoSnackbarManager<in T>(
         val count = recycleBin.size
         activity.snackbar(activity.resources.getQuantityString(R.plurals.removed, count, count))
             .apply {
-                duration = 5000
                 addCallback(removedCallback)
                 setAction(R.string.undo) {
                     val actions = recycleBin.reversed().toList()

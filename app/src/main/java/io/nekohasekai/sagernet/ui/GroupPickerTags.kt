@@ -1,9 +1,14 @@
 package io.nekohasekai.sagernet.ui
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
+import android.text.Spannable
+import android.text.SpannableString
 import android.text.TextUtils
+import android.text.style.ForegroundColorSpan
+import android.view.MotionEvent
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -131,53 +136,131 @@ internal class GroupPickerHeader(
     }
 }
 
-/** Second level is name only: no counts, edit actions or root reorder handles. */
+/** Second level: member GROUP counts, with the same inline handle/recovery as root rows. */
+@SuppressLint("ClickableViewAccessibility")
 internal class TagPickerAdapter(
     private val context: Context,
     private val color: Int,
     private val card: () -> Drawable,
     private val onClick: (Long) -> Unit,
-) : RecyclerView.Adapter<TagPickerAdapter.Holder>() {
-    private var rows: List<TagGroup> = emptyList()
-    val ids: List<Long> get() = rows.map { it.id }
-    class Holder(val label: TextView) : RecyclerView.ViewHolder(label) { var tagId = RecyclerView.NO_ID }
+    private val secondaryColor: Int = color,
+) : RecyclerView.Adapter<TagPickerAdapter.Holder>(), GroupPickerReorderAdapter {
+    private val rows = ArrayList<TagGroup>()
+    private var counts: Map<Long, Long> = emptyMap()
+    private var recycler: RecyclerView? = null
+    private var suppressClick = false
+    var dragging = false
+        private set
+    var startDrag: ((Holder) -> Unit)? = null
+    override val ids: List<Long> get() = rows.map { it.id }
+    class Holder(val row: LinearLayout, val nameCard: LinearLayout,
+                 val label: TextView, val handle: TextView) : RecyclerView.ViewHolder(row) {
+        var tagId = RecyclerView.NO_ID
+    }
     init { setHasStableIds(true) }
     override fun getItemCount() = rows.size
     override fun getItemId(position: Int) = rows[position].id
+    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
+        super.onAttachedToRecyclerView(recyclerView)
+        recycler = recyclerView
+    }
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        recycler = null
+        super.onDetachedFromRecyclerView(recyclerView)
+    }
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
         fun dp(value: Int) = (value * context.resources.displayMetrics.density).toInt()
-        val holder = Holder(TextView(context).apply {
+        val label = TextView(context).apply {
             textSize = 15f
             setTextColor(color)
-            gravity = Gravity.CENTER_VERTICAL
             setSingleLine(true)
             ellipsize = TextUtils.TruncateAt.END
-            minHeight = dp(48)
-            setPadding(dp(14), dp(10), dp(14), dp(10))
-            background = card()
+            setPadding(0, dp(10), 0, dp(10))
+            isLongClickable = false
+        }
+        val handle = TextView(context).apply {
+            text = "≡"
+            textSize = 22f
+            setTextColor(secondaryColor)
+            gravity = Gravity.CENTER
+            contentDescription = context.getString(R.string.group_reorder_handle)
+            isClickable = true
             isFocusable = true
-            layoutParams = RecyclerView.LayoutParams(-1, -2).apply {
-                leftMargin = dp(12); rightMargin = dp(12)
-                topMargin = dp(2); bottomMargin = dp(2)
+            isLongClickable = false
+        }
+        val nameCard = LinearLayout(context).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), 0, dp(2), 0)
+            background = card()
+            addView(label, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(handle, LinearLayout.LayoutParams(dp(48), dp(48)))
+        }
+        val row = LinearLayout(context).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(2), dp(12), dp(2))
+            isFocusable = true
+            isLongClickable = false
+            layoutParams = RecyclerView.LayoutParams(-1, -2)
+            addView(nameCard, LinearLayout.LayoutParams(-1, -2))
+        }
+        val holder = Holder(row, nameCard, label, handle)
+        val click = View.OnClickListener {
+            if (!dragging && !suppressClick && rows.any { it.id == holder.tagId }) onClick(holder.tagId)
+        }
+        row.setOnClickListener(click)
+        label.setOnClickListener(click)
+        val touch = View.OnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN && !dragging) suppressClick = false
+            false
+        }
+        row.setOnTouchListener(touch)
+        label.setOnTouchListener(touch)
+        handle.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                suppressClick = true
+                if (holder.bindingAdapterPosition != RecyclerView.NO_POSITION) startDrag?.invoke(holder)
             }
-        })
-        holder.label.setOnClickListener {
-            if (rows.any { it.id == holder.tagId }) onClick(holder.tagId)
+            true // includes UP after clearView; never opens the tag at the end of a drag
         }
         return holder
     }
     override fun onBindViewHolder(holder: Holder, position: Int) {
-        holder.tagId = rows[position].id
-        holder.label.text = rows[position].name
+        val tag = rows[position]
+        holder.tagId = tag.id
+        val full = "${tag.name}·${counts[tag.id] ?: 0L}"
+        holder.label.text = SpannableString(full).apply {
+            setSpan(ForegroundColorSpan(secondaryColor), tag.name.length, full.length,
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
     }
-    fun replace(tags: List<TagGroup>, recycler: RecyclerView) {
+    fun replace(tags: List<TagGroup>, recycler: RecyclerView,
+                memberCounts: Map<Long, Long> = counts) {
+        check(!dragging)
         val fresh = tagPickerTags(tags)
-        if (rows == fresh) return
+        if (rows == fresh && counts == memberCounts) return
         val viewport = pickerViewport(recycler, ids)
-        rows = fresh
+        rows.clear()
+        rows.addAll(fresh)
+        counts = memberCounts
         notifyDataSetChanged()
         viewport?.restore(recycler, ids)
     }
+    override fun move(from: Int, to: Int): Boolean {
+        if (from == to || from !in rows.indices || to !in rows.indices) return false
+        rows.add(to, rows.removeAt(from))
+        notifyItemMoved(from, to)
+        return true
+    }
+    override fun restore(ids: List<Long>) {
+        GroupOrderStore.mergeOrder(this.ids, ids).forEachIndexed { to, id ->
+            val from = rows.indexOfFirst { it.id == id }
+            if (from != to) move(from, to)
+        }
+    }
+    override fun prepareDrag(holder: RecyclerView.ViewHolder) {
+        recycler?.itemAnimator?.endAnimation(holder)
+    }
+    override fun updateDraggingState(value: Boolean) { dragging = value }
 }
 
 /** Stable-ID + exact decorated offset survives rename/member changes and removed anchors. */

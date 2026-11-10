@@ -21,6 +21,15 @@ import androidx.recyclerview.widget.RecyclerView
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.ProxyGroup
 
+/** Shared stable-ID move contract; root and quick-tag gestures have identical recovery rules. */
+internal interface GroupPickerReorderAdapter {
+    val ids: List<Long>
+    fun move(from: Int, to: Int): Boolean
+    fun restore(ids: List<Long>)
+    fun prepareDrag(holder: RecyclerView.ViewHolder)
+    fun updateDraggingState(value: Boolean)
+}
+
 /** Same move/recovery timing as the group page, without change cross-fades/recycled holders. */
 internal fun groupPickerItemAnimator() = DefaultItemAnimator().apply {
     supportsChangeAnimations = false
@@ -50,7 +59,7 @@ internal class GroupPickerAdapter(
     private val textColor: Int,
     private val secondaryColor: Int,
     private val onClick: (Long) -> Unit,
-) : RecyclerView.Adapter<GroupPickerAdapter.Holder>() {
+) : RecyclerView.Adapter<GroupPickerAdapter.Holder>(), GroupPickerReorderAdapter {
     private val rows = ArrayList(groups)
     private val counts = HashMap<Long, Long>()
     private var recycler: GroupPickerRecyclerView? = null
@@ -82,7 +91,7 @@ internal class GroupPickerAdapter(
     var reorderable = true
     var dragging = false
         private set
-    val ids: List<Long> get() = rows.map { it.id }
+    override val ids: List<Long> get() = rows.map { it.id }
 
     init {
         setHasStableIds(true)
@@ -196,7 +205,7 @@ internal class GroupPickerAdapter(
         }
     }
 
-    fun move(from: Int, to: Int): Boolean {
+    override fun move(from: Int, to: Int): Boolean {
         if (from == to || from !in rows.indices || to !in rows.indices) return false
         rows.add(to, rows.removeAt(from))
         notifyItemMoved(from, to)
@@ -210,7 +219,7 @@ internal class GroupPickerAdapter(
         notifyDataSetChanged()
     }
 
-    fun restore(ids: List<Long>) {
+    override fun restore(ids: List<Long>) {
         // Cancellation rolls back through moves, not a full invalidation during recovery.
         GroupOrderStore.mergeOrder(this.ids, ids).forEachIndexed { to, id ->
             val from = rows.indexOfFirst { it.id == id }
@@ -227,13 +236,13 @@ internal class GroupPickerAdapter(
         }
     }
 
-    fun prepareDrag(holder: RecyclerView.ViewHolder) {
+    override fun prepareDrag(holder: RecyclerView.ViewHolder) {
         // ItemTouchHelper owns the selected row's translation; do not let a neighbour's
         // previous move animator keep writing to it after a quick second handle-down.
         recycler?.itemAnimator?.endAnimation(holder)
     }
 
-    fun updateDraggingState(value: Boolean) {
+    override fun updateDraggingState(value: Boolean) {
         dragging = value
         // No end-of-drag range rebind: it would cancel a still-running neighbour move.
         recycler?.removeCallbacks(flushCounts)
@@ -243,7 +252,7 @@ internal class GroupPickerAdapter(
 
 /** One immutable ID snapshot per gesture, committed exactly once on clearView (or dismiss). */
 internal class GroupPickerDragCallback(
-    private val adapter: GroupPickerAdapter,
+    private val adapter: GroupPickerReorderAdapter,
     private val commit: (List<Long>) -> Unit,
     private val cancelled: () -> Unit,
     private val settled: () -> Unit,

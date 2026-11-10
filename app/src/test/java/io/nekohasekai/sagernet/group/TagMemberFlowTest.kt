@@ -66,7 +66,7 @@ class TagMemberFlowTest {
         finally { PendingGroupDeletes.unmark(listOf(73001L)) }
         assertFalse(PendingGroupDeletes.contains(73001L))
     }
-    @Test fun integrationUsesExplicitAtomicTagCreationAndScopedUpdatesAndFiveSecondUndo() {
+    @Test fun integrationUsesExplicitAtomicTagCreationAndScopedUpdatesAndDefaultUndo() {
         fun source(path:String)=File("src/main/java/io/nekohasekai/sagernet/$path").takeIf{it.exists()}?.readText()
             ?:File("app/src/main/java/io/nekohasekai/sagernet/$path").readText()
         val fragment=source("ui/GroupFragment.kt")
@@ -76,6 +76,10 @@ class TagMemberFlowTest {
         assertTrue(fragment.contains("TagMemberPolicy.visible"))
         assertTrue(fragment.contains("requestExitTagSearch()"))
         assertTrue(fragment.contains("PendingGroupDeletes.mark(group.id)"))
-        assertTrue(source("widget/UndoSnackbarManager.kt").contains("duration = 5000"))
+        assertFalse(source("widget/UndoSnackbarManager.kt").contains("duration = 5000"))
+        assertFalse(fragment.contains("setDuration(5000)"))
+        val add = fragment.substringAfter("R.id.action_new_group ->").substringBefore("R.id.action_update_all ->")
+        assertTrue(add.contains("openTaggedGroupSettings()"))
+        assertFalse(add.contains("createGroupInTag"))
     }
 }

@@ -27,7 +27,6 @@ import io.nekohasekai.sagernet.widget.ListListener
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -44,7 +43,6 @@ class TagGroupFragment : ToolbarFragment(R.layout.layout_tag_group) {
     private var pendingScrollRestore = false
     private var refreshJob: Job? = null
     private var operationJob: Job? = null
-    private var undoTimer: Job? = null
     private var undoSnackbar: Snackbar? = null
     private var confirmation: androidx.appcompat.app.AlertDialog? = null
     private var viewGeneration = 0
@@ -60,12 +58,10 @@ class TagGroupFragment : ToolbarFragment(R.layout.layout_tag_group) {
         const val ARG_TAG_ID = "tag_id"
         const val ARG_TAG_EDIT = "tag_edit"
         private const val STATE_SCROLL = "tag_group_scroll"
-        internal const val UNDO_DURATION_MS = 5_000L
     }
 
     private data class Row(val tag: TagGroup, val count: Int)
-    private data class PendingUndo(val name: String, val restore: () -> Unit,
-        val expires: Long = SystemClock.elapsedRealtime() + UNDO_DURATION_MS)
+    private data class PendingUndo(val name: String, val restore: () -> Unit)
     private var pendingUndo: PendingUndo? = null
 
     override fun resetScrollState() = Unit
@@ -93,6 +89,7 @@ class TagGroupFragment : ToolbarFragment(R.layout.layout_tag_group) {
                 else -> false
             }
         }
+        ToolbarIconPalette.apply(toolbar, requireContext())
         backCallback = object : OnBackPressedCallback(!isHidden) {
             override fun handleOnBackPressed() = returnToGroups()
         }.also { host.onBackPressedDispatcher.addCallback(viewLifecycleOwner, it) }
@@ -114,7 +111,6 @@ class TagGroupFragment : ToolbarFragment(R.layout.layout_tag_group) {
                 }
             }
         }
-        pendingUndo?.takeIf { it.expires > SystemClock.elapsedRealtime() }?.let(::showUndo)
     }
 
     override fun onResume() {
@@ -130,12 +126,9 @@ class TagGroupFragment : ToolbarFragment(R.layout.layout_tag_group) {
             captureScroll()
             confirmation?.dismiss()
             confirmation = null
-            undoSnackbar?.dismiss()
-            undoSnackbar = null
-            undoTimer?.cancel()
+            dismissUndo()
         } else {
             requestRefresh()
-            pendingUndo?.takeIf { it.expires > SystemClock.elapsedRealtime() }?.let(::showUndo)
         }
     }
 
@@ -188,8 +181,8 @@ class TagGroupFragment : ToolbarFragment(R.layout.layout_tag_group) {
 
     internal fun onNameSaved(renamed: Boolean) {
         requestRefresh()
-        showMessage(if (renamed) R.string.tag_renamed else R.string.tag_created)
-        pendingUndo?.takeIf { it.expires > SystemClock.elapsedRealtime() }?.let(::showUndo)
+        // A create (even with the deleted name) must not replace/restart an active undo bar.
+        if (pendingUndo == null) showMessage(if (renamed) R.string.tag_renamed else R.string.tag_created)
     }
 
     private fun showNameDialog(tag: TagGroup? = null) {
@@ -235,6 +228,7 @@ class TagGroupFragment : ToolbarFragment(R.layout.layout_tag_group) {
         runOperation {
             val record = withContext(Dispatchers.IO) { TagGroupStore.delete(tag.id) }
             if (record != null) {
+                dismissUndo()
                 val undo = PendingUndo(tag.name, record::restore)
                 pendingUndo = undo
                 showUndo(undo)
@@ -250,47 +244,53 @@ class TagGroupFragment : ToolbarFragment(R.layout.layout_tag_group) {
     }
 
     private fun showUndo(undo: PendingUndo) {
-        val host = activity as? MainActivity ?: return
-        if (view == null || isHidden || undo.expires <= SystemClock.elapsedRealtime()) return
-        undoTimer?.cancel()
-        undoSnackbar?.dismiss()
-        val bar = host.snackbar(getString(R.string.tag_deleted, undo.name))
-            .setDuration((undo.expires - SystemClock.elapsedRealtime()).toInt())
-            .setAction(R.string.tag_undo) {
-                if (pendingUndo !== undo || SystemClock.elapsedRealtime() > undo.expires) return@setAction
-                if (busy) { showUndo(undo); return@setAction }
-                undoTimer?.cancel()
-                undoSnackbar = null
-                pendingUndo = null // One operation, one complete restore; no repeat-click race.
-                runOperation {
-                    try {
-                        withContext(Dispatchers.IO) { undo.restore() }
-                        showMessage(R.string.tag_restored)
-                    } catch (failure: Exception) {
-                        if (failure is CancellationException) throw failure
-                        pendingUndo = undo
-                        showUndo(undo) // Store restore failures remain retryable within the window.
-                        throw failure
-                    }
-                }
-            }
-        undoSnackbar = bar
-        bar.show()
-        undoTimer = viewLifecycleOwner.lifecycleScope.launch {
-            while (pendingUndo === undo && undoSnackbar === bar) {
-                val left = undo.expires - SystemClock.elapsedRealtime()
-                if (left <= 0L) break
-                bar.setText(getString(R.string.tag_undo_countdown, undo.name, (left + 999L) / 1000L))
-                delay(minOf(1000L, left))
-            }
+        val host = activity as? MainActivity
+        if (host == null || view == null || isHidden || host.isFinishing || host.isDestroyed) {
             if (pendingUndo === undo) pendingUndo = null
-            if (undoSnackbar === bar) { bar.dismiss(); undoSnackbar = null }
+            return
         }
+        // The original Neko snackbar owns the window (LENGTH_LONG, including accessibility).
+        // Never start a second timer or replay the bar after hide/recreation/name changes.
+        val bar = host.snackbar(getString(R.string.tag_deleted, undo.name))
+        undoSnackbar = bar
+        bar.setAction(R.string.tag_undo) {
+            if (pendingUndo !== undo || undoSnackbar !== bar) return@setAction
+            pendingUndo = null // Consume before IO: one complete store restore, no repeat-click race.
+            undoSnackbar = null
+            if (busy) return@setAction
+            runOperation {
+                withContext(Dispatchers.IO) { undo.restore() }
+                showMessage(R.string.tag_restored)
+            }
+        }.addCallback(object : Snackbar.Callback() {
+            override fun onDismissed(transientBottomBar: Snackbar?, event: Int) {
+                // An old bar may finish dismissing after a newer delete already replaced it.
+                if (undoSnackbar !== transientBottomBar) return
+                undoSnackbar = null
+                if (event != DISMISS_EVENT_ACTION && pendingUndo === undo) pendingUndo = null
+            }
+        })
+        updateUndoAction()
+        bar.show()
+    }
+
+    private fun updateUndoAction() {
+        undoSnackbar?.view?.findViewById<View>(com.google.android.material.R.id.snackbar_action)
+            ?.isEnabled = !busy
+    }
+
+    private fun dismissUndo() {
+        // Close synchronously as Material's dismissal callback can arrive after view teardown.
+        pendingUndo = null
+        val bar = undoSnackbar
+        undoSnackbar = null
+        bar?.dismiss()
     }
 
     private fun runOperation(block: suspend () -> Unit) {
         if (busy || view == null) return
         busy = true
+        updateUndoAction()
         val token = viewGeneration
         operationJob = viewLifecycleOwner.lifecycleScope.launch {
             try {
@@ -302,6 +302,7 @@ class TagGroupFragment : ToolbarFragment(R.layout.layout_tag_group) {
             } finally {
                 if (token == viewGeneration && view != null) {
                     busy = false
+                    updateUndoAction()
                     requestRefresh()
                 }
             }
@@ -438,10 +439,7 @@ class TagGroupFragment : ToolbarFragment(R.layout.layout_tag_group) {
         viewGeneration++
         confirmation?.dismiss()
         confirmation = null
-        undoTimer?.cancel()
-        undoTimer = null
-        undoSnackbar?.dismiss()
-        undoSnackbar = null
+        dismissUndo()
         refreshJob?.cancel()
         refreshJob = null
         operationJob?.cancel()

@@ -96,7 +96,7 @@ class GroupPickerTagsTest {
         } finally { activity.pause().stop().destroy() }
     }
 
-    @Test fun tagNamesOnlyUseStableIdsAndRemovedHoldersCannotOpenWrongTags() {
+    @Test fun tagCountsUseStableIdsAndRemovedHoldersCannotOpenWrongTags() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup()
         try {
             val context = activity.get()
@@ -104,17 +104,20 @@ class GroupPickerTagsTest {
             val clicked = ArrayList<Long>()
             val adapter = TagPickerAdapter(context, Color.BLACK, { ColorDrawable(Color.GRAY) }, { clicked += it })
             recycler.adapter = adapter
-            adapter.replace(listOf(TagGroup(91, "Work", 2), TagGroup(72, "Flower", 1)), recycler)
+            adapter.replace(listOf(TagGroup(91, "Work", 2), TagGroup(72, "Flower", 1)), recycler,
+                mapOf(72L to 3L, 91L to 9L))
             assertEquals(listOf(72L, 91L), adapter.ids)
             val holder = adapter.onCreateViewHolder(recycler, 0)
             adapter.onBindViewHolder(holder, 0)
-            assertEquals("Flower", holder.label.text.toString())
+            assertEquals("Flower·3", holder.label.text.toString())
+            assertEquals("≡", holder.handle.text.toString())
+            assertSame(holder.nameCard, holder.handle.parent)
             assertFalse(holder.label.isLongClickable)
             adapter.replace(listOf(TagGroup(72, "Renamed", 3), TagGroup(91, "Work", 1)), recycler)
             holder.label.performClick()
             assertEquals(listOf(72L), clicked)
             adapter.onBindViewHolder(holder, 1)
-            assertEquals("Renamed", holder.label.text.toString())
+            assertEquals("Renamed·3", holder.label.text.toString())
             adapter.replace(listOf(TagGroup(91, "Work", 1)), recycler)
             holder.label.performClick()
             assertEquals(listOf(72L), clicked)
