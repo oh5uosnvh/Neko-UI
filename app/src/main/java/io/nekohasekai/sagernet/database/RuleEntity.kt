@@ -25,6 +25,18 @@ data class RuleEntity(
     var protocol: String = "",
     @ColumnInfo(name = "ruleset", defaultValue = "")
     var ruleset: String = "",
+    @ColumnInfo(name = "builtinKey", defaultValue = "")
+    var builtinKey: String = "",
+    @ColumnInfo(name = "sourceUrl", defaultValue = "")
+    var sourceUrl: String = "",
+    @ColumnInfo(name = "subscriptionState", defaultValue = "")
+    var subscriptionState: String = "",
+    @ColumnInfo(name = "lastUpdateError", defaultValue = "")
+    var lastUpdateError: String = "",
+    @ColumnInfo(name = "cachedRuleCount", defaultValue = "0")
+    var cachedRuleCount: Int = 0,
+    @ColumnInfo(name = "skippedRuleCount", defaultValue = "0")
+    var skippedRuleCount: Int = 0,
     var outbound: Long = 0,
     var packages: Set<String> = emptySet(),
 ) : Parcelable {
@@ -33,26 +45,20 @@ data class RuleEntity(
         return name.takeIf { it.isNotBlank() } ?: "Rule $id"
     }
 
+    /**
+     * List cards intentionally expose only the kind and amount of configuration.
+     * The actual domains, IPs, ports and rule text remain available in RouteSettingsActivity.
+     */
     fun mkSummary(): String {
-        var summary = ""
-        if (config.isNotBlank()) summary += "[config]\n"
-        if (domains.isNotBlank()) summary += "$domains\n"
-        if (ip.isNotBlank()) summary += "$ip\n"
-        if (source.isNotBlank()) summary += "src ip: $source\n"
-        if (sourcePort.isNotBlank()) summary += "src port: $sourcePort\n"
-        if (port.isNotBlank()) summary += "dst port: $port\n"
-        if (network.isNotBlank()) summary += "network: $network\n"
-        if (protocol.isNotBlank()) summary += "protocol: $protocol\n"
-        if (ruleset.isNotBlank()) summary += "$ruleset\n"
-        if (packages.isNotEmpty()) summary += app.getString(
-            R.string.apps_message, packages.size
-        ) + "\n"
-        val lines = summary.trim().split("\n")
-        return if (lines.size > 3) {
-            lines.subList(0, 3).joinToString("\n", postfix = "\n...")
-        } else {
-            summary.trim()
+        if (packages.isNotEmpty()) return app.getString(R.string.apps_message, packages.size)
+        if (builtinKey.startsWith("remote_")) {
+            return if (cachedRuleCount > 0) app.getString(R.string.route_configured_rules, cachedRuleCount)
+            else app.getString(R.string.route_waiting_update)
         }
+        val count = listOf(config, domains, ip, source, sourcePort, port, network, protocol, ruleset)
+            .sumOf { value -> value.lineSequence().count { it.trim().isNotEmpty() } }
+        return if (count > 0) app.getString(R.string.route_configured_rules, count)
+        else app.getString(R.string.route_configured)
     }
 
     fun displayOutbound(): String {
@@ -71,8 +77,17 @@ data class RuleEntity(
         @Query("SELECT * from rules WHERE (packages != '') AND enabled = 1")
         fun checkVpnNeeded(): List<RuleEntity>
 
-        @Query("SELECT * FROM rules ORDER BY userOrder")
+        @Query("SELECT * FROM rules ORDER BY userOrder, id")
         fun allRules(): List<RuleEntity>
+
+        @Query("SELECT * FROM rules WHERE builtinKey != '' ORDER BY userOrder, id")
+        fun builtinRules(): List<RuleEntity>
+
+        @Query("SELECT * FROM rules WHERE builtinKey = :key LIMIT 1")
+        fun builtin(key: String): RuleEntity?
+
+        @Query("UPDATE rules SET userOrder = :order WHERE id = :id")
+        fun updateBuiltinOrder(id: Long, order: Long): Int
 
         @Query("SELECT * FROM rules WHERE enabled = :enabled ORDER BY userOrder")
         fun enabledRules(enabled: Boolean = true): List<RuleEntity>

@@ -22,7 +22,7 @@ class TagMemberSearchBar(private val toolbar: Toolbar, private val context: Cont
         setPadding(dp(6), 0, dp(6), 0)
     }
     private val ink = context.obtainStyledAttributes(intArrayOf(android.R.attr.textColorPrimary)).let {
-        it.getColor(0, -1).also { _ -> it.recycle() }
+        it.getColor(0, resolveColor(android.R.attr.textColorPrimary)).also { _ -> it.recycle() }
     }
     val back = icon(R.drawable.baseline_arrow_back_24)
     val search = SearchView(context).apply {
@@ -111,5 +111,12 @@ class TagMemberSearchBar(private val toolbar: Toolbar, private val context: Cont
         scaleType = ImageView.ScaleType.CENTER_INSIDE; isClickable = true; isFocusable = true
         contentDescription = context.getString(android.R.string.cancel)
     }
+    private fun resolveColor(attr: Int): Int {
+        val value = android.util.TypedValue()
+        return if (context.theme.resolveAttribute(attr, value, true)) {
+            if (value.resourceId != 0) context.getColor(value.resourceId) else value.data
+        } else 0xFF000000.toInt()
+    }
+
     private fun dp(v: Int) = (v * context.resources.displayMetrics.density + .5f).toInt()
 }

@@ -50,6 +50,10 @@ internal class CompactNavigationMenu(
         setColor(color)
         cornerRadius = dp(radius).toFloat()
     }
+
+    private fun selectedRound() = round(ColorUtils.blendARGB(surfaceColor, color(R.attr.colorPrimary, Color.GRAY), .10f), 10).apply {
+        setStroke(dp(1).coerceAtLeast(1), color(R.attr.colorPrimary, Color.GRAY))
+    }
     private fun color(attr: Int, fallback: Int): Int {
         val value = TypedValue()
         return if (context.theme.resolveAttribute(attr, value, true)) {
@@ -144,7 +148,7 @@ internal class CompactNavigationMenu(
                 background = StateListDrawable().apply {
                     addState(intArrayOf(android.R.attr.state_pressed), round(ColorUtils.blendARGB(surfaceColor, accent, .18f), 10))
                     addState(intArrayOf(android.R.attr.state_focused), round(ColorUtils.blendARGB(surfaceColor, accent, .14f), 10))
-                    addState(intArrayOf(android.R.attr.state_selected), round(ColorUtils.blendARGB(surfaceColor, accent, .10f), 10))
+                    addState(intArrayOf(android.R.attr.state_selected), selectedRound())
                     addState(intArrayOf(), round(Color.TRANSPARENT, 10))
                 }
                 setOnClickListener {

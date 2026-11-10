@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 
 @Database(
     entities = [ProxyGroup::class, ProxyEntity::class, RuleEntity::class, TagGroup::class, TagMembership::class],
-    version = 11,
+    version = 12,
     autoMigrations = [
         AutoMigration(from = 3, to = 4),
         AutoMigration(from = 4, to = 5),
@@ -48,6 +48,27 @@ abstract class SagerDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `groupOrderId` ON `proxy_entities` (`groupId`, `userOrder`, `id`)")
             }
         }
+        val MIGRATION_11_12_BUILTIN_ROUTES = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                fun add(name: String, type: String = "TEXT") {
+                    val columns = mutableSetOf<String>()
+                    db.query("PRAGMA table_info(`rules`)").use { c ->
+                        val i = c.getColumnIndex("name")
+                        while (c.moveToNext()) if (i >= 0) columns += c.getString(i)
+                    }
+                    if (name !in columns) db.execSQL(
+                        "ALTER TABLE `rules` ADD COLUMN `$name` $type NOT NULL DEFAULT ${if (type == "INTEGER") "0" else "''"}"
+                    )
+                }
+                add("builtinKey")
+                add("sourceUrl")
+                add("subscriptionState")
+                add("lastUpdateError")
+                add("cachedRuleCount", "INTEGER")
+                add("skippedRuleCount", "INTEGER")
+            }
+        }
+
         /** Additive only: root groups, profiles, subscriptions and rules are untouched. */
         val MIGRATION_10_11_TAG_GROUPS = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -62,7 +83,7 @@ abstract class SagerDatabase : RoomDatabase() {
         val instance by lazy {
             SagerNet.application.getDatabasePath(Key.DB_PROFILE).parentFile?.mkdirs()
             Room.databaseBuilder(SagerNet.application, SagerDatabase::class.java, Key.DB_PROFILE)
-                .addMigrations(MIGRATION_8_9_SAFE, MIGRATION_9_10_ORDER_INDEX, MIGRATION_10_11_TAG_GROUPS)
+                .addMigrations(MIGRATION_8_9_SAFE, MIGRATION_9_10_ORDER_INDEX, MIGRATION_10_11_TAG_GROUPS, MIGRATION_11_12_BUILTIN_ROUTES)
 //                .addMigrations(*SagerDatabase_Migrations.build())
                 .setJournalMode(JournalMode.TRUNCATE)
                 .allowMainThreadQueries()

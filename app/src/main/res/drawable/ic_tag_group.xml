@@ -1,4 +1,4 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:height="24dp" android:width="24dp" android:viewportWidth="24" android:viewportHeight="24">
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:height="24dp" android:width="24dp" android:viewportWidth="24" android:viewportHeight="24" android:tint="?attr/colorControlNormal">
   <!-- One-colour ink with transparent interior: tint cannot turn the label into a solid block. -->
   <path android:fillColor="#00000000" android:pathData="M4,4.4L20,4.4A2.2,2.2 0,0 1,22.2 6.6L22.2,17.4A2.2,2.2 0,0 1,20 19.6L4,19.6A2.2,2.2 0,0 1,1.8 17.4L1.8,6.6A2.2,2.2 0,0 1,4 4.4z" android:strokeColor="#FFFFFFFF" android:strokeWidth="2"/>
   <path android:fillColor="#FFFFFFFF" android:pathData="M6.3,12m-1.35,0a1.35,1.35 0,1 1,2.7 0a1.35,1.35 0,1 1,-2.7 0"/>

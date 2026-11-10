@@ -192,59 +192,68 @@ object ProfileManager {
         }
     }
 
-    suspend fun getRules(): List<RuleEntity> {
-        var rules = SagerDatabase.rulesDao.allRules()
-        if (rules.isEmpty() && !DataStore.rulesFirstCreate) {
-            DataStore.rulesFirstCreate = true
-            createRule(
-                RuleEntity(
-                    name = app.getString(R.string.route_opt_block_quic),
-                    port = "443",
-                    network = "udp",
-                    outbound = -2
-                )
-            )
-            createRule(
-                RuleEntity(
-                    name = app.getString(R.string.route_opt_block_ads),
-                    domains = "geosite:category-ads-all",
-                    outbound = -2
-                )
-            )
-            val fuckedCountry = mutableListOf("cn:中国")
-            if (Locale.getDefault().country != Locale.CHINA.country) {
-                // 非中文用户
-                fuckedCountry += "ir:Iran"
-                fuckedCountry += "ru:Russia"
-            }
-            for (c in fuckedCountry) {
-                val country = c.substringBefore(":")
-                val displayCountry = c.substringAfter(":")
-                //
-                if (country == "cn") createRule(
-                    RuleEntity(
-                        name = app.getString(R.string.route_play_store, displayCountry),
-                        domains = "domain:googleapis.cn\ndomain:xn--ngstr-lra8j.com\ndomain:xn--ngstr-cn-8za9o.com",
-                    ), false
-                )
-                createRule(
-                    RuleEntity(
-                        name = app.getString(R.string.route_bypass_domain, displayCountry),
-                        domains = "geosite:$country",
-                        outbound = -1
-                    ), false
-                )
-                createRule(
-                    RuleEntity(
-                        name = app.getString(R.string.route_bypass_ip, displayCountry),
-                        ip = "geoip:$country",
-                        outbound = -1
-                    ), false
-                )
-            }
-            rules = SagerDatabase.rulesDao.allRules()
+    /** Idempotently restores the fixed 19 resources without touching user-created routes. */
+    suspend fun ensureDefaultRoutes(reset: Boolean = false): List<RuleEntity> {
+        val dao = SagerDatabase.rulesDao
+        val existing = dao.allRules()
+        val byKey = existing.filter { it.builtinKey.isNotBlank() }.associateBy { it.builtinKey }.toMutableMap()
+        val legacy = existing.filter { it.builtinKey.isBlank() }.toMutableList()
+        val adoptedKeys = hashSetOf<String>()
+        val missingCatalogItem = DefaultRouteCatalog.items.any { item -> byKey[item.key] == null }
+        val restoreCatalogOrder = reset || missingCatalogItem
+        // Upgrade the five historical resources by stable content/name, never by position alone.
+        fun adopt(item: DefaultRouteCatalog.Item, predicate: (RuleEntity) -> Boolean) {
+            if (byKey[item.key] != null) return
+            val old = legacy.firstOrNull(predicate) ?: return
+            old.builtinKey = item.key
+            byKey[item.key] = old
+            adoptedKeys += item.key
+            legacy.remove(old)
         }
-        return rules
+        adopt(DefaultRouteCatalog.items[0]) { it.port == "443" && it.network == "udp" && it.outbound == -2L }
+        adopt(DefaultRouteCatalog.items[1]) { it.domains.contains("category-ads-all") && it.outbound == -2L }
+        adopt(DefaultRouteCatalog.items[2]) { it.domains.contains("googleapis.cn") }
+        adopt(DefaultRouteCatalog.items[17]) { it.domains.contains("geosite:cn") }
+        adopt(DefaultRouteCatalog.items[18]) { it.ip.contains("geoip:cn") }
+        val created = ArrayList<RuleEntity>()
+        SagerDatabase.instance.runInTransaction {
+            DefaultRouteCatalog.items.forEachIndexed { index, item ->
+                val rule = byKey[item.key] ?: DefaultRouteCatalog.defaults(index, item).also {
+                    it.id = dao.createRule(it)
+                    created += it
+                }
+                val isNewOrAdopted = rule.id == 0L || rule.builtinKey in adoptedKeys
+                // Names are fixed for new/adopted resources and on reset, but a normal
+                // reload does not unexpectedly overwrite a user's custom built-in label.
+                if (isNewOrAdopted || reset) rule.name = item.name
+                // Built-ins are enabled by default; reset also restores this state.
+                if (isNewOrAdopted || reset) rule.enabled = true
+                if (reset && item.remoteUrl == null) {
+                    rule.domains = item.domains
+                    rule.ip = item.ip
+                    rule.port = item.port
+                    rule.network = item.network
+                    rule.outbound = item.outbound
+                }
+                if (restoreCatalogOrder) rule.userOrder = index.toLong()
+                rule.builtinKey = item.key
+                rule.sourceUrl = item.remoteUrl.orEmpty()
+                if (item.remoteUrl != null) rule.ruleset = item.ruleset
+                // Preserve user-edited built-in conditions, but restore fixed subscription identity.
+                dao.updateRule(rule)
+            }
+            if (restoreCatalogOrder) {
+                legacy.sortedWith(compareBy<RuleEntity>({ it.userOrder }, { it.id })).forEachIndexed { index, rule ->
+                    rule.userOrder = (DefaultRouteCatalog.items.size + index).toLong()
+                    dao.updateRule(rule)
+                }
+            }
+        }
+        return dao.allRules()
+    }
+
+    suspend fun getRules(): List<RuleEntity> {
+        return ensureDefaultRoutes()
     }
 
 }

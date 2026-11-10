@@ -91,7 +91,9 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     private fun updateGroupSearchActions() {
         if (!::groupAdapter.isInitialized) return
         if (inTag && tagSearchActive) {
-            val matches = groupAdapter.searchMatches().count { it.id !in tagMemberIds }
+            // Keep the action available even when every hit is already classified;
+            // the popup then offers removal instead of silently doing nothing.
+            val matches = groupAdapter.searchMatches().size
             tagSearchBar?.render(tagManualMode, matches, selectedForClassification.size)
         } else groupSearchBar?.render(groupSearchQuery, groupAdapter.searchMatches().size,
             groupAdapter.customSelection, selectedForClassification.size)
@@ -372,13 +374,46 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 selectedForClassification.clear()
                 groupAdapter.customSelection = true
                 groupAdapter.applyFilter()
-            }, onClassify = {
-                mutateTagMembership(groupAdapter.searchMatches().map { it.id }, false)
-            }, onClose = ::requestExitTagSearch, onConfirm = {
+            }, onClassify = ::openTagClassificationChoice, onClose = ::requestExitTagSearch, onConfirm = {
                 mutateTagMembership(selectedForClassification.toList(), tagRemovalSelection)
             })
         }
         groupAdapter.applyFilter()
+    }
+
+    /** Search classification must be explicit: never add every hit without confirmation. */
+    private fun openTagClassificationChoice() {
+        val hits = groupAdapter.searchMatches()
+        if (hits.isEmpty()) return
+        val newMatches = hits.filter { it.id !in tagMemberIds }
+        val alreadyClassified = hits.filter { it.id in tagMemberIds }
+        val options = ArrayList<String>()
+        val actions = ArrayList<() -> Unit>()
+        if (newMatches.isNotEmpty()) {
+            options += getString(R.string.group_classify_confirm)
+            actions += { mutateTagMembership(newMatches.map { it.id }, false) }
+            options += getString(R.string.group_classify_custom)
+            actions += {
+                tagManualMode = true
+                tagRemovalSelection = false
+                selectedForClassification.clear()
+                groupAdapter.customSelection = true
+                updateGroupSearchActions()
+                groupAdapter.notifyDataSetChanged()
+            }
+        }
+        // A search hit that is already in this tag still opens the chooser, and can
+        // explicitly be removed instead of appearing to do nothing.
+        if (alreadyClassified.isNotEmpty()) {
+            options += getString(R.string.tag_member_remove_from_current)
+            actions += { mutateTagMembership(alreadyClassified.map { it.id }, true) }
+        }
+        options += getString(R.string.group_classify_cancel)
+        actions += {}
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.group_classify)
+            .setItems(options.toTypedArray()) { _, which -> actions[which]() }
+            .show()
     }
 
     private fun requestExitTagSearch() {

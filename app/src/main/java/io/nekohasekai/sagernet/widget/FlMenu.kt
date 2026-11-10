@@ -365,7 +365,9 @@ internal class FlMenuPopup(
                 addState(intArrayOf(android.R.attr.state_focused), round(pressedColor))
                 addState(intArrayOf(), round(Color.TRANSPARENT))
             }
-            if (item.isChecked) background = round(selectedColor)
+            // Checked choices retain the translucent theme fill, but also get a clear
+            // theme-colour perimeter so the active option remains obvious in both themes.
+            if (item.isChecked) background = selectedRound()
 
             item.icon?.constantState?.newDrawable()?.mutate()?.let {
                 DrawableCompat.setTint(it, if (item.isChecked) accentColor else titleColor)
@@ -416,6 +418,10 @@ internal class FlMenuPopup(
     private fun round(color: Int) = GradientDrawable().apply {
         setColor(color)
         cornerRadius = dp(12).toFloat()
+    }
+
+    private fun selectedRound() = round(selectedColor).apply {
+        setStroke(dp(1).coerceAtLeast(1), accentColor)
     }
 
     // ------------------------------------------------------------- page paging

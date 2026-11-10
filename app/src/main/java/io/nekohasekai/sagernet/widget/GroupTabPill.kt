@@ -27,9 +27,8 @@ class GroupTabPill(context: Context) : AppCompatTextView(context) {
     /** Test hook: which edge the distance fill grows from (true = right edge). */
     internal val fillFromRight: Boolean get() = surface.fromRight
     init {
-        val night = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK ==
-            android.content.res.Configuration.UI_MODE_NIGHT_YES
-        setTextColor(if (night) Color.WHITE else Color.BLACK)
+        // Resolve the active theme foreground instead of freezing black/white by night mode.
+        setTextColor(color(android.R.attr.textColorPrimary))
         background = surface
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
         setPadding(dp(14), dp(6), dp(14), dp(6))
