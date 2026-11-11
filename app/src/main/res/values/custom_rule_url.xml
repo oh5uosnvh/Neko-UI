@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="route_rule_url">Custom rule URL</string>
+    <string name="route_rule_url_hint">HTTP(S) Clash rule-provider YAML with a payload list. Save, then use Update rules. Downloaded domains/IPs are separate from manual conditions; failed updates retain the last good cache.</string>
+    <string name="route_remote_skipped"> · skipped %d</string>
+    <string name="route_remote_stale"> · update failed, retained cache</string>
+</resources>

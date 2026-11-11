@@ -696,6 +696,21 @@ internal class TopBarController(
 
     private fun reconcilePickerContext() {
         if (host.select) return
+        // A locked scope is the source of truth for every fresh open: start on
+        // that tag's Members page rather than reopening the last transient page.
+        val locked = host.currentLockedTagId()
+        if (locked != null) {
+            val live = try { TagGroupStore.get(locked) != null } catch (_: Exception) { false }
+            if (live) {
+                pickerNavigation.members(locked)
+                return
+            }
+            // Deletion fallback is deliberately the existing scope exit path;
+            // it clears the lock and returns the configuration pager to all groups.
+            host.exitTagScope()
+            pickerNavigation.configuration()
+            return
+        }
         val page = pickerNavigation.page as? GroupPickerNavigation.Page.Members ?: return
         val selected = DataStore.selectedGroup
         val stillInTag = try {
@@ -809,7 +824,9 @@ internal class TopBarController(
             { navigateConfiguration() }, { navigateTags() }, { backPage() })
         private val memberHeader = GroupPickerHeader(popupContext,
             themeColor(android.R.attr.textColorPrimary), { groupHeaderCard(it) },
-            { navigateConfiguration() }, { navigateTags() }, { backPage() })
+            { navigateConfiguration() }, { navigateTags() }, { backPage() },
+            lockedTagId = { host.currentLockedTagId() },
+            onLockedTap = { host.snackbar(R.string.tag_picker_locked_hint) })
         private fun pageView(title: GroupPickerHeader, recycler: RecyclerView) = LinearLayout(popupContext).apply {
             orientation = LinearLayout.VERTICAL
             // Real vertical measurement, not two overlapping MATCH_PARENT FrameLayout children.

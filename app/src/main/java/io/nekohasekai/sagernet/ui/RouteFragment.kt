@@ -221,9 +221,10 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 lifecycleScope.launch {
                     val failures = withContext(Dispatchers.IO) { RemoteRouteUpdater.updateAll() }
                     ruleAdapter.reload()
+                    if (isAdded) needReload()
                     if (failures.isNotEmpty() && isAdded) {
                         snackbar(getString(R.string.route_update_failed,
-                            failures.joinToString(", ") { it.first })).show()
+                            failures.joinToString("\n") { "${it.first}：${it.second}" })).show()
                     }
                 }
             }
@@ -429,12 +430,12 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                     showQuickOutbound(anchor, rule.id, rule.outbound)
                 }
                 // A failed/empty fixed subscription keeps its card and offers a direct retry.
-                if (rule.builtinKey.startsWith("remote_") && rule.subscriptionState == "waiting") {
+                if (rule.sourceUrl.isNotBlank() && rule.subscriptionState == "waiting") {
                     routeOutbound.text = getString(R.string.route_retry_update)
                     routeOutbound.setOnClickListener {
                         lifecycleScope.launch {
                             try {
-                                RemoteRouteUpdater.update(rule.builtinKey)
+                                RemoteRouteUpdater.updateRule(rule.id)
                                 ruleAdapter.reload()
                             } catch (_: Exception) {
                                 if (isAdded) snackbar(getString(R.string.route_update_failed, rule.displayName())).show()

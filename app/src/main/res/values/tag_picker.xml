@@ -8,4 +8,5 @@
     <string name="tag_picker_empty_members">No configuration groups</string>
     <string name="tag_picker_loading">Loading…</string>
     <string name="tag_picker_load_failed">Could not load tag groups</string>
+    <string name="tag_picker_locked_hint">Tag group locked ▶ long-press to unlock</string>
 </resources>

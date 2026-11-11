@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.TextUtils
@@ -17,6 +18,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import io.nekohasekai.sagernet.R
@@ -95,6 +97,8 @@ internal class GroupPickerHeader(
     configuration: () -> Unit,
     tags: () -> Unit,
     back: () -> Unit,
+    private val lockedTagId: () -> Long? = { null },
+    private val onLockedTap: () -> Unit = {},
 ) : LinearLayout(context) {
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private var boundTagId: Long? = null
@@ -132,6 +136,26 @@ internal class GroupPickerHeader(
         setColorFilter(color)
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
+    /** A deliberately compact, high-contrast marker: only the locked tag gets it. */
+    private val lockIndicator = TextView(context).apply {
+        text = "!"
+        textSize = 13f
+        setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+        setTextColor(android.graphics.Color.WHITE)
+        gravity = Gravity.CENTER
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(android.graphics.Color.RED)
+        }
+        contentDescription = context.getString(R.string.tag_picker_locked_hint)
+        isClickable = true
+        isFocusable = true
+        visibility = View.GONE
+        setOnClickListener {
+            Toast.makeText(context, context.getString(R.string.tag_picker_locked_hint), Toast.LENGTH_SHORT).show()
+            onLockedTap()
+        }
+    }
     private val backRow = LinearLayout(context).apply {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
@@ -141,13 +165,16 @@ internal class GroupPickerHeader(
         addView(SubmenuBackIcon(context, color), LayoutParams(dp(20), dp(24)))
         addView(icon, LayoutParams(dp(24), dp(24)).apply { marginStart = dp(8) })
         addView(title, LayoutParams(0, -2, 1f).apply { marginStart = dp(8) })
+        addView(lockIndicator, LayoutParams(dp(22), dp(22)).apply { marginStart = dp(8) })
         setOnClickListener { back() }
     }
     init {
         orientation = VERTICAL
         setPadding(dp(12), dp(4), dp(12), 0)
         minimumHeight = dp(52)
-        QuickLongPress(backRow) { view ->
+        // Only the title is lockable. The surrounding row keeps its existing
+        // short-click back action, including after a long-press is cancelled.
+        QuickLongPress(title) { view ->
             val id = boundTagId
             if (id == null) false else GroupPickerTagScopeBridge.onLongPress?.invoke(id, view) ?: false
         }
@@ -169,6 +196,9 @@ internal class GroupPickerHeader(
         tagsEntry.background = card(tagsEntry.isSelected)
         icon.visibility = if (members) View.VISIBLE else View.GONE
         title.text = tagName ?: context.getString(R.string.tag_picker_title)
+        val locked = members && boundTagId == lockedTagId()
+        lockIndicator.visibility = if (locked) View.VISIBLE else View.GONE
+        lockIndicator.contentDescription = context.getString(R.string.tag_picker_locked_hint)
         backRow.contentDescription = context.getString(R.string.tag_picker_back_to, title.text)
     }
 }

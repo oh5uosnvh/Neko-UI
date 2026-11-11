@@ -149,6 +149,7 @@ object Key {
     const val SERVER_PINNED_CERT_CHAIN_SHA256 = "serverPinnedCertChainSha256"
 
     const val ROUTE_NAME = "routeName"
+    const val ROUTE_RULE_URL = "routeRuleUrl"
     const val ROUTE_DOMAIN = "routeDomain"
     const val ROUTE_IP = "routeIP"
     const val ROUTE_PORT = "routePort"

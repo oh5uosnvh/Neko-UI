@@ -617,7 +617,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 activity.snackbar(R.string.group_classify_no_matches).show()
                 return
             }
-            val names = proposed.joinToString("\n") { "· ${it.displayName()}" }
+            val names = GroupClassification.previewText(proposed) { it.displayName() }
             MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.group_classify_preview_title)
                 .setMessage(getString(R.string.group_classify_preview_message, names))

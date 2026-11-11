@@ -406,8 +406,8 @@
     <string name="apps_message">%d 个应用</string>
     <string name="route_configured">已配置</string>
     <string name="route_waiting_update">等待更新</string>
-    <string name="route_update_builtin">更新内置规则</string>
-    <string name="route_update_failed">部分内置规则更新失败：%s</string>
+    <string name="route_update_builtin">更新规则</string>
+    <string name="route_update_failed">部分规则更新失败：%s</string>
     <string name="route_retry_update">重试更新</string>
     <string name="route_configured_rules">已配置 %d 条规则</string>
     <string name="route_builtin_play_store">中国 Play 商店规则</string>

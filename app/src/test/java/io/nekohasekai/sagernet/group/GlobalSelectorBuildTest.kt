@@ -46,6 +46,22 @@ class GlobalSelectorBuildTest {
         DataStore.remoteDns = "https://9.9.9.9/dns-query"
         assertNotEquals(ca.selectorFingerprint, buildConfig(b).selectorFingerprint)
     }
+    @Test fun customRemoteRulesReachRealBuilderWhilePendingSourceIsNotCatchAll() {
+        val a = node("A", "one")
+        DataStore.globalMode = false
+        val ready = RuleEntity(name = "Downloaded", enabled = true, domains = "full:manual.test",
+            sourceUrl = "https://example.com/r.yaml", remoteDomains = "domain:microsoft.com",
+            remoteIps = "192.0.2.0/24", cachedRuleCount = 2, outbound = -1)
+        val pending = RuleEntity(name = "Pending", enabled = true, sourceUrl = "https://example.com/p.yaml", outbound = -2)
+        env.database.rulesDao().createRule(ready)
+        env.database.rulesDao().createRule(pending)
+        val json = com.google.gson.JsonParser.parseString(buildConfig(a).config).asJsonObject
+        val rules = json.getAsJsonObject("route").getAsJsonArray("rules")
+        assertTrue(rules.any { it.toString().contains("microsoft.com") && it.toString().contains("192.0.2.0/24") })
+        assertTrue(rules.any { it.toString().contains("manual.test") })
+        assertFalse(rules.any { it.toString() == "{\"action\":\"reject\"}" })
+    }
+
     @Test fun changedMemberInvalidatesRunningPolicy() {
         val a = node("A", "one")
         val b = node("B", "two")

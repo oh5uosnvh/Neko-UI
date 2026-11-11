@@ -294,6 +294,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var serverPinnedCertChainSha256 by profileCacheStore.string(Key.SERVER_PINNED_CERT_CHAIN_SHA256)
 
     var routeName by profileCacheStore.string(Key.ROUTE_NAME)
+    var routeRuleUrl by profileCacheStore.string(Key.ROUTE_RULE_URL)
     var routeDomain by profileCacheStore.string(Key.ROUTE_DOMAIN)
     var routeIP by profileCacheStore.string(Key.ROUTE_IP)
     var routePort by profileCacheStore.string(Key.ROUTE_PORT)

@@ -60,6 +60,7 @@ class RouteSettingsActivity(
 
     fun RuleEntity.init() {
         DataStore.routeName = name
+        DataStore.routeRuleUrl = sourceUrl
         DataStore.serverConfig = config
         DataStore.routeDomain = domains
         DataStore.routeIP = ip
@@ -81,6 +82,13 @@ class RouteSettingsActivity(
 
     fun RuleEntity.serialize() {
         name = DataStore.routeName
+        val requestedUrl = DataStore.routeRuleUrl.trim()
+        if (sourceUrl != requestedUrl) {
+            sourceUrl = requestedUrl
+            remoteDomains = ""; remoteIps = ""
+            cachedRuleCount = 0; skippedRuleCount = 0; lastUpdateError = ""
+            subscriptionState = if (sourceUrl.isBlank()) "" else "waiting"
+        }
         config = DataStore.serverConfig
         domains = DataStore.routeDomain
         ip = DataStore.routeIP
@@ -116,6 +124,12 @@ class RouteSettingsActivity(
         addPreferencesFromResource(R.xml.route_preferences)
 
         editConfigPreference = findPreference(Key.SERVER_CONFIG)!!
+        findPreference<EditTextPreference>(Key.ROUTE_RULE_URL)?.apply {
+            setOnBindEditTextListener { edit ->
+                edit.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+                edit.hint = "https://example.com/rules.yaml"
+            }
+        }
     }
 
     override fun onResume() {
@@ -274,6 +288,19 @@ class RouteSettingsActivity(
             return
         }
 
+        val value = DataStore.routeRuleUrl.trim()
+        if (value.isNotBlank()) {
+            try {
+                DataStore.routeRuleUrl = io.nekohasekai.sagernet.database.RemoteRuleParser.url(value)
+            } catch (e: Exception) {
+                onMainDispatcher {
+                    MaterialAlertDialogBuilder(this@RouteSettingsActivity)
+                        .setTitle(R.string.route_rule_url).setMessage(e.message)
+                        .setPositiveButton(android.R.string.ok, null).show()
+                }
+                return
+            }
+        }
         val editingId = DataStore.editingId
         if (editingId == 0L) {
             if (intent.hasExtra(EXTRA_PACKAGE_NAME)) {

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="route_rule_url">自定义规则链接</string>
+    <string name="route_rule_url_hint">填写 HTTP(S) Clash 规则 YAML 链接（包含 payload 列表）。保存后点击“更新规则”下载。远程域名/IP 与手写条件分别保存；更新失败保留上次可用缓存。</string>
+    <string name="route_remote_skipped"> · 跳过 %d 条</string>
+    <string name="route_remote_stale"> · 更新失败，保留缓存</string>
+</resources>

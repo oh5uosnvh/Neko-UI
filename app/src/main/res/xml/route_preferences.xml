@@ -11,6 +11,12 @@
         app:key="serverConfig"
         app:title="@string/custom_config"
         app:useSimpleSummaryProvider="true" />
+    <EditTextPreference
+        app:icon="@drawable/ic_baseline_layers_24"
+        app:key="routeRuleUrl"
+        app:title="@string/route_rule_url"
+        app:dialogMessage="@string/route_rule_url_hint"
+        app:useSimpleSummaryProvider="true" />
     <PreferenceCategory app:title="@string/cag_route">
         <io.nekohasekai.sagernet.widget.AppListPreference
             app:icon="@drawable/ic_baseline_legend_toggle_24"

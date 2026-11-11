@@ -419,6 +419,9 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private fun currentScopeTag(): Long? = scopedTagId?.takeIf { it > 0L }
 
+    /** The tag locked by this configuration view, if any. The picker reads this on open. */
+    internal fun currentLockedTagId(): Long? = currentScopeTag()
+
     /** Entering is only accepted for a live tag; deleted tags always return to all groups. */
     internal fun enterTagScope(tagId: Long): Boolean {
         if (tagId <= 0L || !isAdded) return false

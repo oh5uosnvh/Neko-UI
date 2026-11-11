@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 
 @Database(
     entities = [ProxyGroup::class, ProxyEntity::class, RuleEntity::class, TagGroup::class, TagMembership::class],
-    version = 12,
+    version = 13,
     autoMigrations = [
         AutoMigration(from = 3, to = 4),
         AutoMigration(from = 4, to = 5),
@@ -32,6 +32,12 @@ import kotlinx.coroutines.launch
 abstract class SagerDatabase : RoomDatabase() {
 
     companion object {
+        val MIGRATION_12_13_REMOTE_RULES = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE rules ADD COLUMN remoteDomains TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE rules ADD COLUMN remoteIps TEXT NOT NULL DEFAULT ''")
+            }
+        }
         private val MIGRATION_8_9_SAFE = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 val columns = mutableSetOf<String>()
@@ -83,7 +89,7 @@ abstract class SagerDatabase : RoomDatabase() {
         val instance by lazy {
             SagerNet.application.getDatabasePath(Key.DB_PROFILE).parentFile?.mkdirs()
             Room.databaseBuilder(SagerNet.application, SagerDatabase::class.java, Key.DB_PROFILE)
-                .addMigrations(MIGRATION_8_9_SAFE, MIGRATION_9_10_ORDER_INDEX, MIGRATION_10_11_TAG_GROUPS, MIGRATION_11_12_BUILTIN_ROUTES)
+                .addMigrations(MIGRATION_8_9_SAFE, MIGRATION_9_10_ORDER_INDEX, MIGRATION_10_11_TAG_GROUPS, MIGRATION_11_12_BUILTIN_ROUTES, MIGRATION_12_13_REMOTE_RULES)
 //                .addMigrations(*SagerDatabase_Migrations.build())
                 .setJournalMode(JournalMode.TRUNCATE)
                 .allowMainThreadQueries()

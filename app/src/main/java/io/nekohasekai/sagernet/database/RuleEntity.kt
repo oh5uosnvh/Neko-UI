@@ -29,6 +29,8 @@ data class RuleEntity(
     var builtinKey: String = "",
     @ColumnInfo(name = "sourceUrl", defaultValue = "")
     var sourceUrl: String = "",
+    @ColumnInfo(defaultValue = "") var remoteDomains: String = "",
+    @ColumnInfo(defaultValue = "") var remoteIps: String = "",
     @ColumnInfo(name = "subscriptionState", defaultValue = "")
     var subscriptionState: String = "",
     @ColumnInfo(name = "lastUpdateError", defaultValue = "")
@@ -51,9 +53,13 @@ data class RuleEntity(
      */
     fun mkSummary(): String {
         if (packages.isNotEmpty()) return app.getString(R.string.apps_message, packages.size)
-        if (builtinKey.startsWith("remote_")) {
-            return if (cachedRuleCount > 0) app.getString(R.string.route_configured_rules, cachedRuleCount)
-            else app.getString(R.string.route_waiting_update)
+        if (sourceUrl.isNotBlank() || builtinKey.startsWith("remote_")) {
+            return buildString {
+                append(if (cachedRuleCount > 0) app.getString(R.string.route_configured_rules, cachedRuleCount)
+                    else app.getString(R.string.route_waiting_update))
+                if (skippedRuleCount > 0) append(app.getString(R.string.route_remote_skipped, skippedRuleCount))
+                if (subscriptionState == "stale") append(app.getString(R.string.route_remote_stale))
+            }
         }
         val count = listOf(config, domains, ip, source, sourcePort, port, network, protocol, ruleset)
             .sumOf { value -> value.lineSequence().count { it.trim().isNotEmpty() } }

@@ -482,8 +482,8 @@
     <string name="apps_message">%d Applications</string>
     <string name="route_configured">Configured</string>
     <string name="route_waiting_update">Waiting for update</string>
-    <string name="route_update_builtin">Update built-in rules</string>
-    <string name="route_update_failed">Some built-in rules failed to update: %s</string>
+    <string name="route_update_builtin">Update rules</string>
+    <string name="route_update_failed">Some rules failed to update: %s</string>
     <string name="route_retry_update">Retry update</string>
     <string name="route_configured_rules">Configured %d rules</string>
     <string name="route_builtin_play_store">Play Store rules</string>
