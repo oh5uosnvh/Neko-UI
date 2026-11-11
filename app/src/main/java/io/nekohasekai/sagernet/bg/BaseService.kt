@@ -252,12 +252,9 @@ class BaseService {
                 stopRunner(false, (this as Context).getString(R.string.profile_empty))
                 return
             }
-            if (data.proxy?.config?.globalSelector == true && DataStore.globalSelector && !canReloadSelector()) {
-                // A global selector must never silently downgrade to a restart
-                // using a stale or incompatible policy.
-                Logs.w("global selector live switch rejected: runtime membership or policy changed")
-                return
-            }
+            // Global node-card changes use selectSelectorNode (ACK, never reload).
+            // This broadcast is an explicit settings/subscription Apply request;
+            // changed runtime membership or policy must be rebuilt here.
             if (canReloadSelector()) {
                 val ent = SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
                 val tag = data.proxy!!.config.profileTagMap[ent?.id] ?: ""

@@ -115,7 +115,7 @@ class SwitchThemeContractTest {
         }
         val xml = File(resources, "xml").walkTopDown().filter { it.extension == "xml" }
             .joinToString("\n") { it.readText() }
-        assertEquals("all 54 ordinary preference switches remain covered", 54,
+        assertEquals("all 55 ordinary preference switches, including global selector, remain covered", 55,
             Regex("<io\\.nekohasekai\\.sagernet\\.widget\\.ReferenceSwitchPreference\\b").findAll(xml).count())
         for (name in listOf("layout_route_item", "layout_apps_item", "layout_local_proxy_dialog")) {
             assertTrue(name, "<io.nekohasekai.sagernet.widget.ReferenceSwitch" in
