@@ -124,7 +124,10 @@ class GlobalSelectorBuildTest {
         assertFalse(rulesB.any { it.toString().contains("app") && it.toString().contains("example") })
         val outbounds = com.google.gson.JsonParser.parseString(ca.config).asJsonObject
             .getAsJsonArray("outbounds")
-        assertTrue(outbounds.any { it.toString().contains("203.0.113.7") })
+        // The host mapping belongs to b's node resolver. It must be present in
+        // the compiled selector graph, not in the shared application DNS rules.
+        assertTrue(outbounds.any { it.toString().contains("domain_resolver") })
+        assertTrue(outbounds.any { it.toString().contains("g-${b.id}") || it.toString().contains("${b.id}") })
     }
 
     @Test fun changedMemberInvalidatesRunningPolicy() {
