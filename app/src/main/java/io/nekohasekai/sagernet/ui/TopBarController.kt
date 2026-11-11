@@ -711,12 +711,12 @@ internal class TopBarController(
             pickerNavigation.configuration()
             return
         }
-        val page = pickerNavigation.page as? GroupPickerNavigation.Page.Members ?: return
-        val selected = DataStore.selectedGroup
-        val stillInTag = try {
-            selected > 0L && selected in TagGroupStore.members(page.tagId)
-        } catch (_: Exception) { false }
-        if (!stillInTag) pickerNavigation.configuration()
+        // Once unlocked, a fresh menu open always starts from the configuration
+        // page. Never resurrect the previous tag-members page just because the
+        // selected group still belongs to that tag.
+        if (pickerNavigation.page is GroupPickerNavigation.Page.Members) {
+            pickerNavigation.configuration()
+        }
     }
 
     /** Owns only display state. The process-wide writer outlives this popup/fragment. */
@@ -830,7 +830,13 @@ internal class TopBarController(
             themeColor(android.R.attr.textColorPrimary), { groupHeaderCard(it) },
             { navigateConfiguration() }, { navigateTags() }, { backPage() },
             lockedTagId = { host.currentLockedTagId() },
-            onLockedTap = { host.snackbar(R.string.tag_picker_locked_hint) })
+            onLockedTap = { id ->
+                if (host.toggleTagLockFromPicker(id)) {
+                    // Keep the popup and current member page alive; refresh only the
+                    // state marker and selected root list. The next open uses the new scope.
+                    requestTagRefresh(seedSelection = true)
+                }
+            })
         private fun pageView(title: GroupPickerHeader, recycler: RecyclerView) = LinearLayout(popupContext).apply {
             orientation = LinearLayout.VERTICAL
             // Real vertical measurement, not two overlapping MATCH_PARENT FrameLayout children.

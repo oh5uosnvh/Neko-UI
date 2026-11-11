@@ -98,54 +98,27 @@ class GroupPickerTagsTest {
 
     @Test
     @Config(qualifiers = "zh-rCN")
-    fun lockedMemberHeaderShowsRedBangAndTapExplainsUnlock() {
+    fun memberHeaderUsesExplicitLockUnlockButtonWithoutLongPressOrDismissal() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup()
         try {
             var locked: Long? = 42L
             var back = 0
-            var lockTap = 0
+            val toggled = ArrayList<Long>()
             val header = GroupPickerHeader(activity.get(), Color.BLACK, { ColorDrawable(Color.GRAY) },
-                {}, {}, { back++ }, { locked }, { lockTap++ })
+                {}, {}, { back++ }, { locked }, { id -> toggled += id; locked = null })
             header.bind(GroupPickerNavigation.Page.Members(42L), "Flower")
             val row = header.getChildAt(1) as ViewGroup
-            val bang = descendants(row).filterIsInstance<TextView>().first { it.text.toString() == "!" }
-            assertEquals(View.VISIBLE, bang.visibility)
-            assertEquals(Color.RED, (bang.background as android.graphics.drawable.GradientDrawable)
-                .color!!.defaultColor)
-            bang.performClick()
-            assertEquals(1, lockTap)
-            assertEquals("已锁定当前标签组▶长按解除锁定", ShadowToast.getTextOfLatestToast())
-            row.performClick()
-            assertEquals(1, back)
-            assertEquals(42L, locked)
-            locked = null
-            header.bind(GroupPickerNavigation.Page.Members(42L), "Flower")
-            assertEquals(View.GONE, bang.visibility)
-        } finally { activity.pause().stop().destroy() }
-    }
-
-    @Test fun memberTitleLongPressUsesExistingLockBridgeWithoutChangingShortBack() {
-        val activity = Robolectric.buildActivity(Activity::class.java).setup()
-        try {
-            var toggled: Long? = null
-            var back = 0
-            GroupPickerTagScopeBridge.onLongPress = { id, _ -> toggled = id; true }
-            val header = GroupPickerHeader(activity.get(), Color.BLACK, { ColorDrawable(Color.GRAY) },
-                {}, {}, { back++ })
-            header.bind(GroupPickerNavigation.Page.Members(77L), "Work")
-            val title = descendants(header).filterIsInstance<TextView>().first { it.text.toString() == "Work" }
-            assertFalse("Decorative title must not steal short taps", title.isLongClickable)
-            val row = header.getChildAt(1) as View
-            assertTrue(row.performLongClick())
-            assertEquals(77L, toggled)
-            assertFalse(title.performClick())
+            val button = descendants(row).filterIsInstance<TextView>().first { it.text.toString() == "解锁" }
+            assertEquals(View.VISIBLE, button.visibility)
+            button.performClick()
+            assertEquals(listOf(42L), toggled)
             assertEquals(0, back)
+            locked = 42L
+            header.bind(GroupPickerNavigation.Page.Members(42L), "Flower")
+            assertEquals("解锁", button.text.toString())
             row.performClick()
             assertEquals(1, back)
-        } finally {
-            GroupPickerTagScopeBridge.onLongPress = null
-            activity.pause().stop().destroy()
-        }
+        } finally { activity.pause().stop().destroy() }
     }
 
     @Test fun reopeningLockedNavigationStartsAtMembersAndBackKeepsLockModel() {

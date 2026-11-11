@@ -202,7 +202,12 @@ fun buildConfig(
     val activeSubscription = group?.subscription
     val activeDns = subscriptionDns.config(proxy.requireBean(), activeSubscription)
     val directOverride = activeSubscription?.directDnsResolver.orEmpty()
-    val subscriptionDirectDns = if (directOverride.isNotBlank()) SubscriptionDns.endpointList(directOverride) else activeDns.directDns
+    // A full-group selector must have one stable application DNS table. Per-group
+    // DNS remains attached to each outbound resolver below; using the selected
+    // group's direct DNS here would make live selector validation fail on every
+    // cross-group switch.
+    val subscriptionDirectDns = if (DataStore.globalSelector) emptyList()
+        else if (directOverride.isNotBlank()) SubscriptionDns.endpointList(directOverride) else activeDns.directDns
     val isVPN = DataStore.serviceMode == Key.MODE_VPN
     val deviceInboundTag = if (isVPN && DataStore.enableHevTun) TAG_MIXED else "tun-in"
     val bind = if (!forTest && DataStore.allowAccess) "0.0.0.0" else LOCALHOST
@@ -211,7 +216,8 @@ fun buildConfig(
     val directDNS = DataStore.directDns.split("\n")
         .mapNotNull { dns -> dns.trim().takeIf { it.isNotBlank() && !it.startsWith("#") } }
     val selectorDns = SelectorDnsPolicy(directDNS)
-    val applicationDnsFingerprint = selectorDns.applicationFingerprint(activeDns, activeSubscription)
+    val applicationDnsFingerprint = if (DataStore.globalSelector) "all-groups-selector" else
+        selectorDns.applicationFingerprint(activeDns, activeSubscription)
     val dnsHosts by lazy { parseDnsHosts(DataStore.dnsHosts) }
     val enableDnsRouting = DataStore.enableDnsRouting
     val useFakeDns = DataStore.enableFakeDns && !forTest
@@ -1104,8 +1110,10 @@ fun buildConfig(
             }
             // Subscription policy is scoped to the active group. Only matched domains override app DNS.
             val subscriptionRules = if (globalSelector) {
-                // Node-only DNS/format differences must not alter the application resolver tag.
-                subscriptionDns.general(proxy.requireBean(), selectorDns.generalSubscription(activeDns), "dns-remote")
+                // Full-group selector owns node DNS per outbound. Do not inject one
+                // selected group's application rule table into a selector shared by
+                // every group; that was the source of cross-group startup failures.
+                emptyList()
             } else subscriptionDns.general(proxy.requireBean(), activeSubscription, "dns-remote")
             dns.rules.addAll(0, subscriptionRules)
         }

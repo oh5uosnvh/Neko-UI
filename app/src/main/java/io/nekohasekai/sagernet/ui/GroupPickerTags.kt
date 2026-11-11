@@ -20,20 +20,14 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.TagGroup
-import io.nekohasekai.sagernet.widget.QuickLongPress
 import io.nekohasekai.sagernet.widget.SubmenuBackIcon
 
 /** Navigation only: none of these transitions select, reorder or mutate a root group. */
-/** Bridge used by the picker (owned by TopBarController) without coupling that controller to scopes. */
-internal object GroupPickerTagScopeBridge {
-    @Volatile var onLongPress: ((Long, View) -> Boolean)? = null
-}
 
 /** Pure scope rules kept small so empty/deleted tags and stale results are testable. */
 internal object GroupPickerTagScope {
@@ -100,7 +94,7 @@ internal class GroupPickerHeader(
     tags: () -> Unit,
     back: () -> Unit,
     private val lockedTagId: () -> Long? = { null },
-    private val onLockedTap: () -> Unit = {},
+    private val onLockedTap: (Long) -> Unit = {},
 ) : LinearLayout(context) {
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private var boundTagId: Long? = null
@@ -138,25 +132,16 @@ internal class GroupPickerHeader(
         setColorFilter(color)
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
-    /** A deliberately compact, high-contrast marker: only the locked tag gets it. */
+    /** Explicit two-state control; it is always present on the member page. */
     private val lockIndicator = TextView(context).apply {
-        text = "!"
-        textSize = 13f
+        textSize = 12f
         setTypeface(Typeface.DEFAULT, Typeface.BOLD)
         setTextColor(android.graphics.Color.WHITE)
         gravity = Gravity.CENTER
-        background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(android.graphics.Color.RED)
-        }
-        contentDescription = context.getString(R.string.tag_picker_locked_hint)
+        setPadding(dp(5), 0, dp(5), 0)
         isClickable = true
         isFocusable = true
-        visibility = View.GONE
-        setOnClickListener {
-            Toast.makeText(context, context.getString(R.string.tag_picker_locked_hint), Toast.LENGTH_SHORT).show()
-            onLockedTap()
-        }
+        setOnClickListener { boundTagId?.let { onLockedTap(it) } }
     }
     private val backRow = LinearLayout(context).apply {
         orientation = HORIZONTAL
@@ -169,21 +154,15 @@ internal class GroupPickerHeader(
         addView(SubmenuBackIcon(context, color), LayoutParams(dp(20), dp(24)))
         addView(icon, LayoutParams(dp(24), dp(24)).apply { marginStart = dp(8) })
         addView(title, LayoutParams(0, -2, 1f).apply { marginStart = dp(8) })
-        addView(lockIndicator, LayoutParams(dp(22), dp(22)).apply { marginStart = dp(8) })
+        addView(lockIndicator, LayoutParams(dp(64), dp(28)).apply { marginStart = dp(8) })
         setOnClickListener { back() }
     }
     init {
         orientation = VERTICAL
         setPadding(dp(12), dp(4), dp(12), 0)
         minimumHeight = dp(52)
-        // One accessible gesture owner for the entire capsule. A long-clickable title
-        // takes DOWN even without a click listener, swallowing every short tap over
-        // its weighted width (including the apparent blank space). Decorative children
-        // must stay inert; the separate clickable red marker alone owns its gestures.
-        QuickLongPress(backRow) { view ->
-            val id = boundTagId
-            if (id == null) false else GroupPickerTagScopeBridge.onLongPress?.invoke(id, view) ?: false
-        }
+        // Back remains the single owner of the capsule's short tap. The lock control
+        // is an independent child and therefore does not navigate or dismiss the menu.
         addView(entries, LayoutParams(-1, dp(48)))
         addView(backRow, LayoutParams(-1, dp(48)))
         // Initial state is already configured by the entry defaults; bind() is
@@ -202,9 +181,15 @@ internal class GroupPickerHeader(
         tagsEntry.background = card(tagsEntry.isSelected)
         icon.visibility = if (members) View.VISIBLE else View.GONE
         title.text = tagName ?: context.getString(R.string.tag_picker_title)
+        lockIndicator.visibility = if (members) View.VISIBLE else View.GONE
         val locked = members && boundTagId == lockedTagId()
-        lockIndicator.visibility = if (locked) View.VISIBLE else View.GONE
-        lockIndicator.contentDescription = context.getString(R.string.tag_picker_locked_hint)
+        lockIndicator.text = context.getString(if (locked) R.string.tag_picker_unlock else R.string.tag_picker_lock)
+        lockIndicator.background = GradientDrawable().apply {
+            cornerRadius = dp(12).toFloat()
+            setColor(if (locked) android.graphics.Color.rgb(96, 125, 139)
+                else android.graphics.Color.rgb(62, 125, 78))
+        }
+        lockIndicator.contentDescription = lockIndicator.text
         backRow.contentDescription = context.getString(R.string.tag_picker_back_to, title.text)
     }
 }

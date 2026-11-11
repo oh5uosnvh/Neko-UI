@@ -8,5 +8,6 @@
     <string name="tag_picker_empty_members">暂无配置分组</string>
     <string name="tag_picker_loading">加载中…</string>
     <string name="tag_picker_load_failed">标签组加载失败</string>
-    <string name="tag_picker_locked_hint">已锁定当前标签组▶长按解除锁定</string>
+    <string name="tag_picker_lock">锁定</string>
+    <string name="tag_picker_unlock">解锁</string>
 </resources>

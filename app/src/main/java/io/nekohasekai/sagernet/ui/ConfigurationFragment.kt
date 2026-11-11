@@ -194,7 +194,6 @@ class ConfigurationFragment @JvmOverloads constructor(
     @Volatile
     private var scopedTagId: Long? = null
     private var scopeGeneration = AtomicLong()
-    private val scopeExitMenuId = View.generateViewId()
     private var pendingFileTagId: Long? = null
     private val groupProfileExport = GroupProfileExport(this)
     private var groupTabsMediator: TabLayoutMediator? = null
@@ -421,6 +420,23 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     /** The tag locked by this configuration view, if any. The picker reads this on open. */
     internal fun currentLockedTagId(): Long? = currentScopeTag()
+
+    /** Toggle the picker lock without dismissing its popup or changing the selected group. */
+    internal fun toggleTagLockFromPicker(tagId: Long): Boolean {
+        if (tagId <= 0L || !isAdded) return false
+        if (currentScopeTag() == tagId) {
+            scopedTagId = null
+            prepareConfigurationMenu(toolbar.menu)
+            if (::adapter.isInitialized) adapter.reload(now = true)
+        } else {
+            val live = try { TagGroupStore.get(tagId) != null } catch (_: Exception) { false }
+            if (!live) return false
+            scopedTagId = tagId
+            prepareConfigurationMenu(toolbar.menu)
+            if (::adapter.isInitialized) adapter.reload(now = true)
+        }
+        return true
+    }
 
     /** Entering is only accepted for a live tag; deleted tags always return to all groups. */
     internal fun enterTagScope(tagId: Long): Boolean {
@@ -750,7 +766,6 @@ class ConfigurationFragment @JvmOverloads constructor(
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         if (!select) {
-            GroupPickerTagScopeBridge.onLongPress = { id, _ -> toggleTagScope(id) }
             viewLifecycleOwner.lifecycleScope.launch {
                 TagGroupStore.changes.collectLatest {
                     val id = currentScopeTag() ?: return@collectLatest
@@ -888,11 +903,8 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     internal fun prepareConfigurationMenu(menu: Menu) {
-        val actions = menu.findItem(R.id.action_misc)?.subMenu ?: menu
-        val exit = actions.findItem(scopeExitMenuId) ?: actions.add(Menu.NONE, scopeExitMenuId, 0,
-            if (resources.configuration.locales[0].language == "zh") "返回全部分组" else "Show all groups")
-        exit.isVisible = currentScopeTag() != null
-        exit.setOnMenuItemClickListener { exitTagScope(); true }
+        // Scope is now controlled by the picker header's Lock/Unlock button;
+        // keeping a second "show all" command here caused two competing states.
         LatencyTestMenuPolicy.apply(menu, DataStore.runningTest || pendingLatencyRequest != null)
         menu.findItem(R.id.action_global_mode)?.isChecked = DataStore.globalMode
         menu.findItem(R.id.action_always_show_address)?.isChecked = DataStore.alwaysShowAddress
@@ -953,7 +965,6 @@ class ConfigurationFragment @JvmOverloads constructor(
         latencyOverlay?.release()
         latencyOverlay = null
         topBar.detach()
-        if (GroupPickerTagScopeBridge.onLongPress != null) GroupPickerTagScopeBridge.onLongPress = null
         searchScope.detach()
         DataStore.profileCacheStore.unregisterChangeListener(this)
         DataStore.configurationStore.unregisterChangeListener(displayPrefListener)
@@ -1213,7 +1224,6 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     override fun onMenuItemClick(item: MenuItem): Boolean {
-        if (item.itemId == scopeExitMenuId) { exitTagScope(); return true }
         when (item.itemId) {
             R.id.action_scan_qr_code -> {
                 startActivity(Intent(context, ScannerActivity::class.java))
@@ -1544,19 +1554,17 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             R.id.action_global_no_reload -> {
-                DataStore.globalSelector = !DataStore.globalSelector
-                item.isChecked = DataStore.globalSelector
-                val message = if (DataStore.globalSelector) R.string.global_no_reload_enabled
-                    else R.string.global_no_reload_disabled
-                snackbar(getString(message)).apply {
-                    if (DataStore.serviceState == BaseService.State.Connected) {
-                        setAction(R.string.apply) {
-                            // Changing selector membership needs one explicit build;
-                            // later node-card operations use the native ACK path.
-                            SagerNet.reloadService()
-                        }
-                    }
-                }.show()
+                // This is now the explicit all-groups selector. Enabling it always
+                // rebuilds the service immediately; there is no half-enabled state.
+                val enable = !DataStore.globalSelector
+                DataStore.globalSelector = enable
+                item.isChecked = enable
+                if (DataStore.serviceState.started) {
+                    SagerNet.reloadService()
+                    snackbar(if (enable) "全分组 selector 已启用，正在自动重连" else "全分组 selector 已关闭，正在恢复分组模式").show()
+                } else {
+                    snackbar(if (enable) "全分组 selector 已启用，下次启动立即生效" else "全分组 selector 已关闭").show()
+                }
                 return true
             }
 

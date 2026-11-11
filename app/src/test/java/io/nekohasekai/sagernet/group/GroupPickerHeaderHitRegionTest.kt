@@ -11,7 +11,6 @@ import androidx.appcompat.app.AppCompatActivity
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.ui.GroupPickerHeader
 import io.nekohasekai.sagernet.ui.GroupPickerNavigation
-import io.nekohasekai.sagernet.ui.GroupPickerTagScopeBridge
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -58,7 +57,7 @@ class GroupPickerHeaderHitRegionTest {
             assertFalse("Decorative title must not consume short taps", title.isLongClickable)
             assertEquals(View.VISIBLE, marker.visibility)
             val points = listOf(row.width * 0.08f, row.width * 0.35f,
-                row.width * 0.6f, marker.left - 2f)
+                row.width * 0.6f, marker.left - marker.width - 4f)
             points.forEachIndexed { index, x ->
                 tap(row, x, row.height / 2f)
                 assertEquals("Back at x=$x", index + 1, backs)
@@ -69,7 +68,6 @@ class GroupPickerHeaderHitRegionTest {
             assertTrue(row.performClick())
             assertEquals(points.size + 1, backs)
         } finally {
-            GroupPickerTagScopeBridge.onLongPress = null
             controller.pause().stop().destroy()
         }
     }

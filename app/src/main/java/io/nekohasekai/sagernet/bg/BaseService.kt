@@ -136,22 +136,7 @@ class BaseService {
                     return selectorError("NOT_SELECTOR", "running config has no selector")
                 }
                 if (!current.service.isCompiledSelectorCurrent(profileId)) {
-                    if (running.config.globalSelector) {
-                        val ent = SagerDatabase.proxyDao.getById(profileId)
-                        if (ent != null) {
-                            val subscription = SagerDatabase.groupDao.getById(ent.groupId)?.subscription
-                            val config = io.nekohasekai.sagernet.group.GroupDnsStore.config(ent.requireBean(), subscription)
-                            val direct = DataStore.directDns.lineSequence().map { it.trim() }
-                                .filter { it.isNotBlank() && !it.startsWith("#") }.toList()
-                            val policy = io.nekohasekai.sagernet.fmt.SelectorDnsPolicy(direct)
-                                .applicationFingerprint(config, subscription)
-                            if (policy != running.config.selectorApplicationDnsFingerprint) {
-                                return selectorError("DNS_RECONNECT_REQUIRED",
-                                    "该节点的应用 DNS 策略不同，不能免重载切换；请先停止 VPN，再选择该节点并启动。当前连接和节点保持不变。")
-                            }
-                        }
-                    }
-                    return selectorError("STALE_CONFIG", "节点列表或运行策略已变化；请重新连接载入最新配置。当前连接保持不变。")
+                    return selectorError("STALE_CONFIG", "全分组 selector 的节点列表或运行策略已变化；请重新连接载入最新配置。当前连接保持不变。")
                 }
                 val tag = running.config.profileTagMap[profileId]
                     ?: return selectorError("NOT_MEMBER", "profile is not compiled")

@@ -18,12 +18,13 @@ class GlobalNoReloadMenuTest {
         val item = nodes.item(position + 1) as org.w3c.dom.Element
         assertEquals("true", item.getAttribute("android:checkable"))
     }
-    @Test fun singlePersistedSelectorStateAndExplicitApplyAreUsed() {
+    @Test fun allGroupsSelectorPersistsAndReconnectsImmediately() {
         val source = File(app, "src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt").readText()
         assertTrue(source.contains("menu.findItem(R.id.action_global_no_reload)?.isChecked = DataStore.globalSelector"))
         val body = source.substringAfter("R.id.action_global_no_reload ->").substringBefore("R.id.action_global_mode ->")
-        assertTrue(body.contains("DataStore.globalSelector = !DataStore.globalSelector"))
-        assertTrue(body.contains("setAction(R.string.apply)"))
-        assertTrue(File(app, "src/main/res/values-zh-rCN/global_no_reload.xml").readText().contains(">全局免重载<"))
+        assertTrue(body.contains("DataStore.globalSelector = enable"))
+        assertTrue(body.contains("SagerNet.reloadService()"))
+        assertFalse(body.contains("setAction(R.string.apply)"))
+        assertTrue(File(app, "src/main/res/values-zh-rCN/global_no_reload.xml").readText().contains(">全分组 selector<"))
     }
 }

@@ -42,7 +42,8 @@ class GroupPickerTagScopeTest {
             .first { java.io.File(it, "src/main/java").isDirectory }
         val source = java.io.File(app, "src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt").readText()
         assertTrue(source.contains("topBar.dismissGroupPicker(immediate = true)"))
-        assertTrue(source.contains("Show all groups"))
+        assertFalse(source.contains("Show all groups"))
+        assertFalse(source.contains("返回全部分组"))
         assertTrue(source.contains("pendingFileTagId = currentScopeTag()"))
         assertTrue(source.contains("outState.putLong(\"pendingFileTagId\", pendingFileTagId ?: 0L)"))
         assertTrue(source.contains("savedInstanceState?.getLong(\"pendingFileTagId\", 0L)"))
