@@ -32,6 +32,7 @@ def edit(name,old,new,count=1):
     s=changes.get(name,(root/name).read_text())
     if s.count(old)!=count: raise SystemExit(f'Pinned source mismatch: {name}: expected {count} matches')
     changes[name]=s.replace(old,new)
+edit('dns/client.go','c.storeCache(transport, question, response, timeToLive)','c.storeCache(transport, question, response.Copy(), timeToLive)')
 edit('box.go','ctx = service.ContextWithDefaultRegistry(ctx)\n\n\tendpointRegistry', 'ctx = service.ContextWithDefaultRegistry(ctx)\n\tservice.MustRegister[*adapter.RuntimeRoutingState](ctx, new(adapter.RuntimeRoutingState))\n\n\tendpointRegistry')
 edit('route/router.go','"runtime"','"runtime"\n "sync"')
 edit('route/router.go','type Router struct {','type Router struct {\n '+MARK+'\n runtimeUpdateMu sync.Mutex\n runtimeClosed bool\n runtimeRouting *adapter.RuntimeRoutingState\n runtimeRouteOptions option.RouteOptions\n runtimeDNSOptions option.DNSOptions')
