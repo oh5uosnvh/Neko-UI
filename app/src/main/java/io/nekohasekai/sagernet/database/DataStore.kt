@@ -13,6 +13,7 @@ import io.nekohasekai.sagernet.bg.VpnService
 import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
 import io.nekohasekai.sagernet.database.preference.PublicDatabase
 import io.nekohasekai.sagernet.database.preference.RoomPreferenceDataStore
+import io.nekohasekai.sagernet.fmt.SelectorGeneration
 import io.nekohasekai.sagernet.ktx.boolean
 import io.nekohasekai.sagernet.ktx.int
 import io.nekohasekai.sagernet.ktx.long
@@ -33,6 +34,13 @@ object DataStore : OnPreferenceDataStoreChangeListener {
 
     val configurationStore = RoomPreferenceDataStore(PublicDatabase.kvPairDao)
     val profileCacheStore = RoomPreferenceDataStore(TempDatabase.profileCacheDao)
+
+    // Every config-affecting preference write invalidates process-local build
+    // snapshots. The generation check is cheap; rebuilding remains off click paths.
+    init {
+        configurationStore.registerChangeListener(this)
+        profileCacheStore.registerChangeListener(this)
+    }
 
     // last used, but may not be running
     var currentProfile by configurationStore.long(Key.PROFILE_CURRENT)
@@ -376,5 +384,11 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var globalSelector by configurationStore.boolean(Key.GLOBAL_SELECTOR)
 
     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
+        // Exclude purely visual/account state. Unknown keys are conservatively
+        // invalidated because ConfigBuilder reads many options across modules.
+        if (key !in setOf(
+                Key.PROFILE_ID, Key.PROFILE_CURRENT, Key.PROFILE_GROUP,
+                Key.SERVICE_MODE, Key.APP_LANGUAGE, Key.NIGHT_THEME,
+            )) SelectorGeneration.invalidate()
     }
 }

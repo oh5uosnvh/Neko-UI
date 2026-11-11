@@ -6,6 +6,7 @@ import io.nekohasekai.sagernet.database.GroupManager
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.SubscriptionBean
 import io.nekohasekai.sagernet.fmt.AbstractBean
+import io.nekohasekai.sagernet.fmt.SelectorGeneration
 import io.nekohasekai.sagernet.fmt.http.HttpBean
 import io.nekohasekai.sagernet.fmt.hysteria.HysteriaBean
 import io.nekohasekai.sagernet.fmt.naive.NaiveBean
@@ -161,6 +162,9 @@ abstract class GroupUpdater {
 
 
         suspend fun finishUpdate(proxyGroup: ProxyGroup) {
+            // Subscription imports update many proxy rows in one transaction-like
+            // batch; invalidate once at commit, never per node.
+            SelectorGeneration.invalidate()
             updating.remove(proxyGroup.id)
             progress.remove(proxyGroup.id)
             // 修复：广播数据库中的最新持久化对象，而不是调用方手里的同一实例。

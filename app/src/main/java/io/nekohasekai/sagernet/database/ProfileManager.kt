@@ -4,6 +4,7 @@ import android.database.sqlite.SQLiteCantOpenDatabaseException
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.aidl.TrafficData
 import io.nekohasekai.sagernet.fmt.AbstractBean
+import io.nekohasekai.sagernet.fmt.SelectorGeneration
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.applyDefaultValues
@@ -73,6 +74,7 @@ object ProfileManager {
     }
 
     suspend fun createProfile(groupId: Long, bean: AbstractBean): ProxyEntity {
+        SelectorGeneration.invalidate()
         bean.applyDefaultValues()
 
         val profile = ProxyEntity(groupId = groupId).apply {
@@ -86,11 +88,13 @@ object ProfileManager {
     }
 
     suspend fun updateProfile(profile: ProxyEntity) {
+        SelectorGeneration.invalidate()
         SagerDatabase.proxyDao.updateProxy(profile)
         iterator { onUpdated(profile, false) }
     }
 
     suspend fun updateProfile(profiles: List<ProxyEntity>) {
+        if (profiles.isNotEmpty()) SelectorGeneration.invalidate()
         SagerDatabase.proxyDao.updateProxy(profiles)
         profiles.forEach {
             iterator { onUpdated(it, false) }
@@ -109,6 +113,7 @@ object ProfileManager {
 
     suspend fun deleteProfile2(groupId: Long, profileId: Long) {
         if (SagerDatabase.proxyDao.deleteById(profileId) == 0) return
+        SelectorGeneration.invalidate()
         if (DataStore.selectedProxy == profileId) {
             DataStore.selectedProxy = 0L
         }
@@ -116,6 +121,7 @@ object ProfileManager {
 
     suspend fun deleteProfile(groupId: Long, profileId: Long) {
         if (SagerDatabase.proxyDao.deleteById(profileId) == 0) return
+        SelectorGeneration.invalidate()
         if (DataStore.selectedProxy == profileId) {
             DataStore.selectedProxy = 0L
         }
@@ -165,6 +171,7 @@ object ProfileManager {
     }
 
     suspend fun createRule(rule: RuleEntity, post: Boolean = true): RuleEntity {
+        SelectorGeneration.invalidate()
         rule.userOrder = SagerDatabase.rulesDao.nextOrder() ?: 1
         rule.id = SagerDatabase.rulesDao.createRule(rule)
         RuntimeRouteUpdater.request()
@@ -175,18 +182,21 @@ object ProfileManager {
     }
 
     suspend fun updateRule(rule: RuleEntity) {
+        SelectorGeneration.invalidate()
         SagerDatabase.rulesDao.updateRule(rule)
         RuntimeRouteUpdater.request()
         ruleIterator { onUpdated(rule) }
     }
 
     suspend fun deleteRule(ruleId: Long) {
+        SelectorGeneration.invalidate()
         SagerDatabase.rulesDao.deleteById(ruleId)
         RuntimeRouteUpdater.request()
         ruleIterator { onRemoved(ruleId) }
     }
 
     suspend fun deleteRules(rules: List<RuleEntity>) {
+        if (rules.isNotEmpty()) SelectorGeneration.invalidate()
         SagerDatabase.rulesDao.deleteRules(rules)
         RuntimeRouteUpdater.request()
         ruleIterator {

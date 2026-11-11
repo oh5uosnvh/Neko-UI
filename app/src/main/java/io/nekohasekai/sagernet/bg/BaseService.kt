@@ -16,6 +16,7 @@ import io.nekohasekai.sagernet.aidl.ISagerNetServiceCallback
 import io.nekohasekai.sagernet.bg.proto.ProxyInstance
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.fmt.SelectorGeneration
 import io.nekohasekai.sagernet.fmt.buildConfig
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.plugin.PluginManager
@@ -54,9 +55,15 @@ class BaseService {
         val receiver = broadcastReceiver { ctx, intent ->
             when (intent.action) {
                 Intent.ACTION_SHUTDOWN -> service.persistStats()
-                Action.RELOAD -> if (ServiceStartPolicy.permits(intent)) service.reload()
+                Action.RELOAD -> if (ServiceStartPolicy.permits(intent)) {
+                    SelectorGeneration.invalidate()
+                    service.reload()
+                }
                 io.nekohasekai.sagernet.database.RuntimeRouteUpdater.ACTION_APPLY ->
-                    if (ServiceStartPolicy.permits(intent)) service.applyRuntimeRouting()
+                    if (ServiceStartPolicy.permits(intent)) {
+                        SelectorGeneration.invalidate()
+                        service.applyRuntimeRouting()
+                    }
                 Action.CLOSE -> service.stopRunner(userInitiated = true)
                 // Action.SWITCH_WAKE_LOCK -> runOnDefaultDispatcher { service.switchWakeLock() }
                 PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED -> {
@@ -138,10 +145,14 @@ class BaseService {
                 if (!ServiceStartPolicy.fence.permitsAutomatic()) {
                     return selectorError("USER_STOPPED", "connection was stopped by the user")
                 }
-                val ent = SagerDatabase.proxyDao.getById(profileId)
-                    ?: return selectorError("NOT_FOUND", "profile no longer exists")
+                // The immutable running map is the selector membership snapshot. Do
+                // not consult Room here: a selector tap must be only native ACK work.
                 val tag = running.config.profileTagMap[profileId]
-                if (tag.isNullOrBlank() || !current.service.isCompiledSelectorCurrent(profileId)) {
+                // A tag present in the immutable running selector is the complete
+                // fast-path proof. Never rebuild the global configuration on a tap:
+                // buildConfig() walks every enabled group, DNS policy and plugin and
+                // was the source of the observed ~15 second "hot" switch.
+                if (tag.isNullOrBlank()) {
                     return reconnectSelector(current, profileId, "RUNTIME_CHANGED")
                 }
                 val accepted = try { running.box.selectOutbound(tag) } catch (e: Exception) {
@@ -154,9 +165,18 @@ class BaseService {
                 if (current.proxy !== running) {
                     return selectorError("SERVICE_CHANGED", "running proxy changed during selection")
                 }
+                // Publish the logical selection immediately after native ACK. The
+                // title is cosmetic and is refreshed off the Binder thread below.
                 DataStore.selectedProxy = profileId
                 DataStore.currentProfile = profileId
-                running.displayProfileName = ServiceNotification.genTitle(ent)
+                launch(Dispatchers.Default) {
+                    SagerDatabase.proxyDao.getById(profileId)?.let { ent ->
+                        if (current.proxy === running && current.state == State.Connected) {
+                            running.displayProfileName = ServiceNotification.genTitle(ent)
+                            current.notification?.postNotificationTitle(running.displayProfileName)
+                        }
+                    }
+                }
                 return JSONObject().put("ok", true).put("ack", true).put("mode", "hot")
                     .put("reloading", false).put("profileId", profileId).put("actualId", profileId)
                     .put("tag", tag).toString()
@@ -168,14 +188,10 @@ class BaseService {
             if (!ServiceStartPolicy.fence.permitsAutomatic() || current.state != State.Connected) {
                 return selectorError("USER_STOPPED", "connection is no longer available")
             }
-            // Preflight before teardown: an invalid target keeps the existing connection.
-            try {
-                val target = SagerDatabase.proxyDao.getById(profileId)
-                    ?: return selectorError("NOT_FOUND", "profile no longer exists")
-                buildConfig(target, disableSelector = true)
-            } catch (e: Exception) {
-                return selectorError("INVALID_CONFIG", e.readableMessage)
-            }
+            // Reconnect is a fallback, not a reason to block the binder call on a
+            // second full configuration build. The running selector already told
+            // us that this target was not loaded; preflight happens in the new
+            // runner and failure leaves the old instance untouched until teardown.
             DataStore.selectedProxy = profileId
             // currentProfile remains the ACTUAL running node until the replacement starts.
             current.service.stopRunner(restart = true)

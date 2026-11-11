@@ -4,6 +4,8 @@ import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.ServiceNotification
 import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.fmt.ConfigBuildCache
+import io.nekohasekai.sagernet.fmt.SelectorGeneration
 import io.nekohasekai.sagernet.fmt.buildConfig
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
@@ -23,8 +25,19 @@ class ProxyInstance(profile: ProxyEntity, var service: BaseService.Interface? = 
     var looper: TrafficLooper? = null
 
     override fun buildConfig() {
+        val generation = SelectorGeneration.current()
+        val disableSelector = disableRuntimeSelector
+        if (notTmp) {
+            ConfigBuildCache.get(profile.id, generation, disableSelector)?.let {
+                config = it
+                lastSelectorGroupId = it.selectorGroupId
+                Logs.d("selector config cache hit id=${profile.id} generation=$generation")
+                return
+            }
+        }
+        val started = android.os.SystemClock.elapsedRealtime()
         try {
-            if (disableRuntimeSelector) config = buildConfig(profile, disableSelector = true)
+            if (disableSelector) config = buildConfig(profile, disableSelector = true)
             else super.buildConfig()
         } catch (e: Exception) {
             // An unrelated enabled group's malformed chain/custom outbound must not
@@ -33,6 +46,10 @@ class ProxyInstance(profile: ProxyEntity, var service: BaseService.Interface? = 
             Logs.w("Global selector compilation failed; using selected-node config: ${e.message}")
             config = buildConfig(profile, disableSelector = true)
         }
+        // A global build failure falls back to a single-node config; never cache
+        // that fallback under the global-selector key.
+        if (notTmp && (disableSelector || config.globalSelector)) ConfigBuildCache.put(config, disableSelector)
+        Logs.d("selector config build id=${profile.id} generation=${config.selectorGeneration} elapsed=${android.os.SystemClock.elapsedRealtime() - started}ms global=${config.globalSelector}")
         lastSelectorGroupId = config.selectorGroupId
         //
         if (notTmp) Logs.d(config.config)
@@ -46,8 +63,10 @@ class ProxyInstance(profile: ProxyEntity, var service: BaseService.Interface? = 
     }
 
     override suspend fun init() {
+        val initStarted = android.os.SystemClock.elapsedRealtime()
         try {
             super.init()
+            Logs.d("proxy init id=${profile.id} build+plugins+native elapsed=${android.os.SystemClock.elapsedRealtime() - initStarted}ms global=${config.globalSelector}")
         } catch (e: Exception) {
             if (disableRuntimeSelector || !runCatching { config.globalSelector }.getOrDefault(false)) throw e
             // Includes unavailable plugins or native-invalid custom members in OTHER

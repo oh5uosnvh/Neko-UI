@@ -81,6 +81,8 @@ class ConfigBuildResult(
     val selectorFingerprint: String = "",
     /** Allocated loopback ports keyed by this build, values are stable chain identities. */
     val runtimePorts: Map<Int, String> = emptyMap(),
+    /** Database selector-graph generation captured when this snapshot was built. */
+    val selectorGeneration: Long = SelectorGeneration.current(),
 ) {
     data class IndexEntity(var chain: LinkedHashMap<Int, ProxyEntity>)
 }

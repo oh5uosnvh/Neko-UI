@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.database
 
 import io.nekohasekai.sagernet.GroupType
 import io.nekohasekai.sagernet.bg.SubscriptionUpdater
+import io.nekohasekai.sagernet.fmt.SelectorGeneration
 
 object GroupManager {
 
@@ -58,12 +59,14 @@ object GroupManager {
     }
 
     suspend fun clearGroup(groupId: Long) {
+        SelectorGeneration.invalidate()
         DataStore.selectedProxy = 0L
         SagerDatabase.proxyDao.deleteAll(groupId)
         iterator { groupUpdated(groupId) }
     }
 
     fun rearrange(groupId: Long) {
+        SelectorGeneration.invalidate()
         val entities = SagerDatabase.proxyDao.getByGroup(groupId)
         for (index in entities.indices) {
             entities[index].userOrder = (index + 1).toLong()
@@ -88,6 +91,7 @@ object GroupManager {
 
     /** Clipboard/import path: profiles, root group and optional classification commit together. */
     suspend fun createGroup(group: ProxyGroup, tagId: Long?, profiles: List<ProxyEntity>): ProxyGroup {
+        SelectorGeneration.invalidate()
         SagerDatabase.instance.tagStore.createRootGroup(group, tagId, profiles)
         iterator { groupAdd(group) }
         if (group.type == GroupType.SUBSCRIPTION) {
@@ -97,6 +101,7 @@ object GroupManager {
     }
 
     suspend fun updateGroup(group: ProxyGroup) {
+        SelectorGeneration.invalidate()
         SagerDatabase.groupDao.updateGroup(group)
         iterator { groupUpdated(group) }
         if (group.type == GroupType.SUBSCRIPTION) {
@@ -105,12 +110,14 @@ object GroupManager {
     }
 
     suspend fun deleteGroup(groupId: Long) {
+        SelectorGeneration.invalidate()
         SagerDatabase.instance.tagStore.deleteRootGroups(listOf(groupId))
         iterator { groupRemoved(groupId) }
         SubscriptionUpdater.reconfigureUpdater()
     }
 
     suspend fun deleteGroup(group: List<ProxyGroup>) {
+        if (group.isNotEmpty()) SelectorGeneration.invalidate()
         SagerDatabase.instance.tagStore.deleteRootGroups(group.map { it.id })
         for (proxyGroup in group) iterator { groupRemoved(proxyGroup.id) }
         SubscriptionUpdater.reconfigureUpdater()

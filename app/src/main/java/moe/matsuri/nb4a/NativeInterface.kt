@@ -91,12 +91,12 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
                 val running = data.proxy ?: return@runOnDefaultDispatcher
                 val id = running.config.profileTagMap
                     .filterValues { it == tag }.keys.firstOrNull() ?: return@runOnDefaultDispatcher
-                val ent = SagerDatabase.proxyDao.getById(id) ?: return@runOnDefaultDispatcher
-                // Validate the callback against the exact compiled runtime map;
-                // never let a stale/web-ui tag update host state.
+                // The running immutable tag/traffic map is the authoritative
+                // membership proof. Do not call Room/buildConfig() here: this
+                // callback is emitted after native selector ACK and must stay fast.
                 val compiled = running.config.trafficMap[tag].orEmpty()
-                if (compiled.none { it.id == id } || tag.isBlank() ||
-                    !isCompiledSelectorCurrent(id)) {
+                val ent = compiled.firstOrNull { it.id == id }
+                if (ent == null || tag.isBlank()) {
                     Logs.w("reject selector callback outside current compiled membership: $tag/$id")
                     return@runOnDefaultDispatcher
                 }
