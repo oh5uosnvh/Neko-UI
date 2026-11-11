@@ -75,6 +75,12 @@ internal class QuickPopupTestEnvironment : AutoCloseable {
         install(SagerDatabase::class.java, database)
         install(PublicDatabase::class.java, preferences)
         install(TempDatabase::class.java, cache)
+        // Staged UI navigation is process-global, unlike the injected preference DB.
+        // Isolate and restore it too; otherwise one real picker-choice test contaminates
+        // the selected stable ID of every later sandbox fixture.
+        val previousPending = ReflectionHelpers.getField<Long>(DataStore, "pendingSelectedGroup")
+        ReflectionHelpers.setField(DataStore, "pendingSelectedGroup", 0L)
+        restore += { ReflectionHelpers.setField(DataStore, "pendingSelectedGroup", previousPending) }
         // A reused sandbox may already have DataStore delegates; replace their DAO, not the delegates.
         for ((store, dao) in listOf(DataStore.configurationStore to preferences.keyValuePairDao(),
             DataStore.profileCacheStore to cache.profileCacheDao())) {

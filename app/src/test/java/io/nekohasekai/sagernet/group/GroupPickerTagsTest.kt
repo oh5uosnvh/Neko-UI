@@ -134,11 +134,13 @@ class GroupPickerTagsTest {
                 {}, {}, { back++ })
             header.bind(GroupPickerNavigation.Page.Members(77L), "Work")
             val title = descendants(header).filterIsInstance<TextView>().first { it.text.toString() == "Work" }
-            assertTrue(title.performLongClick())
+            assertFalse("Decorative title must not steal short taps", title.isLongClickable)
+            val row = header.getChildAt(1) as View
+            assertTrue(row.performLongClick())
             assertEquals(77L, toggled)
-            title.performClick()
+            assertFalse(title.performClick())
             assertEquals(0, back)
-            (header.getChildAt(1) as View).performClick()
+            row.performClick()
             assertEquals(1, back)
         } finally {
             GroupPickerTagScopeBridge.onLongPress = null
