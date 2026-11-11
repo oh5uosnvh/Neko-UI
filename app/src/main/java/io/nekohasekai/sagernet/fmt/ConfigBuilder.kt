@@ -75,6 +75,8 @@ class ConfigBuildResult(
     val selectorGroupId: Long,
     /** True when the running config owns a global selector, not a group-local one. */
     val globalSelector: Boolean = false,
+    /** Ordinary DNS table identity; unlike node resolvers, this requires an explicit reconnect. */
+    val selectorApplicationDnsFingerprint: String = "",
     /** Fingerprint of selector membership, chains and DNS policy at build time. */
     val selectorFingerprint: String = "",
 ) {
@@ -208,6 +210,8 @@ fun buildConfig(
         .mapNotNull { dns -> dns.trim().takeIf { it.isNotBlank() && !it.startsWith("#") } }
     val directDNS = DataStore.directDns.split("\n")
         .mapNotNull { dns -> dns.trim().takeIf { it.isNotBlank() && !it.startsWith("#") } }
+    val selectorDns = SelectorDnsPolicy(directDNS)
+    val applicationDnsFingerprint = selectorDns.applicationFingerprint(activeDns, activeSubscription)
     val dnsHosts by lazy { parseDnsHosts(DataStore.dnsHosts) }
     val enableDnsRouting = DataStore.enableDnsRouting
     val useFakeDns = DataStore.enableFakeDns && !forTest
@@ -375,7 +379,12 @@ fun buildConfig(
                 val nodeSubscription = nodeGroup?.subscription
                 val nodeDnsConfig = subscriptionDns.config(bean, nodeSubscription)
                 NodeHostMapping.apply(bean, nodeDnsConfig.hosts, nodeSubscription?.applyHosts != false)
-                val nodeResolver = subscriptionDns.node(bean, nodeSubscription)
+                // Resolve every compiled node through its own group's fallback, never the
+                // active group's dns-direct. Even a node without imported DNS needs isolation.
+                val nodeResolver = if (globalSelector) {
+                    val fallback = selectorDns.nodeFallback(nodeDnsConfig, nodeSubscription)
+                    subscriptionDns.node(bean, nodeSubscription, fallback) ?: fallback
+                } else subscriptionDns.node(bean, nodeSubscription)
                 val preserveMultiAddress = nodeSubscription?.applyHosts != false && NodeHostMapping.hasMultipleAddresses(bean, nodeDnsConfig.hosts)
                 // Keep all IP candidates in the resolver instead of freezing a multi-IP hosts entry.
                 if (preserveMultiAddress) bean.serverAddress = bean.mappedOriginalAddress
@@ -616,25 +625,9 @@ fun buildConfig(
         if (buildSelector) {
             val members = if (globalSelector) {
                 val groups = SagerDatabase.groupDao.allGroups()
-                fun dnsPolicy(item: ProxyGroup): String {
-                    val s = item.subscription
-                    return listOf(
-                        s?.serverDnsResolver.orEmpty(), s?.directDnsResolver.orEmpty(),
-                        s?.privateDnsConfig.orEmpty(), s?.hostsConfig.orEmpty(),
-                        s?.importedDnsConfig.orEmpty(), (s?.applyHosts != false).toString(),
-                    ).joinToString("\u0000")
-                }
-                val basePolicy = dnsPolicy(group!!)
-                groups.filter { dnsPolicy(it) != basePolicy }.firstOrNull()?.let { incompatible ->
-                    throw IllegalArgumentException(
-                        "Global selector cannot mix subscription DNS policies: ${incompatible.displayName()}"
-                    )
-                }
-                // Policy is part of the runtime fingerprint as well: even a
-                // uniform edit must invalidate a running config before switching.
-                selectorFingerprintParts += groups.sortedBy { it.id }.map {
-                    "group:${it.id}:dns:${dnsPolicy(it)}"
-                }
+                // Application DNS belongs to the selected node, while each member has
+                // an isolated node resolver. Differences in unrelated subscriptions must
+                // not abort VPN startup. Full output fingerprint still fences live edits.
                 groups.flatMap { groupItem -> SagerDatabase.proxyDao.getByGroup(groupItem.id) }
             } else {
                 SagerDatabase.proxyDao.getByGroup(group!!.id)
@@ -1004,6 +997,8 @@ fun buildConfig(
             detour = TAG_DIRECT
         })
 
+        // Isolated fallbacks must exist before any node policy referencing them is built.
+        dns.servers.addAll(selectorDns.servers)
         if (subscriptionDirectDns.isNotEmpty()) {
             subscriptionDns.direct(subscriptionDirectDns)
             // Legacy remote DNS resolves its address_resolver during construction, not Start.
@@ -1108,7 +1103,10 @@ fun buildConfig(
                 })
             }
             // Subscription policy is scoped to the active group. Only matched domains override app DNS.
-            val subscriptionRules = subscriptionDns.general(proxy.requireBean(), activeSubscription, "dns-remote")
+            val subscriptionRules = if (globalSelector) {
+                // Node-only DNS/format differences must not alter the application resolver tag.
+                subscriptionDns.general(proxy.requireBean(), selectorDns.generalSubscription(activeDns), "dns-remote")
+            } else subscriptionDns.general(proxy.requireBean(), activeSubscription, "dns-remote")
             dns.rules.addAll(0, subscriptionRules)
         }
 
@@ -1125,6 +1123,7 @@ fun buildConfig(
             tagMap,
             if (buildSelector) if (globalSelector) GLOBAL_SELECTOR_GROUP_ID else group!!.id else -1L,
             globalSelector = globalSelector,
+            selectorApplicationDnsFingerprint = if (buildSelector) applicationDnsFingerprint else "",
             selectorFingerprint = if (buildSelector) {
                 SelectorFingerprint.of(selectorFingerprintParts + SelectorFingerprint.policy(configMap))
             } else ""

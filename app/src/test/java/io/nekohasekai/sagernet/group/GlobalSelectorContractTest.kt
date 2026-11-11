@@ -26,7 +26,9 @@ class GlobalSelectorContractTest {
         val builder = source("java/io/nekohasekai/sagernet/fmt/ConfigBuilder.kt")
         assertTrue(builder.contains("DataStore.globalSelector"))
         assertTrue(builder.contains("SagerDatabase.groupDao.allGroups()"))
-        assertTrue(builder.contains("Global selector cannot mix subscription DNS policies"))
+        assertFalse(builder.contains("Global selector cannot mix subscription DNS policies"))
+        assertTrue(builder.contains("selectorDns.nodeFallback(nodeDnsConfig, nodeSubscription)"))
+        assertTrue(builder.contains("selectorApplicationDnsFingerprint"))
         assertTrue(builder.contains("it.resolveChain()"))
         assertTrue(builder.contains("selectorFingerprint"))
     }

@@ -183,6 +183,34 @@ class GroupPickerTagsSessionTest {
         }
     }
 
+    @Test fun lockedReopenPrioritizesSelectedGroupIdOverRememberedViewportAndDuplicateTitles() {
+        Fixture().use { f ->
+            val tag = TagGroupStore.create("良心云")
+            TagGroupStore.add(tag.id, f.roots.map { it.id })
+            // Independent root IDs share exactly the same displayed title.
+            val renamed = f.roots.map { it.copy(name = "良心云") }
+            renamed.forEach { f.environment.database.groupDao().updateGroup(it) }
+            f.host.adapter.groupList = ArrayList(renamed)
+            f.show(); f.tags(); f.open(tag.id)
+            (f.memberList.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(0, 0)
+            f.frame()
+            assertEquals(f.roots[0].id, pickerViewport(f.memberList, f.memberAdapter.ids)?.id)
+            ReflectionHelpers.setField(f.host, "scopedTagId", tag.id)
+            val selected = f.roots[34].id
+            DataStore.stageSelectedGroup(selected)
+            f.reopen()
+            assertEquals(GroupPickerNavigation.Page.Members(tag.id), f.navigation.page)
+            val position = f.memberAdapter.ids.indexOf(selected)
+            val layout = f.memberList.layoutManager as LinearLayoutManager
+            assertTrue("Selected group visible at first completed layout", position in
+                layout.findFirstVisibleItemPosition()..layout.findLastVisibleItemPosition())
+            val holder = f.memberList.findViewHolderForAdapterPosition(position) as GroupPickerAdapter.Holder
+            assertEquals(selected, f.memberAdapter.ids[holder.bindingAdapterPosition])
+            assertTrue("Same-title selected ID is highlighted", holder.row.isSelected)
+            assertTrue("Selection does not fall back to first duplicate", position > 0)
+        }
+    }
+
     @Test fun reopenRemembersMembersAndAllPixelViewportsDeletedTagFallsBack() {
         Fixture().use { f ->
             val tags = (0..23).map { TagGroupStore.create("Tag $it") }

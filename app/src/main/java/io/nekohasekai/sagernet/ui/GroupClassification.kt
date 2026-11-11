@@ -104,11 +104,65 @@ internal object GroupClassification {
             (shorter.any { it in 'a'..'z' } || shorter.any { it.code in 0x2E80..0x9FFF })
     }
 
+    /** Contiguous Han sequences only: punctuation/Latin gaps cannot manufacture a match. */
+    private fun hanTerms(value: String): Set<String> {
+        val normalized = Normalizer.normalize(value, Normalizer.Form.NFKC)
+        val terms = linkedSetOf<String>()
+        Regex("[\\p{IsHan}]{2,}").findAll(normalized).forEach { match ->
+            val run = match.value
+            for (start in run.indices) for (length in 2..minOf(24, run.length - start)) {
+                val term = run.substring(start, start + length)
+                if (term !in genericHanTerms) terms += term
+            }
+        }
+        return terms
+    }
+
+    // Shared descriptors are not brands. Single-character matches are never considered.
+    private val genericHanTerms = setOf("机场", "网络", "配置", "订阅", "直连", "检测",
+        "备用", "节点", "自建", "聚合", "高速", "流量", "到期", "套餐", "剩余")
+
     /**
-     * Find repeated families. Families are anchored at their first source item
-     * and are not connected components, preventing transitive over-merges.
+     * Indexed two-or-more-character brand matching, including middle and suffix positions.
+     * Every member matches the SAME term directly, never a transitive graph edge.
+     * Coverage wins over a longer descriptive suffix (蓝猫 vs 蓝猫直连); on equal
+     * coverage retain the longest shared brand. Root order and duplicate IDs survive.
      */
+    private fun <T> hanClusters(source: List<T>, name: (T) -> String): List<NameCluster<T>> {
+        val terms = source.map { hanTerms(name(it)) }
+        val index = linkedMapOf<String, MutableList<Int>>()
+        terms.forEachIndexed { i, values -> values.forEach { index.getOrPut(it) { ArrayList() } += i } }
+        val consumed = BooleanArray(source.size)
+        val result = ArrayList<NameCluster<T>>()
+        source.indices.forEach { anchor ->
+            if (consumed[anchor]) return@forEach
+            val options = terms[anchor].mapNotNull { term ->
+                val members = index[term].orEmpty().filterNot { consumed[it] }
+                if (members.size < 2) null else term to members
+            }
+            val chosen = options.maxWithOrNull(compareBy<Pair<String, List<Int>>> { it.second.size }
+                .thenBy { it.first.length }.thenBy { -name(source[anchor]).indexOf(it.first) })
+                ?: return@forEach
+            chosen.second.forEach { consumed[it] = true }
+            val canonical = chosen.second.firstOrNull { compact(name(source[it])) == chosen.first }
+            val label = canonical?.let { name(source[it]).trim() } ?: chosen.first
+            result += NameCluster(label, chosen.second.map { source[it] })
+        }
+        return result
+    }
+
+    /** Find directly shared Chinese brands first, then the existing bounded Latin families. */
     fun <T> namedClusters(source: List<T>, name: (T) -> String): List<NameCluster<T>> {
+        if (source.size < 2) return emptyList()
+        val chinese = hanClusters(source, name)
+        val chineseMembers = chinese.flatMap { it.members }.toSet()
+        val remaining = source.filterNot { it in chineseMembers }
+        return (chinese + boundedClusters(remaining, name)).sortedBy { cluster ->
+            source.indexOfFirst { it in cluster.members }
+        }
+    }
+
+    private fun <T> boundedClusters(source: List<T>, name: (T) -> String): List<NameCluster<T>> {
         if (source.size < 2) return emptyList()
         val signatures = source.map { signature(name(it)) }
         val consumed = BooleanArray(source.size)

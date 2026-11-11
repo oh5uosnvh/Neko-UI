@@ -62,6 +62,64 @@ class GlobalSelectorBuildTest {
         assertFalse(rules.any { it.toString() == "{\"action\":\"reject\"}" })
     }
 
+    private fun dns(node: ProxyEntity, server: String = "", direct: String = "", hosts: String = "") {
+        val group = env.database.groupDao().getById(node.groupId)!!
+        group.subscription = SubscriptionBean().apply {
+            initializeDefaultValues()
+            serverDnsResolver = server
+            directDnsResolver = direct
+            hostsConfig = hosts
+        }
+        env.database.groupDao().updateGroup(group)
+    }
+
+    @Test fun unrelatedServerDnsDifferencesDoNotAbortStartupOrBlockCompatibleSwitches() {
+        val a = node("A", "same name")
+        val b = node("饿饭sunny", "same name")
+        dns(a, server = "udp://1.1.1.1")
+        dns(b, server = "udp://9.9.9.9")
+        val ca = buildConfig(a)
+        val cb = buildConfig(b)
+        assertEquals(setOf(a.id, b.id), ca.profileTagMap.keys)
+        assertEquals(ca.selectorApplicationDnsFingerprint, cb.selectorApplicationDnsFingerprint)
+        assertEquals(ca.selectorFingerprint, cb.selectorFingerprint)
+        val json = com.google.gson.JsonParser.parseString(ca.config).asJsonObject
+        val outbounds = json.getAsJsonArray("outbounds")
+        val resolvers = listOf(a, b).map { node ->
+            outbounds.first { it.asJsonObject.get("tag").asString == ca.profileTagMap[node.id] }
+                .asJsonObject.getAsJsonObject("domain_resolver").get("server").asString
+        }
+        assertNotEquals(resolvers[0], resolvers[1])
+    }
+
+    @Test fun differentDirectDnsStartsButRequiresExplicitApplicationPolicyReconnect() {
+        val a = node("A", "one")
+        val b = node("B", "two")
+        dns(b, direct = "udp://9.9.9.9")
+        val ca = buildConfig(a)
+        val cb = buildConfig(b)
+        assertEquals(setOf(a.id, b.id), ca.profileTagMap.keys)
+        assertNotEquals(ca.selectorApplicationDnsFingerprint, cb.selectorApplicationDnsFingerprint)
+        assertNotEquals(ca.selectorFingerprint, cb.selectorFingerprint)
+        val servers = com.google.gson.JsonParser.parseString(ca.config).asJsonObject
+            .getAsJsonObject("dns").getAsJsonArray("servers")
+        assertTrue(servers.any { it.toString().contains("9.9.9.9") })
+        assertTrue(servers.any { it.asJsonObject.get("tag").asString.startsWith("dns-selector-direct-") })
+    }
+
+    @Test fun applicationHostsAreNotSilentlySharedBetweenSelectedGroups() {
+        val a = node("A", "one")
+        val b = node("B", "two")
+        dns(b, hosts = "hosts:\n  app.example: 203.0.113.7\n")
+        val ca = buildConfig(a)
+        val cb = buildConfig(b)
+        assertNotEquals(ca.selectorApplicationDnsFingerprint, cb.selectorApplicationDnsFingerprint)
+        val rulesA = com.google.gson.JsonParser.parseString(ca.config).asJsonObject.getAsJsonObject("dns").getAsJsonArray("rules")
+        val rulesB = com.google.gson.JsonParser.parseString(cb.config).asJsonObject.getAsJsonObject("dns").getAsJsonArray("rules")
+        assertFalse(rulesA.any { it.toString().contains("app") && it.toString().contains("example") })
+        assertTrue(rulesB.any { it.toString().contains("app") && it.toString().contains("example") })
+    }
+
     @Test fun changedMemberInvalidatesRunningPolicy() {
         val a = node("A", "one")
         val b = node("B", "two")

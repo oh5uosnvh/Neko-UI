@@ -3,6 +3,8 @@ package io.nekohasekai.sagernet.ui
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Typeface
+import android.content.res.ColorStateList
+import android.graphics.drawable.RippleDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.text.Spannable
@@ -160,8 +162,10 @@ internal class GroupPickerHeader(
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(8), 0, dp(8), 0)
-        background = card(false)
+        background = RippleDrawable(ColorStateList.valueOf((color and 0x00ffffff) or 0x24000000),
+            card(false), card(false))
         isFocusable = true
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         addView(SubmenuBackIcon(context, color), LayoutParams(dp(20), dp(24)))
         addView(icon, LayoutParams(dp(24), dp(24)).apply { marginStart = dp(8) })
         addView(title, LayoutParams(0, -2, 1f).apply { marginStart = dp(8) })
@@ -172,9 +176,11 @@ internal class GroupPickerHeader(
         orientation = VERTICAL
         setPadding(dp(12), dp(4), dp(12), 0)
         minimumHeight = dp(52)
-        // Only the title is lockable. The surrounding row keeps its existing
-        // short-click back action, including after a long-press is cancelled.
-        QuickLongPress(title) { view ->
+        // One accessible gesture owner for the entire capsule. A long-clickable title
+        // takes DOWN even without a click listener, swallowing every short tap over
+        // its weighted width (including the apparent blank space). Decorative children
+        // must stay inert; the separate clickable red marker alone owns its gestures.
+        QuickLongPress(backRow) { view ->
             val id = boundTagId
             if (id == null) false else GroupPickerTagScopeBridge.onLongPress?.invoke(id, view) ?: false
         }

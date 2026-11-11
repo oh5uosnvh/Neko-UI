@@ -768,7 +768,11 @@ internal class TopBarController(
         private val navigation = if (host.select) GroupPickerNavigation() else pickerNavigation
         private var tagRows: List<TagGroup> = emptyList()
         private var memberIds: Set<Long> = emptySet()
-        private var memberNeedsSelection = false
+        // Fresh opens of a locked scope locate the current selected GROUP, not the
+        // last browsing anchor captured on close. Ordinary in-session tag navigation
+        // still restores each tag's exact viewport.
+        private var memberNeedsSelection = (navigation.page as? GroupPickerNavigation.Page.Members)
+            ?.tagId?.let { !host.select && it == host.currentLockedTagId() } == true
         private var tagsLoaded = false
         private var tagsFailed = false
         private var tagsWatching: Job? = null
@@ -1232,10 +1236,13 @@ internal class TopBarController(
                         memberIds = ids
                         val memberId = (navigation.page as? GroupPickerNavigation.Page.Members)?.tagId
                         val remembered = memberId?.let { pickerMemberViewports[it] }
-                        val seed = (seedSelection || memberNeedsSelection || restoringMembers) && remembered == null
+                        val prioritizeSelection = memberNeedsSelection
+                        val seed = prioritizeSelection || ((seedSelection || restoringMembers) && remembered == null)
                         memberNeedsSelection = false
                         refreshMemberRows(seed)
-                        if (restoringMembers && remembered != null) remembered.restore(memberList, memberAdapter.ids)
+                        // A fresh locked-scope open must not restore an old browsing anchor
+                        // over the just-seeded selected GROUP ID.
+                        if (restoringMembers && remembered != null && !prioritizeSelection) remembered.restore(memberList, memberAdapter.ids)
                         restoringMembers = false
                         renderPage() // rename updates third-level title immediately
                     }

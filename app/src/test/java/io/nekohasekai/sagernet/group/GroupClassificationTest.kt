@@ -79,7 +79,32 @@ class GroupClassificationTest {
         )
         assertEquals(listOf(1L, 2L, 3L, 4L, 5L, 6L, 7L), GroupClassification.stableClusterIds(source))
         val clusters = GroupClassification.namedClusters(source) { it.second }
-        assertEquals(listOf("黑石", "黑石VPN机场"), clusters.map { it.label })
-        assertEquals(listOf(2, 2), clusters.map { it.members.size })
+        // All four share the same direct two-character brand; this is not a
+        // transitive merge via intermediate names, as in the former bounded rule.
+        assertEquals(listOf("黑石"), clusters.map { it.label })
+        assertEquals(listOf(4), clusters.map { it.members.size })
+    }
+
+    @Test fun screenshotFamiliesMatchPrefixMiddleAndSuffixWithoutBareAnchor() {
+        val source = listOf("飞猪云", "飞猪云", "飞猪聚合", "饿饭sunny", "饿饭CC云",
+            "bitboo✘饿饭🍚", "饿饭漏洞uid", "蓝猫检测", "蓝猫直连A", "蓝猫直连B")
+            .mapIndexed { i, value -> i.toLong() to value }
+        val clusters = GroupClassification.namedClusters(source) { it.second }
+        assertEquals(listOf("飞猪", "饿饭", "蓝猫"), clusters.map { it.label })
+        assertEquals(listOf(listOf(0L, 1L, 2L), listOf(3L, 4L, 5L, 6L), listOf(7L, 8L, 9L)),
+            clusters.map { it.members.map { member -> member.first } })
+    }
+
+    @Test fun genericDescriptorsAndOneCharacterCannotBridgeDistinctBrands() {
+        val source = listOf("甲机场", "乙机场", "甲网络", "乙网络", "黑石", "黑石蓝猫", "蓝猫")
+            .mapIndexed { i, value -> i.toLong() to value }
+        val clusters = GroupClassification.namedClusters(source) { it.second }
+        assertEquals(listOf("黑石"), clusters.map { it.label })
+        assertEquals(listOf(4L, 5L), clusters.single().members.map { it.first })
+    }
+
+    @Test fun exactLongBrandWinsWhenCoverageIsEqual() {
+        val source = listOf(1L to "良心云|甲", 2L to "良心云|乙", 3L to "良心云")
+        assertEquals("良心云", GroupClassification.namedClusters(source) { it.second }.single().label)
     }
 }

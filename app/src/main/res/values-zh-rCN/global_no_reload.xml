@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="global_no_reload">全局免重载</string>
-    <string name="global_no_reload_enabled">已开启全局 selector。需重新连接一次载入全部分组节点，之后兼容节点可跨分组免重载切换。</string>
+    <string name="global_no_reload_enabled">已开启全局 selector。重新连接一次载入全部分组节点；相同应用 DNS 策略的兼容节点可跨组免重载切换，不同应用 DNS 策略需手动重连，不会自动重启。</string>
     <string name="global_no_reload_disabled">已关闭全局 selector。重新连接后恢复各分组原来的 selector 设置。</string>
 </resources>
