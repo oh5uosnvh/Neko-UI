@@ -76,6 +76,7 @@ type BoxInstance struct {
 
 	v2api        *boxapi.SbV2rayServer
 	selector     *group.Selector
+	clashServer  adapter.ClashServer
 	pauseManager pause.Manager
 }
 
@@ -95,6 +96,7 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 	var options option.Options
 	err = options.UnmarshalJSONContext(ctx, []byte(config))
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("decode config: %v", err)
 	}
 
@@ -112,6 +114,7 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 	b = &BoxInstance{
 		Box:          instance,
 		cancel:       cancel,
+		clashServer:  service.FromContext[adapter.ClashServer](ctx),
 		pauseManager: service.FromContext[pause.Manager](ctx),
 	}
 
@@ -131,11 +134,17 @@ func (b *BoxInstance) Start() (err error) {
 
 	defer device.DeferPanicToError("box.Start", func(err_ error) { err = err_ })
 
-	if b.state == 0 {
-		b.state = 1
-		return b.Box.Start()
+	if b.state != 0 {
+		return errors.New("box already started, failed, or closed")
 	}
-	return errors.New("already started")
+	// A failed/panicking start is terminal; it must never expose mode mutation
+	// or silently retry/reload the partially started core.
+	b.state = 3
+	if err = b.Box.Start(); err != nil {
+		return err
+	}
+	b.state = 1
+	return nil
 }
 
 func (b *BoxInstance) Close() (err error) {
@@ -161,7 +170,7 @@ func (b *BoxInstance) Close() (err error) {
 		b.cancel()
 	}
 	if b.Box != nil {
-		b.Box.Close()
+		return b.Box.Close()
 	}
 
 	return nil
@@ -211,6 +220,39 @@ func (b *BoxInstance) SelectOutbound(tag string) bool {
 		return b.selector.SelectOutbound(tag)
 	}
 	return false
+}
+
+// SetRuntimeMode changes only the compiled Clash mode. It never rebuilds the
+// Box, listeners, TUN stack, or VPN service. The caller can therefore use the
+// return value as the commit acknowledgement for an in-process mode toggle.
+func (b *BoxInstance) SetRuntimeMode(newMode string) (ok bool, err error) {
+	b.access.Lock()
+	defer b.access.Unlock()
+	defer device.DeferPanicToError("box.SetRuntimeMode", func(err_ error) { ok = false; err = err_ })
+	if b.state != 1 {
+		return false, errors.New("box is not running")
+	}
+	if b.clashServer == nil {
+		return false, errors.New("runtime mode is not compiled into this box")
+	}
+	// This bridge is intentionally limited to the precompiled Rule/Global
+	// prototype, even if a custom Clash config advertises additional modes.
+	if !strings.EqualFold(newMode, "Rule") && !strings.EqualFold(newMode, "Global") {
+		return false, errors.New("only Rule and Global runtime modes are supported")
+	}
+	if !b.clashServer.SetMode(newMode) {
+		return false, errors.New("requested runtime mode is not compiled into this box")
+	}
+	return true, nil
+}
+
+func (b *BoxInstance) RuntimeMode() string {
+	b.access.Lock()
+	defer b.access.Unlock()
+	if b.clashServer == nil {
+		return ""
+	}
+	return b.clashServer.Mode()
 }
 
 func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err error) {

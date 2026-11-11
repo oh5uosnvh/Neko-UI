@@ -84,6 +84,9 @@ class BaseService {
         }
         @Volatile var closeReceiverRegistered = false
 
+        /** Serializes a hot mode change with the transition to Stopping. */
+        val globalModeLock = Any()
+
         val binder = Binder(this)
         var connectingJob: Job? = null
         var probeJob: Job? = null
@@ -121,6 +124,69 @@ class BaseService {
         override fun getState(): Int = (data?.state ?: State.Idle).ordinal
         override fun getProfileName(): String = data?.proxy?.displayProfileName ?: "Idle"
         override fun getConnectionProbe(): String = data?.connectionProbe.orEmpty()
+
+        /**
+         * Synchronous by design: the UI must not persist a requested value until
+         * the native box has acknowledged it.  The lock also makes this atomic
+         * with stopRunner's transition to Stopping.
+         */
+        override fun setGlobalMode(desired: Boolean): String {
+            val current = data ?: return modeError("SERVICE_GONE", "service binder is closed")
+            synchronized(current.globalModeLock) {
+                val state = current.state
+                if (state == State.Connecting || state == State.Stopping) {
+                    return modeError("BUSY", "service is ${state.name.lowercase()}")
+                }
+                if (state != State.Connected) {
+                    // Stopped is intentionally not an error: callers may save a
+                    // value for the next start, but no hot switch is attempted.
+                    return JSONObject().put("ok", true).put("ack", false)
+                        .put("actual", desired).put("deferred", true).toString()
+                }
+                val proxy = current.proxy
+                    ?: return modeError("NO_PROXY", "proxy is not initialized")
+                if (!proxy.isInitialized() || !proxy.config.runtimeModeSupported) {
+                    return modeError("UNSUPPORTED", "runtime mode requires native automatic configuration")
+                }
+                return try {
+                    val requestedMode = if (desired) "Global" else "Rule"
+                    val acknowledged = proxy.box.setRuntimeMode(requestedMode)
+                    val actual = proxy.box.runtimeMode()
+                    val expected = if (desired) "global" else "rule"
+                    if (!acknowledged || !actual.equals(expected, ignoreCase = true)) {
+                        modeError("NOT_ACKNOWLEDGED", "core actual mode is $actual")
+                    } else {
+                        JSONObject().put("ok", true).put("ack", true)
+                            .put("requested", desired).put("actual", actual).toString()
+                    }
+                } catch (e: Throwable) {
+                    modeError("CORE_ERROR", e.message ?: e.javaClass.simpleName)
+                }
+            }
+        }
+
+        override fun getGlobalMode(): String {
+            val current = data ?: return modeError("SERVICE_GONE", "service binder is closed")
+            synchronized(current.globalModeLock) {
+                val proxy = current.proxy
+                if (current.state != State.Connected || proxy == null || !proxy.isInitialized()) {
+                    return modeError("UNAVAILABLE", "core is not connected")
+                }
+                if (!proxy.config.runtimeModeSupported) {
+                    return modeError("UNSUPPORTED", "runtime mode requires native automatic configuration")
+                }
+                return try {
+                    JSONObject().put("ok", true).put("ack", true)
+                        .put("actual", proxy.box.runtimeMode()).toString()
+                } catch (e: Throwable) {
+                    modeError("CORE_ERROR", e.message ?: e.javaClass.simpleName)
+                }
+            }
+        }
+
+        private fun modeError(code: String, message: String): String =
+            JSONObject().put("ok", false).put("ack", false)
+                .put("error", code).put("message", message).toString()
 
         fun connectionProbeChanged(snapshot: String) = launch {
             broadcast { it.connectionProbe(snapshot) }
@@ -272,8 +338,13 @@ class BaseService {
                 BootReceiver.enabled = false
                 Logs.d("Service user stop: epoch=$epoch")
             }
-            if (data.state == State.Stopping) return
-            data.pendingRestartEpoch = if (restart) ServiceStartPolicy.fence.snapshot() else null
+            // Take the same lock as setGlobalMode: whichever operation wins
+            // first owns the old box; a mode call cannot race its teardown.
+            synchronized(data.globalModeLock) {
+                if (data.state == State.Stopping) return
+                data.pendingRestartEpoch = if (restart) ServiceStartPolicy.fence.snapshot() else null
+                data.changeState(State.Stopping)
+            }
 
             DataStore.baseService = null
             DataStore.vpnService = null
@@ -286,8 +357,6 @@ class BaseService {
             data.notification?.destroy()
             data.notification = null
             this as Service
-
-            data.changeState(State.Stopping)
 
             runOnMainDispatcher {
                 data.connectingJob?.cancelAndJoin() // ensure stop connecting first

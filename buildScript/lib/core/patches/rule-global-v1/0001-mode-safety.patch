@@ -1,0 +1,311 @@
+--- a/adapter/experimental.go
++++ b/adapter/experimental.go
+@@ -14,6 +14,9 @@
+ 	ConnectionTracker
+ 	Mode() string
+ 	ModeList() []string
++	// SetMode changes the routing mode without rebuilding the Box. It returns
++	// false when the requested mode is not compiled into the current config.
++	SetMode(newMode string) bool
+ 	HistoryStorage() URLTestHistoryStorage
+ }
+ 
+--- a/adapter/inbound.go
++++ b/adapter/inbound.go
+@@ -50,6 +50,9 @@
+ 	Destination M.Socksaddr
+ 	User        string
+ 	Outbound    string
++
++	// ClashMode is captured once per routing operation.
++	ClashMode string
+ 
+ 	// sniffer
+ 
+--- a/experimental/clashapi/server.go
++++ b/experimental/clashapi/server.go
+@@ -9,6 +9,7 @@
+ 	"os"
+ 	"runtime"
+ 	"strings"
++	"sync"
+ 	"syscall"
+ 	"time"
+ 
+@@ -53,6 +54,8 @@
+ 
+ 	mode           string
+ 	modeList       []string
++	modeMu         sync.RWMutex
++	modeFromConfig bool
+ 	modeUpdateHook chan<- struct{}
+ 
+ 	externalController       bool
+@@ -77,7 +80,8 @@
+ 		},
+ 		trafficManager:           trafficManager,
+ 		logDebug:                 logFactory.Level() >= log.LevelDebug,
+-		modeList:                 options.ModeList,
++		modeList:                 append([]string(nil), options.ModeList...),
++		modeFromConfig:           options.DefaultMode != "",
+ 		externalController:       options.ExternalController != "",
+ 		externalUIDownloadURL:    options.ExternalUIDownloadURL,
+ 		externalUIDownloadDetour: options.ExternalUIDownloadDetour,
+@@ -147,15 +151,21 @@
+ func (s *Server) Start(stage adapter.StartStage) error {
+ 	switch stage {
+ 	case adapter.StartStateStart:
+-		cacheFile := service.FromContext[adapter.CacheFile](s.ctx)
+-		if cacheFile != nil {
+-			mode := cacheFile.LoadMode()
+-			if common.Any(s.modeList, func(it string) bool {
+-				return strings.EqualFold(it, mode)
+-			}) {
+-				s.mode = mode
+-			}
+-		}
++		// Explicit App default_mode wins over persisted core mode. Preserve
++		// legacy cache restoration for raw configs without an explicit default.
++		s.modeMu.Lock()
++		if !s.modeFromConfig {
++			if cache := service.FromContext[adapter.CacheFile](s.ctx); cache != nil {
++				cachedMode := cache.LoadMode()
++				for _, candidate := range s.modeList {
++					if strings.EqualFold(candidate, cachedMode) {
++						s.mode = candidate
++						break
++					}
++				}
++			}
++		}
++		s.modeMu.Unlock()
+ 	case adapter.StartStateStarted:
+ 		if s.externalController {
+ 			s.checkAndDownloadExternalUI()
+@@ -196,28 +206,37 @@
+ }
+ 
+ func (s *Server) Mode() string {
++	s.modeMu.RLock()
++	defer s.modeMu.RUnlock()
+ 	return s.mode
+ }
+ 
+ func (s *Server) ModeList() []string {
+-	return s.modeList
++	s.modeMu.RLock()
++	defer s.modeMu.RUnlock()
++	return append([]string(nil), s.modeList...)
+ }
+ 
+ func (s *Server) SetModeUpdateHook(hook chan<- struct{}) {
++	s.modeMu.Lock()
++	defer s.modeMu.Unlock()
+ 	s.modeUpdateHook = hook
+ }
+ 
+-func (s *Server) SetMode(newMode string) {
++func (s *Server) SetMode(newMode string) bool {
++	// Serialize publication and all invalidation/persistence side effects.
++	s.modeMu.Lock()
++	defer s.modeMu.Unlock()
+ 	if !common.Contains(s.modeList, newMode) {
+ 		newMode = common.Find(s.modeList, func(it string) bool {
+ 			return strings.EqualFold(it, newMode)
+ 		})
+ 	}
+ 	if !common.Contains(s.modeList, newMode) {
+-		return
++		return false
+ 	}
+ 	if newMode == s.mode {
+-		return
++		return true
+ 	}
+ 	s.mode = newMode
+ 	if s.modeUpdateHook != nil {
+@@ -226,7 +245,8 @@
+ 		default:
+ 		}
+ 	}
+-	s.dnsRouter.ClearCache()
++	// DNS calls bypass non-mode-aware response/RDRC caches in this prototype.
++	// Do not invoke a platform cache callback while holding the mode writer.
+ 	cacheFile := service.FromContext[adapter.CacheFile](s.ctx)
+ 	if cacheFile != nil {
+ 		err := cacheFile.StoreMode(newMode)
+@@ -235,6 +255,7 @@
+ 		}
+ 	}
+ 	s.logger.Info("updated mode: ", newMode)
++	return true
+ }
+ 
+ func (s *Server) HistoryStorage() adapter.URLTestHistoryStorage {
+--- a/experimental/clashapi/configs.go
++++ b/experimental/clashapi/configs.go
+@@ -42,8 +42,8 @@
+ 			logLevel = log.LevelError
+ 		}
+ 		render.JSON(w, r, &configSchema{
+-			Mode:        server.mode,
+-			ModeList:    server.modeList,
++			Mode:        server.Mode(),
++			ModeList:    server.ModeList(),
+ 			BindAddress: "*",
+ 			LogLevel:    log.FormatLevel(logLevel),
+ 		})
+--- a/protocol/dns/handle.go
++++ b/protocol/dns/handle.go
+@@ -40,6 +40,8 @@
+ 		return err
+ 	}
+ 	metadataInQuery := metadata
++	// Each DNS message captures current mode, not the socket route mode.
++	metadataInQuery.ClashMode = ""
+ 	go func() error {
+ 		response, err := router.Exchange(adapter.WithContext(ctx, &metadataInQuery), &message, adapter.DNSQueryOptions{})
+ 		if err != nil {
+@@ -123,6 +125,8 @@
+ 				timeout.Update()
+ 			}
+ 			metadataInQuery := metadata
++			// Each DNS message captures current mode, not the socket route mode.
++			metadataInQuery.ClashMode = ""
+ 			go func() error {
+ 				response, err := router.Exchange(adapter.WithContext(ctx, &metadataInQuery), &message, adapter.DNSQueryOptions{})
+ 				if err != nil {
+@@ -193,6 +197,8 @@
+ 				timeout.Update()
+ 			}
+ 			metadataInQuery := metadata
++			// Each DNS message captures current mode, not the socket route mode.
++			metadataInQuery.ClashMode = ""
+ 			go func() error {
+ 				response, err := router.Exchange(adapter.WithContext(ctx, &metadataInQuery), &message, adapter.DNSQueryOptions{})
+ 				if err != nil {
+--- a/route/dns.go
++++ b/route/dns.go
+@@ -21,6 +21,8 @@
+ )
+ 
+ func (r *Router) hijackDNSStream(ctx context.Context, conn net.Conn, metadata adapter.InboundContext) error {
++	// A DNS message is a new operation, not part of the socket's old route.
++	metadata.ClashMode = ""
+ 	metadata.Destination = M.Socksaddr{}
+ 	for {
+ 		conn.SetReadDeadline(time.Now().Add(C.DNSTimeout))
+@@ -36,6 +38,7 @@
+ }
+ 
+ func (r *Router) hijackDNSPacket(ctx context.Context, conn N.PacketConn, packetBuffers []*N.PacketBuffer, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) error {
++	metadata.ClashMode = ""
+ 	if natConn, isNatConn := conn.(udpnat.Conn); isNatConn {
+ 		metadata.Destination = M.Socksaddr{}
+ 		for _, packet := range packetBuffers {
+--- a/route/rule/rule_item_clash_mode.go
++++ b/route/rule/rule_item_clash_mode.go
+@@ -29,6 +29,9 @@
+ }
+ 
+ func (r *ClashModeItem) Match(metadata *adapter.InboundContext) bool {
++	if metadata != nil && metadata.ClashMode != "" {
++		return strings.EqualFold(metadata.ClashMode, r.mode)
++	}
+ 	if r.clashServer == nil {
+ 		return false
+ 	}
+--- a/route/route.go
++++ b/route/route.go
+@@ -26,6 +26,7 @@
+ 	M "github.com/sagernet/sing/common/metadata"
+ 	N "github.com/sagernet/sing/common/network"
+ 	"github.com/sagernet/sing/common/uot"
++	"github.com/sagernet/sing/service"
+ 
+ 	"golang.org/x/exp/slices"
+ )
+@@ -59,6 +60,11 @@
+ }
+ 
+ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) error {
++	if metadata.ClashMode == "" {
++		if server := service.FromContext[adapter.ClashServer](r.ctx); server != nil {
++			metadata.ClashMode = server.Mode()
++		}
++	}
+ 	//nolint:staticcheck
+ 	if metadata.InboundDetour != "" {
+ 		if metadata.LastInbound == metadata.InboundDetour {
+@@ -181,6 +187,11 @@
+ }
+ 
+ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) error {
++	if metadata.ClashMode == "" {
++		if server := service.FromContext[adapter.ClashServer](r.ctx); server != nil {
++			metadata.ClashMode = server.Mode()
++		}
++	}
+ 	//nolint:staticcheck
+ 	if metadata.InboundDetour != "" {
+ 		if metadata.LastInbound == metadata.InboundDetour {
+@@ -266,18 +277,9 @@
+ }
+ 
+ func (r *Router) PreMatch(metadata adapter.InboundContext) error {
+-	selectedRule, _, _, _, err := r.matchRule(r.ctx, &metadata, true, nil, nil)
+-	if err != nil {
+-		return err
+-	}
+-	if selectedRule == nil {
+-		return nil
+-	}
+-	rejectAction, isReject := selectedRule.Action().(*R.RuleActionReject)
+-	if !isReject {
+-		return nil
+-	}
+-	return rejectAction.Error(context.Background())
++	// PreMatch cannot carry a token into the real route operation. Avoid stale
++	// early rejects and DNS side effects; real routing remains authoritative.
++	return nil
+ }
+ 
+ func (r *Router) matchRule(
+--- a/dns/router.go
++++ b/dns/router.go
+@@ -229,6 +229,17 @@
+ 		metadata.IPVersion = 6
+ 	}
+ 	metadata.Domain = FqdnToDomain(message.Question[0].Name)
++	if server := service.FromContext[adapter.ClashServer](r.ctx); server != nil {
++		// Nested route resolution inherits its caller's mode. Standalone DNS
++		// operations capture here; hijacked sessions clear the socket's token.
++		if metadata.ClashMode == "" {
++			metadata.ClashMode = server.Mode()
++		}
++		// Safe prototype fallback: bypass cache, singleflight and RDRC because
++		// stock keys have no mode namespace. Old inflight queries cannot poison
++		// the current mode's answers. Fixed transports are not replaced here.
++		options.DisableCache = true
++	}
+ 	if options.Transport != nil {
+ 		transport = options.Transport
+ 		if legacyTransport, isLegacy := transport.(adapter.LegacyDNSTransport); isLegacy {
+@@ -348,6 +359,17 @@
+ 	ctx, metadata := adapter.ExtendContext(ctx)
+ 	metadata.Destination = M.Socksaddr{}
+ 	metadata.Domain = FqdnToDomain(domain)
++	if server := service.FromContext[adapter.ClashServer](r.ctx); server != nil {
++		// Nested route resolution inherits its caller's mode. Standalone DNS
++		// operations capture here; hijacked sessions clear the socket's token.
++		if metadata.ClashMode == "" {
++			metadata.ClashMode = server.Mode()
++		}
++		// Safe prototype fallback: bypass cache, singleflight and RDRC because
++		// stock keys have no mode namespace. Old inflight queries cannot poison
++		// the current mode's answers. Fixed transports are not replaced here.
++		options.DisableCache = true
++	}
+ 	if options.Transport != nil {
+ 		transport := options.Transport
+ 		if legacyTransport, isLegacy := transport.(adapter.LegacyDNSTransport); isLegacy {

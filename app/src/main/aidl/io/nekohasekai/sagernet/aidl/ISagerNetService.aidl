@@ -12,4 +12,9 @@ interface ISagerNetService {
 
   int urlTest();
   String getConnectionProbe();
+
+  /** Hot-switch the running native automatic configuration. Returns a JSON receipt. */
+  String setGlobalMode(boolean desired);
+  /** Returns a JSON snapshot of the core's actual runtime mode. */
+  String getGlobalMode();
 }

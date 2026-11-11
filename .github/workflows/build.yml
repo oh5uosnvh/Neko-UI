@@ -65,6 +65,14 @@ jobs:
           # TestRealTCPCancellationClosesBlockedConnection 依赖真实 DNS TCP 出网，
           # 在 CI runner 上偶发超时导致假失败，与代码无关，跳过。
           go test -race -count=1 -skip 'TestRealTCPCancellationClosesBlockedConnection' ./dnspolicy
+      - name: Verify no-reload core traffic, bridge lifecycle and races
+        run: |
+          # Re-fetch is intentional: the exact patched source must be idempotent.
+          bash buildScript/lib/core/get_source.sh
+          python3 buildScript/lib/core/test_patches.py
+          bash buildScript/lib/core/test_runtime_mode.sh
+          cd libcore
+          go test -tags with_clash_api -race -count=1 -run '^TestRuntimeModeBridge' .
       - name: Build libcore
         run: ./run lib core
       - uses: actions/upload-artifact@v4
@@ -157,7 +165,7 @@ jobs:
             https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/2.0.21/kotlin-compiler-embeddable-2.0.21.pom \
             -o "$compiler_cache/kotlin-compiler-embeddable-2.0.21.pom"
           echo "bd4656a46ec418252e5bc5e1c20eb2029fb2a8e0e3cc94eeddfac7e87c8cd5b6  $compiler_cache/kotlin-compiler-embeddable-2.0.21.pom" | sha256sum -c -
-          ./gradlew --no-daemon app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.group.*' --tests 'io.nekohasekai.sagernet.ui.*' --tests 'io.nekohasekai.sagernet.database.*'
+          ./gradlew --no-daemon app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.group.*' --tests 'io.nekohasekai.sagernet.ui.*' --tests 'io.nekohasekai.sagernet.database.*' --tests 'io.nekohasekai.sagernet.fmt.*'
           ./gradlew --no-daemon app:assemblePreviewRelease
           mkdir -p release
           shopt -s nullglob

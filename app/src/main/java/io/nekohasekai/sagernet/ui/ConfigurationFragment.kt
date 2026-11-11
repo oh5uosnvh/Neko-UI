@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.os.RemoteException
 import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.text.SpannableStringBuilder
@@ -147,6 +148,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.ZipInputStream
+import org.json.JSONObject
 import kotlin.collections.set
 import androidx.appcompat.app.AlertDialog
 import io.nekohasekai.sagernet.database.SubscriptionBean
@@ -233,6 +235,12 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     private val titleJumpSequence = SelectedJumpSequence()
+
+    // Global-mode receipts are ordered so a delayed Binder reply can never
+    // overwrite a newer menu state (or a recreated view).
+    private val globalModeGeneration = AtomicLong(0L)
+    private val globalModeInFlight = AtomicBoolean(false)
+    private val globalModeRefreshInFlight = AtomicBoolean(false)
 
     /** The ⊙ jump already completed the first leg of the title's two-step cycle. */
     internal fun armTitleJumpAfterSelected(profileId: Long, groupId: Long) {
@@ -791,6 +799,81 @@ class ConfigurationFragment @JvmOverloads constructor(
         LatencyTestMenuPolicy.apply(menu, DataStore.runningTest || pendingLatencyRequest != null)
         menu.findItem(R.id.action_global_mode)?.isChecked = DataStore.globalMode
         menu.findItem(R.id.action_always_show_address)?.isChecked = DataStore.alwaysShowAddress
+        refreshGlobalModeFromCore(menu)
+    }
+
+    /** Refresh only the visual check mark from the native core's actual mode. */
+    private fun refreshGlobalModeFromCore(menu: Menu) {
+        if (DataStore.serviceState != BaseService.State.Connected || globalModeInFlight.get() ||
+            !globalModeRefreshInFlight.compareAndSet(false, true)) return
+        val generation = globalModeGeneration.get()
+        runOnDefaultDispatcher {
+            val response: String? = try {
+                (activity as? MainActivity)?.connection?.service?.getGlobalMode()
+            } catch (e: Exception) {
+                null
+            }
+            onMainDispatcher {
+                globalModeRefreshInFlight.set(false)
+                if (generation != globalModeGeneration.get() || globalModeInFlight.get() ||
+                    !isAdded || view == null || response.isNullOrBlank()) return@onMainDispatcher
+                val json = runCatching { JSONObject(response) }.getOrNull() ?: return@onMainDispatcher
+                val actual = json.optString("actual").lowercase()
+                if (json.optBoolean("ok") && actual.isNotBlank()) {
+                    menu.findItem(R.id.action_global_mode)?.isChecked = actual == "global"
+                }
+            }
+        }
+    }
+
+    private fun applyGlobalMode(desired: Boolean, item: MenuItem) {
+        if (!globalModeInFlight.compareAndSet(false, true)) return
+        val state = DataStore.serviceState
+        if (state == BaseService.State.Stopped || state == BaseService.State.Idle) {
+            // Stopped is a next-start preference; do not call a dead binder.
+            globalModeInFlight.set(false)
+            DataStore.globalMode = desired
+            item.isChecked = desired
+            return
+        }
+        if (state == BaseService.State.Connecting || state == BaseService.State.Stopping) {
+            globalModeInFlight.set(false)
+            item.isChecked = DataStore.globalMode
+            snackbar(getString(R.string.global_mode_busy)).show()
+            return
+        }
+        val generation = globalModeGeneration.incrementAndGet()
+        runOnDefaultDispatcher {
+            val service = (activity as? MainActivity)?.connection?.service
+            val response = try {
+                service?.setGlobalMode(desired)
+            } catch (e: Exception) {
+                null
+            }
+            onMainDispatcher {
+                globalModeInFlight.set(false)
+                if (generation != globalModeGeneration.get() || !isAdded) return@onMainDispatcher
+                val json = response?.let { runCatching { JSONObject(it) }.getOrNull() }
+                val actual = json?.optString("actual")?.lowercase().orEmpty()
+                val acknowledged = json?.optBoolean("ok") == true && json.optBoolean("ack") &&
+                    actual == (if (desired) "global" else "rule")
+                if (acknowledged) {
+                    // Persist only after the core receipt has acknowledged the request.
+                    DataStore.globalMode = desired
+                    item.isChecked = desired
+                    if (view != null) snackbar(if (desired)
+                        "全局模式已生效，无需重载；已有连接保持原出口"
+                    else "规则模式已生效，无需重载；已有连接保持原出口").show()
+                } else {
+                    item.isChecked = DataStore.globalMode
+                    snackbar(json?.optString("message")?.takeIf { it.isNotBlank() }
+                        ?: getString(R.string.global_mode_failed)).show()
+                    // A lost/invalid receipt must not optimistically alter storage;
+                    // ask the core for the actual check mark instead.
+                    refreshGlobalModeFromCore(toolbar.menu)
+                }
+            }
+        }
     }
 
     override fun onPrepareOptionsMenu(menu: Menu) {
@@ -1407,35 +1490,10 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             R.id.action_global_mode -> {
-                item.isChecked = !item.isChecked
-                DataStore.globalMode = item.isChecked
-                if (DataStore.serviceState.canStop) {
-                    runOnDefaultDispatcher {
-                        try {
-                            // 等待一段时间确保配置已保存
-                            delay(500)
-                            snackbar(getString(R.string.need_reload)).setAction(R.string.apply) {
-                                runOnDefaultDispatcher {
-                                    try {
-                                        // 再次等待确保配置已保存
-                                        delay(100)
-                                        SagerNet.reloadService()
-                                    } catch (e: Exception) {
-                                        Logs.w(e)
-                                        onMainDispatcher {
-                                            snackbar(getString(R.string.service_failed)).show()
-                                        }
-                                    }
-                                }
-                            }.show()
-                        } catch (e: Exception) {
-                            Logs.w(e)
-                            onMainDispatcher {
-                                snackbar(getString(R.string.service_failed)).show()
-                            }
-                        }
-                    }
-                }
+                // Do not mutate DataStore or reload here. Running services must
+                // receive a native acknowledgement first; stopped services only
+                // record the value for their next start.
+                applyGlobalMode(!item.isChecked, item)
                 return true
             }
         }

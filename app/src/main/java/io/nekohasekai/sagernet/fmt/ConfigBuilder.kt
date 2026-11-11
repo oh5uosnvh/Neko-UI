@@ -71,6 +71,7 @@ class ConfigBuildResult(
     var trafficMap: Map<String, List<ProxyEntity>>,
     var profileTagMap: Map<Long, String>,
     val selectorGroupId: Long,
+    val runtimeModeSupported: Boolean = false,
 ) {
     data class IndexEntity(var chain: LinkedHashMap<Int, ProxyEntity>)
 }
@@ -177,6 +178,11 @@ fun buildConfig(
             rule.outbound.takeIf { it > 0 && it != proxy.id }
         }.toHashSet().toList()).associateBy { it.id }
     val buildSelector = !forTest && group?.isSelector == true && !forExport
+    // Raw JSON may replace listeners, actions or even the mode rules. Keep its
+    // existing static semantics, and explicitly refuse live mode changes.
+    val compileRuntimeModes = !forTest && !forExport
+    var runtimeModeSupported = compileRuntimeModes &&
+        DataStore.globalCustomConfig.isBlank() && extraRules.all { it.config.isNullOrBlank() }
     val userDNSRuleList = mutableListOf<DNSRule_DefaultOptions>()
     val domainListDNSDirectForce = mutableListOf<String>()
     val bypassDNSBeans = hashSetOf<AbstractBean>()
@@ -222,8 +228,15 @@ fun buildConfig(
                     // }
                 }
                 
-                if (DataStore.enableClashAPI) {
-                    clash_api = ClashAPIOptions().apply {
+                // Keep Clash mode available as an internal runtime control plane
+                // only for ordinary service configs. Export/raw configs retain
+                // their historical static semantics.
+                if (compileRuntimeModes || DataStore.enableClashAPI) clash_api = ClashAPIOptions().apply {
+                    if (compileRuntimeModes) {
+                        external_controller = ""
+                        default_mode = if (DataStore.globalMode) "Global" else "Rule"
+                    }
+                    if (DataStore.enableClashAPI) {
                         external_controller = "127.0.0.1:9090"
                         external_ui = "../files/yacd"
                     }
@@ -353,6 +366,9 @@ fun buildConfig(
 
             profileList.forEachIndexed { index, proxyEntity ->
                 val bean = proxyEntity.requireBean()
+                if (bean is ConfigBean || !bean.customConfigJson.isNullOrBlank()) {
+                    runtimeModeSupported = false
+                }
                 val nodeGroup = groupCache.getOrPut(proxyEntity.groupId) {
                     SagerDatabase.groupDao.getById(proxyEntity.groupId)
                 }
@@ -617,10 +633,11 @@ fun buildConfig(
 
         val mainProxyTag = (if (buildSelector) TAG_PROXY else tagMap[proxy.id]) ?: TAG_PROXY
 
-        // 在应用用户规则之前检查全局模式
-        if (!forTest && DataStore.globalMode) {
-            // 全局模式下的规则处理
-            
+        // Compile both routing branches. Clash mode is switched in the running
+        // core; the build-time preference only selects the initial mode.
+        if (!forTest && (compileRuntimeModes || DataStore.globalMode)) {
+            // In ordinary runtime builds both branches are compiled and selected
+            // by clash_mode. Export builds retain the historical static branch.
             // 绕过内部网络（如果启用）
             if (DataStore.bypassLan) {
                 route.rules.add(Rule_DefaultOptions().apply {
@@ -635,23 +652,30 @@ fun buildConfig(
                         "fc00::/7",
                         "fe80::/10"
                     )
+                    if (compileRuntimeModes) clash_mode = "Global"
                     outbound = TAG_DIRECT
                 })
             }
 
             route.rules.add(Rule_DefaultOptions().apply {
-                inbound = listOf(deviceInboundTag)
+                if (compileRuntimeModes) clash_mode = "Global"
+                inbound = listOf(deviceInboundTag, TAG_MIXED).distinct()
                 outbound = mainProxyTag
             })
-
-            route.rules.add(Rule_DefaultOptions().apply {
-                inbound = listOf(TAG_MIXED)
+            // Include Rule even with zero user rules, so both runtime modes are
+            // discovered by CalculateClashModeList regardless of initial mode.
+            // The never-present inbound must not intercept built-in core rules.
+            if (compileRuntimeModes) route.rules.add(Rule_DefaultOptions().apply {
+                clash_mode = "Rule"
+                inbound = listOf("runtime-mode-capability-only")
                 outbound = mainProxyTag
             })
 
             route.final_ = mainProxyTag
-        } else {
-            // 应用用户规则
+        }
+        if (compileRuntimeModes || !DataStore.globalMode) {
+            // Ordinary runtime builds compile Rule rules alongside Global rules;
+            // export builds keep the historical static Global/Rule split.
             for (rule in extraRules) {
                 if (rule.packages.isNotEmpty()) {
                     PackageCache.awaitLoadSync()
@@ -859,7 +883,9 @@ fun buildConfig(
                             ruleObj.outbound = null
                             ruleObj.action = "reject"
                         }
-                        route.rules.add(ruleObj)
+                        if (compileRuntimeModes) route.rules.add(Rule().apply {
+                            _hack_config_map.putAll(RuntimeModeRules.guard(ruleObj.asMap()))
+                        }) else route.rules.add(ruleObj)
                         route.rule_set.addAll(ruleSets)
                     }
                 }
@@ -966,7 +992,11 @@ fun buildConfig(
         // dns object user rules
         if (enableDnsRouting) {
             userDNSRuleList.forEach {
-                if (!it.checkEmpty()) dns.rules.add(it)
+                if (!it.checkEmpty()) {
+                    if (compileRuntimeModes) dns.rules.add(DNSRule().apply {
+                        _hack_config_map.putAll(RuntimeModeRules.guard(it.asMap(), dns = true))
+                    }) else dns.rules.add(it)
+                }
             }
         }
 
@@ -1047,7 +1077,8 @@ fun buildConfig(
             proxy.id,
             trafficMap,
             tagMap,
-            if (buildSelector) group.id else -1L
+            if (buildSelector) group.id else -1L,
+            runtimeModeSupported = runtimeModeSupported,
         )
     }
 

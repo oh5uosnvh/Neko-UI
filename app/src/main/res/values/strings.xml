@@ -715,6 +715,8 @@
     <string name="webdav_create_dir_failed">Failed to create or access backup directory</string>
     <string name="global_mode">Global Mode</string>
     <string name="global_mode_summary">Bypass all routing rules and proxy all traffic through current node</string>
+    <string name="global_mode_busy">Global mode cannot change while the service is transitioning</string>
+    <string name="global_mode_failed">Global mode change was not acknowledged by the core</string>
     <string name="mux_preference">Mulitplex</string>
     <string name="padding">Padding</string>
     <string name="network_change_reset_connections">Reset outbound connections when network changes</string>

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "repository": "https://github.com/starifly/sing-box.git",
+  "baseline": "0b7a2fc2f2c33f754e5fe5a1bb3e0a4f610b6aa9",
+  "patches": [
+    {
+      "file": "0001-mode-safety.patch",
+      "sha256": "3901831d7d65bc4082383f369e288df5c0aaa76c5108d7ef053eb4b6abf0ec11"
+    }
+  ]
+}
