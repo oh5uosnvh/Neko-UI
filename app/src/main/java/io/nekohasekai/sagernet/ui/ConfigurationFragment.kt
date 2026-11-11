@@ -908,7 +908,9 @@ class ConfigurationFragment @JvmOverloads constructor(
         LatencyTestMenuPolicy.apply(menu, DataStore.runningTest || pendingLatencyRequest != null)
         menu.findItem(R.id.action_global_mode)?.isChecked = DataStore.globalMode
         menu.findItem(R.id.action_always_show_address)?.isChecked = DataStore.alwaysShowAddress
-        menu.findItem(R.id.action_global_no_reload)?.isChecked = DataStore.globalSelector
+        val allGroups = SagerDatabase.groupDao.allGroups()
+        menu.findItem(R.id.action_global_no_reload)?.isChecked =
+            allGroups.isNotEmpty() && allGroups.all { it.isSelector }
     }
 
     override fun onPrepareOptionsMenu(menu: Menu) {
@@ -1554,17 +1556,29 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             R.id.action_global_no_reload -> {
-                // This is now the explicit all-groups selector. Enabling it always
-                // rebuilds the service immediately; there is no half-enabled state.
-                val enable = !DataStore.globalSelector
-                DataStore.globalSelector = enable
-                item.isChecked = enable
-                if (DataStore.serviceState.started) {
-                    SagerNet.reloadService()
-                    snackbar(if (enable) "全分组 selector 已启用，正在自动重连" else "全分组 selector 已关闭，正在恢复分组模式").show()
-                } else {
-                    snackbar(if (enable) "全分组 selector 已启用，下次启动立即生效" else "全分组 selector 已关闭").show()
+                // Batch operation: this switch is only a convenience for the
+                // per-group “启用 selector（免重载切换节点）” setting.
+                val groups = SagerDatabase.groupDao.allGroups()
+                val enable = groups.isNotEmpty() && !groups.all { it.isSelector }
+                runOnDefaultDispatcher {
+                    try {
+                        groups.forEach { group ->
+                            if (group.isSelector != enable) {
+                                group.isSelector = enable
+                                SagerDatabase.groupDao.updateGroup(group)
+                                GroupManager.postUpdate(group)
+                            }
+                        }
+                        if (DataStore.serviceState.started) SagerNet.reloadService()
+                        onMainDispatcher {
+                            if (isAdded) snackbar(if (enable) "已为全部分组启用 selector，正在自动重连" else "已为全部分组关闭 selector，正在自动重连").show()
+                        }
+                    } catch (error: Exception) {
+                        Logs.w(error)
+                        onMainDispatcher { if (isAdded) snackbar(error.readableMessage).show() }
+                    }
                 }
+                item.isChecked = enable
                 return true
             }
 
@@ -3637,9 +3651,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                     if (proxyEntity.id == DataStore.selectedProxy && !SagerNet.isTv) {
                         return@runOnDefaultDispatcher
                     }
-                    // Global selector is an acknowledged operation on the current
-                    // Box, not a preference write followed by a reload broadcast.
-                    if (DataStore.globalSelector && DataStore.serviceState.started) {
+                    // A per-group selector is an acknowledged operation on the
+                    // current Box, not a preference write followed by a reload.
+                    if (SagerDatabase.groupDao.getById(proxyEntity.groupId)?.isSelector == true && DataStore.serviceState.started) {
                         profileAccess.withLock {
                             val previous = DataStore.selectedProxy
                             val receipt = try {

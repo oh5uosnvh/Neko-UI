@@ -73,9 +73,9 @@ class ConfigBuildResult(
     var trafficMap: Map<String, List<ProxyEntity>>,
     var profileTagMap: Map<Long, String>,
     val selectorGroupId: Long,
-    /** True when the running config owns a global selector, not a group-local one. */
+    /** Compatibility field; runtime selector scope is always per-group. */
     val globalSelector: Boolean = false,
-    /** Ordinary DNS table identity; unlike node resolvers, this requires an explicit reconnect. */
+    /** Ordinary DNS table identity for the current group selector. */
     val selectorApplicationDnsFingerprint: String = "",
     /** Fingerprint of selector membership, chains and DNS policy at build time. */
     val selectorFingerprint: String = "",
@@ -122,9 +122,7 @@ fun buildConfig(
     if (proxy.type == TYPE_CONFIG) {
         val bean = proxy.requireBean() as ConfigBean
         if (bean.type == 0) {
-            if (DataStore.globalSelector && !forTest && !forExport) {
-                throw IllegalArgumentException("Global selector does not support raw custom configurations")
-            }
+
             val tagProxy = proxy.displayName()
             return ConfigBuildResult(
                 bean.config,
@@ -189,11 +187,10 @@ fun buildConfig(
         if (forTest) mapOf() else SagerDatabase.proxyDao.getEntities(extraRules.mapNotNull { rule ->
             rule.outbound.takeIf { it > 0 && it != proxy.id }
         }.toHashSet().toList()).associateBy { it.id }
-    val globalSelector = !forTest && !forExport && DataStore.globalSelector
-    val buildSelector = !forTest && !forExport && (globalSelector || group?.isSelector == true)
-    if (globalSelector && group == null) {
-        throw IllegalArgumentException("Global selector requires the selected node to belong to an existing group")
-    }
+    // Selector is a per-group setting. The toolbar action named “all-groups
+    // selector” only batches ProxyGroup.isSelector; it never creates a
+    // cross-group selector or changes DNS scope.
+    val buildSelector = !forTest && !forExport && group?.isSelector == true
     val userDNSRuleList = mutableListOf<DNSRule_DefaultOptions>()
     val domainListDNSDirectForce = mutableListOf<String>()
     val bypassDNSBeans = hashSetOf<AbstractBean>()
@@ -202,12 +199,7 @@ fun buildConfig(
     val activeSubscription = group?.subscription
     val activeDns = subscriptionDns.config(proxy.requireBean(), activeSubscription)
     val directOverride = activeSubscription?.directDnsResolver.orEmpty()
-    // A full-group selector must have one stable application DNS table. Per-group
-    // DNS remains attached to each outbound resolver below; using the selected
-    // group's direct DNS here would make live selector validation fail on every
-    // cross-group switch.
-    val subscriptionDirectDns = if (DataStore.globalSelector) emptyList()
-        else if (directOverride.isNotBlank()) SubscriptionDns.endpointList(directOverride) else activeDns.directDns
+    val subscriptionDirectDns = if (directOverride.isNotBlank()) SubscriptionDns.endpointList(directOverride) else activeDns.directDns
     val isVPN = DataStore.serviceMode == Key.MODE_VPN
     val deviceInboundTag = if (isVPN && DataStore.enableHevTun) TAG_MIXED else "tun-in"
     val bind = if (!forTest && DataStore.allowAccess) "0.0.0.0" else LOCALHOST
@@ -216,8 +208,7 @@ fun buildConfig(
     val directDNS = DataStore.directDns.split("\n")
         .mapNotNull { dns -> dns.trim().takeIf { it.isNotBlank() && !it.startsWith("#") } }
     val selectorDns = SelectorDnsPolicy(directDNS)
-    val applicationDnsFingerprint = if (DataStore.globalSelector) "all-groups-selector" else
-        selectorDns.applicationFingerprint(activeDns, activeSubscription)
+    val applicationDnsFingerprint = selectorDns.applicationFingerprint(activeDns, activeSubscription)
     val dnsHosts by lazy { parseDnsHosts(DataStore.dnsHosts) }
     val enableDnsRouting = DataStore.enableDnsRouting
     val useFakeDns = DataStore.enableFakeDns && !forTest
@@ -385,12 +376,7 @@ fun buildConfig(
                 val nodeSubscription = nodeGroup?.subscription
                 val nodeDnsConfig = subscriptionDns.config(bean, nodeSubscription)
                 NodeHostMapping.apply(bean, nodeDnsConfig.hosts, nodeSubscription?.applyHosts != false)
-                // Resolve every compiled node through its own group's fallback, never the
-                // active group's dns-direct. Even a node without imported DNS needs isolation.
-                val nodeResolver = if (globalSelector) {
-                    val fallback = selectorDns.nodeFallback(nodeDnsConfig, nodeSubscription)
-                    subscriptionDns.node(bean, nodeSubscription, fallback) ?: fallback
-                } else subscriptionDns.node(bean, nodeSubscription)
+                val nodeResolver = subscriptionDns.node(bean, nodeSubscription)
                 val preserveMultiAddress = nodeSubscription?.applyHosts != false && NodeHostMapping.hasMultipleAddresses(bean, nodeDnsConfig.hosts)
                 // Keep all IP candidates in the resolver instead of freezing a multi-IP hosts entry.
                 if (preserveMultiAddress) bean.serverAddress = bean.mappedOriginalAddress
@@ -629,31 +615,9 @@ fun buildConfig(
         // Each member still enters through resolveChain(), which applies its own
         // group's front/landing proxies and subscription-scoped node DNS.
         if (buildSelector) {
-            val members = if (globalSelector) {
-                val groups = SagerDatabase.groupDao.allGroups()
-                // Application DNS belongs to the selected node, while each member has
-                // an isolated node resolver. Differences in unrelated subscriptions must
-                // not abort VPN startup. Full output fingerprint still fences live edits.
-                groups.flatMap { groupItem -> SagerDatabase.proxyDao.getByGroup(groupItem.id) }
-            } else {
-                SagerDatabase.proxyDao.getByGroup(group!!.id)
-            }.distinctBy { it.id }
+            val members = SagerDatabase.proxyDao.getByGroup(group!!.id)
             if (members.none { it.id == proxy.id }) {
                 throw IllegalArgumentException("Selected node is not a member of the compiled selector")
-            }
-            if (globalSelector) {
-                if (DataStore.globalCustomConfig.isNotBlank()) {
-                    throw IllegalArgumentException("Global selector does not support a global custom config")
-                }
-                members.forEach { member ->
-                    val bean = member.requireBean()
-                    if (member.needExternal() || !bean.customConfigJson.isNullOrBlank() ||
-                        !bean.customOutboundJson.isNullOrBlank()) {
-                        throw IllegalArgumentException(
-                            "Global selector does not support external or custom-config node: ${member.displayName()}"
-                        )
-                    }
-                }
             }
             members.forEach {
                 val chain = it.resolveChain()
@@ -1003,8 +967,6 @@ fun buildConfig(
             detour = TAG_DIRECT
         })
 
-        // Isolated fallbacks must exist before any node policy referencing them is built.
-        dns.servers.addAll(selectorDns.servers)
         if (subscriptionDirectDns.isNotEmpty()) {
             subscriptionDns.direct(subscriptionDirectDns)
             // Legacy remote DNS resolves its address_resolver during construction, not Start.
@@ -1109,12 +1071,7 @@ fun buildConfig(
                 })
             }
             // Subscription policy is scoped to the active group. Only matched domains override app DNS.
-            val subscriptionRules = if (globalSelector) {
-                // Full-group selector owns node DNS per outbound. Do not inject one
-                // selected group's application rule table into a selector shared by
-                // every group; that was the source of cross-group startup failures.
-                emptyList()
-            } else subscriptionDns.general(proxy.requireBean(), activeSubscription, "dns-remote")
+            val subscriptionRules = subscriptionDns.general(proxy.requireBean(), activeSubscription, "dns-remote")
             dns.rules.addAll(0, subscriptionRules)
         }
 
@@ -1129,8 +1086,8 @@ fun buildConfig(
             proxy.id,
             trafficMap,
             tagMap,
-            if (buildSelector) if (globalSelector) GLOBAL_SELECTOR_GROUP_ID else group!!.id else -1L,
-            globalSelector = globalSelector,
+            if (buildSelector) group!!.id else -1L,
+            globalSelector = false,
             selectorApplicationDnsFingerprint = if (buildSelector) applicationDnsFingerprint else "",
             selectorFingerprint = if (buildSelector) {
                 SelectorFingerprint.of(selectorFingerprintParts + SelectorFingerprint.policy(configMap))

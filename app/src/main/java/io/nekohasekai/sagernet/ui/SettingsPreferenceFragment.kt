@@ -232,9 +232,9 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         val concurrentDial = findPreference<SwitchPreference>(Key.CONCURRENT_DIAL)!!
         concurrentDial.onPreferenceChangeListener = reloadListener
 
-        // Rebuild the selector when its global scope changes; the service will
-        // reject a stale live switch rather than applying a mixed policy.
-        findPreference<SwitchPreference>(Key.GLOBAL_SELECTOR)?.onPreferenceChangeListener = reloadListener
+        // The toolbar's all-groups selector action batches each ProxyGroup.isSelector.
+        // Keep the legacy preference key readable for migration, but do not use it
+        // as a second runtime selector mode.
 
         enableFakeDns.onPreferenceChangeListener = reloadListener
         remoteDns.onPreferenceChangeListener = reloadListener

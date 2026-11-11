@@ -16,20 +16,24 @@ class GlobalSelectorContractTest {
         val store = source("java/io/nekohasekai/sagernet/database/DataStore.kt")
         val prefs = source("res/xml/global_preferences.xml")
         val settings = source("java/io/nekohasekai/sagernet/ui/SettingsPreferenceFragment.kt")
+        // The persisted key remains only for migration compatibility; there is
+        // no second settings-page runtime switch. The toolbar batch action is the
+        // sole global convenience entry point.
         assertTrue(constants.contains("GLOBAL_SELECTOR = \"globalSelector\""))
         assertTrue(store.contains("var globalSelector by configurationStore.boolean(Key.GLOBAL_SELECTOR)"))
-        assertTrue(prefs.contains("app:key=\"globalSelector\""))
-        assertTrue(settings.contains("findPreference<SwitchPreference>(Key.GLOBAL_SELECTOR)"))
+        assertFalse(prefs.contains("app:key=\"globalSelector\""))
+        assertFalse(settings.contains("findPreference<SwitchPreference>(Key.GLOBAL_SELECTOR)"))
     }
 
-    @Test fun builderCompilesAllGroupsAndKeepsGroupDnsPolicyExplicit() {
+    @Test fun selectorIsPerGroupAndToolbarActionOnlyBatchesGroupFlags() {
         val builder = source("java/io/nekohasekai/sagernet/fmt/ConfigBuilder.kt")
-        assertTrue(builder.contains("DataStore.globalSelector"))
-        assertTrue(builder.contains("SagerDatabase.groupDao.allGroups()"))
-        assertFalse(builder.contains("Global selector cannot mix subscription DNS policies"))
-        assertTrue(builder.contains("selectorDns.nodeFallback(nodeDnsConfig, nodeSubscription)"))
-        assertTrue(builder.contains("selectorApplicationDnsFingerprint"))
-        assertTrue(builder.contains("it.resolveChain()"))
+        val fragment = source("java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt")
+        assertTrue(builder.contains("group?.isSelector == true"))
+        assertTrue(builder.contains("SagerDatabase.proxyDao.getByGroup(group!!.id)"))
+        assertFalse(builder.contains("DataStore.globalSelector"))
+        assertFalse(builder.contains("Global selector does not support"))
+        assertTrue(fragment.contains("group.isSelector = enable"))
+        assertTrue(fragment.contains("全部分组启用 selector"))
         assertTrue(builder.contains("selectorFingerprint"))
     }
 

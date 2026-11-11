@@ -372,7 +372,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
         set(value) = configurationStore.putString("webdavPath", value)
 
     var globalMode by configurationStore.boolean(Key.GLOBAL_MODE)
-    /** Compile every group as one selector and allow live cross-group selection. */
+    /** Legacy key retained for migration only; selector runtime is per group. */
     var globalSelector by configurationStore.boolean(Key.GLOBAL_SELECTOR)
 
     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {

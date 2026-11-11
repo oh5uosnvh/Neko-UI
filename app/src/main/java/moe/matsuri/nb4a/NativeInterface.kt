@@ -101,10 +101,9 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
                     return@runOnDefaultDispatcher
                 }
                 if (data.proxy !== running || !data.state.connected) return@runOnDefaultDispatcher
-                if (running.config.globalSelector && DataStore.currentProfile != id) return@runOnDefaultDispatcher
-                // Preserve legacy group-local reset behavior. Global selector is
-                // already acknowledged by the service; don't reset every VPN flow.
-                if (!running.config.globalSelector) Libcore.resetAllConnections(true)
+                // Per-group selector changes reset existing flows after the native
+                // selector acknowledgement, preserving the established behavior.
+                Libcore.resetAllConnections(true)
                 // traffic & title
                 running.apply {
                     looper?.selectMain(id)

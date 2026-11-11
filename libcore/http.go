@@ -55,6 +55,8 @@ type HTTPRequest interface {
 }
 
 type HTTPResponse interface {
+	GetStatusCode() int
+	GetStatusMessage() string
 	GetHeader(string) *StringBox
 	GetContent() ([]byte, error)
 	GetContentString() (*StringBox, error)
@@ -220,11 +222,9 @@ func (r *httpRequest) Execute() (HTTPResponse, error) {
 		}
 		return nil, err
 	}
-	httpResp := &httpResponse{Response: response}
-	if response.StatusCode != http.StatusOK {
-		return nil, errors.New(httpResp.errorString())
-	}
-	return httpResp, nil
+	// Return HTTP responses for every status. The Android subscription layer
+	// needs to distinguish 403/404 from proxy, DNS, timeout and parse failures.
+	return &httpResponse{Response: response}, nil
 }
 
 type requestFunc func() (response *http.Response, err error)
@@ -314,16 +314,7 @@ func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
 				return
 			}
 
-			// 处理 HTTP 状态码
-			if rsp.StatusCode != http.StatusOK {
-				hr := &httpResponse{Response: rsp}
-				err = fmt.Errorf("%s: %s", t, hr.errorString())
-				mu.Lock()
-				finalErr = errors.Join(finalErr, err)
-				mu.Unlock()
-				return
-			}
-
+			// Return non-2xx responses to Android for typed subscription errors.
 			select {
 			case successCh <- rsp:
 				// 第一个成功的请求，不要关闭 body
@@ -360,6 +351,10 @@ func (h *httpResponse) errorString() string {
 	}
 	return fmt.Sprint("HTTP ", h.Status, ": ", content)
 }
+
+func (h *httpResponse) GetStatusCode() int { return h.StatusCode }
+
+func (h *httpResponse) GetStatusMessage() string { return h.Status }
 
 func (h *httpResponse) GetHeader(key string) *StringBox {
 	return wrapString(h.Header.Get(key))

@@ -78,6 +78,7 @@ object RawUpdater : GroupUpdater() {
             var titleHeader = ""
             var dispositionHeader = ""
             var parsed: List<AbstractBean>? = null
+            val failures = ArrayList<String>()
             try {
                 for ((attempt, ua) in userAgents.withIndex()) {
                     try {
@@ -86,6 +87,20 @@ object RawUpdater : GroupUpdater() {
                             setURL(subscription.link)
                             setUserAgent(ua)
                         }.execute()
+                        // Status accessors are provided by the rebuilt libcore AAR.
+                        // Reflection keeps older cached AARs source-compatible during
+                        // staged upgrades; the fallback is the native exception path.
+                        val status = runCatching { response.javaClass.getMethod("getStatusCode").invoke(response) as Int }
+                            .getOrElse { 200 }
+                        val statusText = runCatching { response.javaClass.getMethod("getStatusMessage").invoke(response) as String }
+                            .getOrDefault("HTTP $status").ifBlank { "HTTP $status" }
+                        if (status !in 200..299) {
+                            // Consume/close the body before trying the next UA; this
+                            // also preserves a short server message in native logs.
+                            runCatching { response.contentString }
+                            failures += "$ua → HTTP $status $statusText"
+                            continue
+                        }
                         val body = Util.getStringBox(response.contentString)
                         val nodes = parseRaw(body)?.takeIf { it.isNotEmpty() }
                             ?: error("Response contains no supported nodes")
@@ -98,15 +113,25 @@ object RawUpdater : GroupUpdater() {
                     } catch (cancelled: kotlinx.coroutines.CancellationException) {
                         throw cancelled
                     } catch (error: Exception) {
-                        // Exception strings may contain the subscription token. Do not
-                        // expose them; try the next enabled UA on download OR parse failure.
+                        // Exception strings may contain the subscription token. Keep the
+                        // user-facing reason typed, but never include the URL or token.
+                        val detail = when (error) {
+                            is java.net.UnknownHostException -> "DNS/域名解析失败"
+                            is java.net.ConnectException -> "连接代理或服务器失败"
+                            is java.net.SocketTimeoutException -> "连接超时"
+                            else -> error.message?.takeIf { it.isNotBlank() }?.take(180)
+                                ?: error.javaClass.simpleName
+                        }
+                        failures += "$ua → $detail"
                         Logs.w("Subscription UA attempt ${attempt + 1} failed: ${error.javaClass.simpleName}")
                     }
                 }
             } finally {
                 httpClient.close()
             }
-            proxies = parsed ?: error("Subscription fetch/parse failed for all enabled User-Agent candidates")
+            proxies = parsed ?: error(
+                "订阅拉取/解析失败：${failures.distinct().joinToString("；")}".take(1200)
+            )
 
             var userinfo = userInfoHeader
             if (userinfo.isBlank()) {

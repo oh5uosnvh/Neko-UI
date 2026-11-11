@@ -951,14 +951,10 @@ class MainActivity : ThemedActivity(),
 
     override fun cbSelectorUpdate(id: Long) {
         val old = DataStore.selectedProxy
-        // Global-selector changes are committed in the service only after its
-        // native ACK. A delayed callback must never rewrite a newer selection.
-        if (DataStore.globalSelector) {
-            if (DataStore.currentProfile != id) return
-        } else {
-            DataStore.selectedProxy = id
-            DataStore.currentProfile = id
-        }
+        // The callback is emitted by the currently running per-group selector.
+        // Persist the acknowledged node exactly like the legacy group selector.
+        DataStore.selectedProxy = id
+        DataStore.currentProfile = id
         refreshConfigurationProfileState()
         runOnDefaultDispatcher {
             ProfileManager.postUpdate(old, true)

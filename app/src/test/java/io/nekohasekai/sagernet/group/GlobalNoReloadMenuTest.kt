@@ -20,11 +20,11 @@ class GlobalNoReloadMenuTest {
     }
     @Test fun allGroupsSelectorPersistsAndReconnectsImmediately() {
         val source = File(app, "src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt").readText()
-        assertTrue(source.contains("menu.findItem(R.id.action_global_no_reload)?.isChecked = DataStore.globalSelector"))
+        assertTrue(source.contains("allGroups.all { it.isSelector }"))
         val body = source.substringAfter("R.id.action_global_no_reload ->").substringBefore("R.id.action_global_mode ->")
-        assertTrue(body.contains("DataStore.globalSelector = enable"))
+        assertTrue(body.contains("group.isSelector = enable"))
         assertTrue(body.contains("SagerNet.reloadService()"))
-        assertFalse(body.contains("setAction(R.string.apply)"))
+        assertFalse(body.contains("DataStore.globalSelector = enable"))
         assertTrue(File(app, "src/main/res/values-zh-rCN/global_no_reload.xml").readText().contains(">全分组 selector<"))
     }
 }

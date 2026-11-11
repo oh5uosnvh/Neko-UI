@@ -132,7 +132,7 @@ class BaseService {
                     return selectorError(code, "service is ${current.state.name.lowercase()}")
                 }
                 val running = current.proxy ?: return selectorError("NO_PROXY", "proxy is not initialized")
-                if (!running.config.globalSelector && running.config.selectorGroupId < 0L) {
+                if (running.config.selectorGroupId < 0L) {
                     return selectorError("NOT_SELECTOR", "running config has no selector")
                 }
                 if (!current.service.isCompiledSelectorCurrent(profileId)) {
@@ -285,10 +285,9 @@ class BaseService {
                 val tmpBox = ProxyInstance(ent)
                 tmpBox.buildConfigTmp()
                 val rebuilt = tmpBox.config
-                // Membership, chain order and selector policy must be exactly the
-                // same. Group id alone is insufficient for cross-group selectors.
+                // Membership, chain order and selector policy must be exactly the same
+                // for the currently selected configuration group.
                 rebuilt.selectorGroupId == running.config.selectorGroupId &&
-                    rebuilt.globalSelector == running.config.globalSelector &&
                     rebuilt.selectorFingerprint == running.config.selectorFingerprint &&
                     rebuilt.profileTagMap[ent.id] == runningTag
             } catch (e: Throwable) {
