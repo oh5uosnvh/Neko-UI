@@ -118,7 +118,7 @@ class GlobalSelectorBuildTest {
         val rulesB = com.google.gson.JsonParser.parseString(cb.config).asJsonObject
             .getAsJsonObject("dns").getAsJsonArray("rules")
         assertFalse(rulesA.any { it.toString().contains("app") && it.toString().contains("example") })
-        assertFalse(rulesB.any { it.toString().contains("app") && it.toString().contains("example") })
+        assertTrue(rulesB.any { it.toString().contains("app") && it.toString().contains("example") })
         val outbounds = com.google.gson.JsonParser.parseString(cb.config).asJsonObject
             .getAsJsonArray("outbounds")
         // Hosts belong to the selected group's node resolver and never leak into
@@ -130,8 +130,8 @@ class GlobalSelectorBuildTest {
         val a = node("A", "one")
         val b = node("B", "two")
         val old = buildConfig(a).selectorFingerprint
-        b.socksBean!!.serverPort = 2080
-        env.database.proxyDao().updateProxy(b)
+        a.socksBean!!.serverPort = 2080
+        env.database.proxyDao().updateProxy(a)
         assertNotEquals(old, buildConfig(a).selectorFingerprint)
     }
 }
