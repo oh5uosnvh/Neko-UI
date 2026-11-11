@@ -53,7 +53,9 @@ class GlobalSelectorContractTest {
         assertTrue(selectBody.contains("put(\"ack\", false).put(\"accepted\", true)"))
         assertTrue(selectBody.contains("put(\"mode\", \"hot\")"))
         assertTrue(selectBody.contains("put(\"mode\", \"reload\")"))
-        assertTrue(selectBody.contains("disableSelector = true"))
+        // Missing tags fall back immediately to automatic reconnect; no synchronous
+        // disableSelector preflight is allowed on the Binder click path.
+        assertFalse(selectBody.contains("buildConfig("))
         assertTrue(service.contains("rebuilt.selectorFingerprint == running.config.selectorFingerprint"))
         assertTrue(service.contains("box.selectOutbound(tag)"))
         assertTrue(service.contains("selector rejected compiled node"))
