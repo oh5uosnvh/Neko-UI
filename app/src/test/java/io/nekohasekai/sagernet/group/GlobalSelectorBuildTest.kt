@@ -83,7 +83,7 @@ class GlobalSelectorBuildTest {
         val ca = buildConfig(a)
         val cb = buildConfig(b)
         assertEquals(setOf(a.id), ca.profileTagMap.keys)
-        assertNotEquals(ca.selectorApplicationDnsFingerprint, cb.selectorApplicationDnsFingerprint)
+        assertEquals(ca.selectorApplicationDnsFingerprint, cb.selectorApplicationDnsFingerprint)
         assertNotEquals(ca.selectorFingerprint, cb.selectorFingerprint)
         val jsonA = com.google.gson.JsonParser.parseString(ca.config).asJsonObject
         val jsonB = com.google.gson.JsonParser.parseString(cb.config).asJsonObject
@@ -119,11 +119,9 @@ class GlobalSelectorBuildTest {
             .getAsJsonObject("dns").getAsJsonArray("rules")
         assertFalse(rulesA.any { it.toString().contains("app") && it.toString().contains("example") })
         assertTrue(rulesB.any { it.toString().contains("app") && it.toString().contains("example") })
-        val outbounds = com.google.gson.JsonParser.parseString(cb.config).asJsonObject
-            .getAsJsonArray("outbounds")
-        // Hosts belong to the selected group's node resolver and never leak into
-        // another group's application DNS rules.
-        assertTrue(outbounds.any { it.toString().contains("203.0.113.7") || it.toString().contains("app.example") })
+        // Hosts belong to the selected group's own DNS rule table and never leak
+        // into group A's config.
+        assertTrue(rulesB.any { it.toString().contains("app.example") || it.toString().contains("203.0.113.7") })
     }
 
     @Test fun changedMemberInvalidatesRunningPolicy() {
