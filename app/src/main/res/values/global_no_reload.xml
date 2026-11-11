@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="global_no_reload">Global no-reload</string>
+    <string name="global_no_reload_enabled">Global selector enabled. Reconnect once to load nodes from all groups; subsequent compatible node switches do not reload.</string>
+    <string name="global_no_reload_disabled">Global selector disabled. Reconnect to restore each group’s selector setting.</string>
+</resources>

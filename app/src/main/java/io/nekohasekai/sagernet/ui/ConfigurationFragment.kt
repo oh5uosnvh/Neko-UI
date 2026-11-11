@@ -893,6 +893,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         LatencyTestMenuPolicy.apply(menu, DataStore.runningTest || pendingLatencyRequest != null)
         menu.findItem(R.id.action_global_mode)?.isChecked = DataStore.globalMode
         menu.findItem(R.id.action_always_show_address)?.isChecked = DataStore.alwaysShowAddress
+        menu.findItem(R.id.action_global_no_reload)?.isChecked = DataStore.globalSelector
     }
 
     override fun onPrepareOptionsMenu(menu: Menu) {
@@ -1536,6 +1537,23 @@ class ConfigurationFragment @JvmOverloads constructor(
                 DataStore.alwaysShowAddress = !DataStore.alwaysShowAddress
                 item.isChecked = DataStore.alwaysShowAddress
                 refreshAddressDisplayPreferences()
+                return true
+            }
+
+            R.id.action_global_no_reload -> {
+                DataStore.globalSelector = !DataStore.globalSelector
+                item.isChecked = DataStore.globalSelector
+                val message = if (DataStore.globalSelector) R.string.global_no_reload_enabled
+                    else R.string.global_no_reload_disabled
+                snackbar(getString(message)).apply {
+                    if (DataStore.serviceState == BaseService.State.Connected) {
+                        setAction(R.string.apply) {
+                            // Changing selector membership needs one explicit build;
+                            // later node-card operations use the native ACK path.
+                            SagerNet.reloadService()
+                        }
+                    }
+                }.show()
                 return true
             }
 
