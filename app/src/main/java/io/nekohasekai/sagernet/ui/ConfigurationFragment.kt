@@ -63,6 +63,7 @@ import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.database.TagGroupStore
 import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
 import io.nekohasekai.sagernet.databinding.LayoutProfileListBinding
 import io.nekohasekai.sagernet.databinding.LayoutProgressListBinding
@@ -127,6 +128,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.collectLatest
 import moe.matsuri.nb4a.Protocols
 import moe.matsuri.nb4a.Protocols.getProtocolColor
 import moe.matsuri.nb4a.proxy.anytls.AnyTLSSettingsActivity
@@ -188,6 +190,12 @@ class ConfigurationFragment @JvmOverloads constructor(
     lateinit var tabLayout: TabLayout
     lateinit var groupPager: ViewPager2
     private var isRestoringGroup = false
+    /** Captured tag for this configuration view; null means all groups. */
+    @Volatile
+    private var scopedTagId: Long? = null
+    private var scopeGeneration = AtomicLong()
+    private val scopeExitMenuId = View.generateViewId()
+    private var pendingFileTagId: Long? = null
     private val groupProfileExport = GroupProfileExport(this)
     private var groupTabsMediator: TabLayoutMediator? = null
     // TabLayout pools/recreates TabViews. Weak entries must not retain removed tabs.
@@ -407,6 +415,79 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private fun isCurrentGroupPagerAdapter(candidate: GroupPagerAdapter): Boolean {
         return ::adapter.isInitialized && adapter === candidate
+    }
+
+    private fun currentScopeTag(): Long? = scopedTagId?.takeIf { it > 0L }
+
+    /** Entering is only accepted for a live tag; deleted tags always return to all groups. */
+    internal fun enterTagScope(tagId: Long): Boolean {
+        if (tagId <= 0L || !isAdded) return false
+        val generation = scopeGeneration.incrementAndGet()
+        runOnDefaultDispatcher {
+            val live = try { TagGroupStore.get(tagId) != null } catch (_: Exception) { false }
+            onMainDispatcher {
+                if (generation != scopeGeneration.get() || !isAdded || view == null) return@onMainDispatcher
+                if (!live) { exitTagScope(); return@onMainDispatcher }
+                scopedTagId = tagId
+                topBar.dismissGroupPicker(immediate = true)
+                prepareConfigurationMenu(toolbar.menu)
+                if (::adapter.isInitialized) adapter.reload(now = true)
+            }
+        }
+        return true
+    }
+
+    internal fun exitTagScope() {
+        scopeGeneration.incrementAndGet()
+        if (scopedTagId == null) return
+        scopedTagId = null
+        topBar.dismissGroupPicker(immediate = true)
+        if (view != null) prepareConfigurationMenu(toolbar.menu)
+        if (::adapter.isInitialized) adapter.reload(now = true)
+    }
+
+    internal fun toggleTagScope(tagId: Long): Boolean {
+        if (scopedTagId == tagId) { exitTagScope(); return true }
+        return enterTagScope(tagId)
+    }
+
+    private fun scopedTagMembers(tagId: Long): Set<Long> = try {
+        TagGroupStore.members(tagId)
+    } catch (_: Exception) { emptySet() }
+
+    /** Validate the initiating scope, never silently downgrade a deleted tag to all groups. IO only. */
+    private fun requireImportTag(tagId: Long?) {
+        if (tagId != null) requireNotNull(TagGroupStore.get(tagId)) { "Import tag no longer exists" }
+    }
+
+    private suspend fun resolveImportTarget(tagId: Long?): Long {
+        if (tagId == null) return DataStore.selectedGroupForImport()
+        requireImportTag(tagId)
+        val candidate = GroupPickerTagScope.importTarget(
+            SagerDatabase.groupDao.allGroups(), TagGroupStore.members(tagId), DataStore.selectedGroup)
+        if (candidate != null) return candidate.id
+        // Root insertion and membership use the existing atomic GroupManager API.
+        return GroupManager.createGroup(ProxyGroup(name = "My group", type = GroupType.BASIC), tagId).id
+    }
+
+    /** Revalidate inside the same outer write transaction as the node append. */
+    private fun requireImportTarget(tagId: Long?, groupId: Long) {
+        requireImportTag(tagId)
+        if (tagId != null) {
+            check(groupId in TagGroupStore.members(tagId)) { "Import group left the captured tag" }
+            check(SagerDatabase.groupDao.getById(groupId)?.type == GroupType.BASIC &&
+                !io.nekohasekai.sagernet.database.PendingGroupDeletes.contains(groupId)) { "Import group is not writable" }
+        }
+    }
+
+    private suspend fun importSubscriptionCaptured(link: String, tagId: Long?) {
+        try {
+            requireImportTag(tagId)
+            (activity as? MainActivity)?.importSubscription(link.toUri(), tagId)
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            onMainDispatcher { if (isAdded) snackbar(R.string.tag_member_failed).show() }
+        }
     }
 
     fun getCurrentGroupFragment(): GroupFragment? {
@@ -643,6 +724,9 @@ class ConfigurationFragment @JvmOverloads constructor(
     @SuppressLint("DetachAndAttachSameFragment")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        scopedTagId = savedInstanceState?.getLong("scopedTagId", 0L)?.takeIf { it > 0L }
+        pendingFileTagId = savedInstanceState?.getLong("pendingFileTagId", 0L)?.takeIf { it > 0L }
+        openingFilePicker = savedInstanceState?.getBoolean("openingFilePicker", false) ?: false
         groupProfileExport.restoreState(savedInstanceState)
         setHasOptionsMenu(true)
         startProfileStateActor()
@@ -653,12 +737,25 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putLong("scopedTagId", scopedTagId ?: 0L)
+        outState.putLong("pendingFileTagId", pendingFileTagId ?: 0L)
+        outState.putBoolean("openingFilePicker", openingFilePicker)
         super.onSaveInstanceState(outState)
         groupProfileExport.saveState(outState)
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        if (!select) {
+            GroupPickerTagScopeBridge.onLongPress = { id, _ -> toggleTagScope(id) }
+            viewLifecycleOwner.lifecycleScope.launch {
+                TagGroupStore.changes.collectLatest {
+                    val id = currentScopeTag() ?: return@collectLatest
+                    if (!isAdded || TagGroupStore.get(id) == null) exitTagScope()
+                    else if (::adapter.isInitialized) adapter.reload(now = true)
+                }
+            }
+        }
 
         if (!select) {
             // 菜单仍然 inflate 到 toolbar 上 —— checkOrderMenu / global_mode
@@ -788,6 +885,11 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     internal fun prepareConfigurationMenu(menu: Menu) {
+        val actions = menu.findItem(R.id.action_misc)?.subMenu ?: menu
+        val exit = actions.findItem(scopeExitMenuId) ?: actions.add(Menu.NONE, scopeExitMenuId, 0,
+            if (resources.configuration.locales[0].language == "zh") "返回全部分组" else "Show all groups")
+        exit.isVisible = currentScopeTag() != null
+        exit.setOnMenuItemClickListener { exitTagScope(); true }
         LatencyTestMenuPolicy.apply(menu, DataStore.runningTest || pendingLatencyRequest != null)
         menu.findItem(R.id.action_global_mode)?.isChecked = DataStore.globalMode
         menu.findItem(R.id.action_always_show_address)?.isChecked = DataStore.alwaysShowAddress
@@ -847,6 +949,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         latencyOverlay?.release()
         latencyOverlay = null
         topBar.detach()
+        if (GroupPickerTagScopeBridge.onLongPress != null) GroupPickerTagScopeBridge.onLongPress = null
         searchScope.detach()
         DataStore.profileCacheStore.unregisterChangeListener(this)
         DataStore.configurationStore.unregisterChangeListener(displayPrefListener)
@@ -933,9 +1036,14 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private val importFile =
         registerForActivityResult(ActivityResultContracts.GetContent()) { file ->
+            val capturedTagId = pendingFileTagId
+            val importOwner = viewLifecycleOwnerLiveData.value
+            val importAdapter = if (::adapter.isInitialized) adapter else null
+            pendingFileTagId = null
             openingFilePicker = false
             if (file != null) runOnDefaultDispatcher {
                 try {
+                    requireImportTag(capturedTagId)
                     val fileName =
                         requireContext().contentResolver.query(file, null, null, null, null)
                             ?.use { cursor ->
@@ -968,11 +1076,14 @@ class ConfigurationFragment @JvmOverloads constructor(
                             val prefix = if (length > 0) String(probe, 0, length) else ""
                             reader.reset()
                             if (StreamingProfileImport.isNodeListPrefix(prefix)) {
-                                streamedTarget = DataStore.selectedGroupForImport()
+                                streamedTarget = resolveImportTarget(capturedTagId)
                                 val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
                                 streamedCount = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                                    StreamingProfileImport.append(SagerDatabase.instance, streamedTarget, reader,
-                                        "file", fileName.orEmpty()) { job?.ensureActive() }.count
+                                    SagerDatabase.instance.runInTransaction(java.util.concurrent.Callable {
+                                        requireImportTarget(capturedTagId, streamedTarget)
+                                        StreamingProfileImport.append(SagerDatabase.instance, streamedTarget, reader,
+                                            "file", fileName.orEmpty()) { job?.ensureActive() }.count
+                                    })
                                 }
                             } else {
                                 RawUpdater.parseRaw(reader.readText(), fileName.orEmpty())
@@ -986,9 +1097,11 @@ class ConfigurationFragment @JvmOverloads constructor(
                             GroupManager.postUpdate(streamedTarget)
                             GroupManager.postReload(streamedTarget)
                             onMainDispatcher {
-                                if (isAdded) {
+                                if (isAdded && importOwner != null && viewLifecycleOwnerLiveData.value === importOwner &&
+                                    importAdapter != null && isCurrentGroupPagerAdapter(importAdapter) &&
+                                    currentScopeTag() == capturedTagId) {
                                     DataStore.editingGroup = streamedTarget
-                                    adapter.selectImportedGroup(streamedTarget)
+                                    importAdapter.selectImportedGroup(streamedTarget)
                                     snackbar(resources.getQuantityString(R.plurals.added, count, count)).show()
                                 }
                             }
@@ -997,9 +1110,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                         }
                     } else if (proxies.isEmpty()) onMainDispatcher {
                         if (isAdded) snackbar(getString(R.string.no_proxies_found_in_file)).show()
-                    } else import(proxies, "file", fileName.orEmpty())
+                    } else import(proxies, "file", fileName.orEmpty(), capturedTagId)
                 } catch (e: SubscriptionFoundException) {
-                    (activity as? MainActivity)?.importSubscription(e.link.toUri())
+                    importSubscriptionCaptured(e.link, capturedTagId)
                 } catch (e: Exception) {
                     Logs.w(e)
                     onMainDispatcher {
@@ -1011,16 +1124,26 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
         }
 
-    suspend fun import(proxies: List<AbstractBean>, source: String = "", fileName: String = "") {
-        val targetId = DataStore.selectedGroupForImport()
-        kotlinx.coroutines.withContext(Dispatchers.IO) {
-            ProfileBatchStore.append(SagerDatabase.instance, targetId, proxies, source, fileName)
+    suspend fun import(proxies: List<AbstractBean>, source: String = "", fileName: String = "",
+                       capturedTagId: Long? = currentScopeTag()) {
+        val importOwner = onMainDispatcher { viewLifecycleOwnerLiveData.value }
+        val importAdapter = onMainDispatcher { if (::adapter.isInitialized) adapter else null }
+        val targetId = withContext(Dispatchers.IO) {
+            val target = resolveImportTarget(capturedTagId)
+            SagerDatabase.instance.runInTransaction {
+                requireImportTarget(capturedTagId, target)
+                ProfileBatchStore.append(SagerDatabase.instance, target, proxies, source, fileName)
+            }
+            target
         }
         GroupManager.postUpdate(targetId)
         GroupManager.postReload(targetId)
         onMainDispatcher {
+            if (!isAdded || importOwner == null || viewLifecycleOwnerLiveData.value !== importOwner ||
+                importAdapter == null || !isCurrentGroupPagerAdapter(importAdapter) ||
+                currentScopeTag() != capturedTagId) return@onMainDispatcher
             DataStore.editingGroup = targetId
-            adapter.selectImportedGroup(targetId)
+            importAdapter.selectImportedGroup(targetId)
             snackbar(
                 requireContext().resources.getQuantityString(
                     R.plurals.added, proxies.size, proxies.size
@@ -1086,30 +1209,31 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     override fun onMenuItemClick(item: MenuItem): Boolean {
+        if (item.itemId == scopeExitMenuId) { exitTagScope(); return true }
         when (item.itemId) {
             R.id.action_scan_qr_code -> {
                 startActivity(Intent(context, ScannerActivity::class.java))
             }
 
             R.id.action_import_clipboard -> {
+                val capturedTagId = currentScopeTag()
                 val text = SagerNet.getClipboardText()
                 if (text.isBlank()) {
                     snackbar(getString(R.string.clipboard_empty)).show()
                 } else runOnDefaultDispatcher {
                     try {
+                        requireImportTag(capturedTagId)
                         val proxies = RawUpdater.parseRaw(text)
                         if (proxies.isNullOrEmpty()) {
                             onMainDispatcher {
                                 snackbar(getString(R.string.no_proxies_found_in_clipboard)).show()
                             }
                         } else {
-                            import(proxies)
+                            import(proxies, capturedTagId = capturedTagId)
                         }
                     } catch (e: SubscriptionFoundException) {
                         if (e.link.startsWith("sn://")) {
-                            onMainDispatcher {
-                                (requireActivity() as MainActivity).importSubscription(e.link.toUri())
-                            }
+                            importSubscriptionCaptured(e.link, capturedTagId)
                         } else {
                             val subscriptionUri = Uri.parse(e.link)
                             val subscriptionLink = subscriptionUri.getQueryParameter("url") ?: e.link
@@ -1122,10 +1246,17 @@ class ConfigurationFragment @JvmOverloads constructor(
                             subscription.link = subscriptionLink
                             subscription.autoUpdate = false
                             group.name = airportName ?: ""
+                            val tagStillExists = capturedTagId == null || TagGroupStore.get(capturedTagId) != null
                             onMainDispatcher {
+                                if (!tagStillExists) {
+                                    if (isAdded) snackbar(R.string.tag_member_failed).show()
+                                    return@onMainDispatcher
+                                }
+                                if (!isAdded) return@onMainDispatcher
                                 startActivity(Intent(requireContext(), GroupSettingsActivity::class.java).apply {
                                     putExtra(GroupSettingsActivity.EXTRA_FROM_CLIPBOARD, true)
                                     putExtra(GroupSettingsActivity.EXTRA_GROUP_SUBSCRIPTION_LINK, subscriptionLink)
+                                    capturedTagId?.let { putExtra(GroupSettingsActivity.EXTRA_TAG_ID, it) }
                                     if (airportName != null) {
                                         putExtra(GroupSettingsActivity.EXTRA_GROUP_NAME, airportName)
                                     }
@@ -1143,6 +1274,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             R.id.action_import_file -> {
                 if (openingFilePicker) return true
+                pendingFileTagId = currentScopeTag()
                 openingFilePicker = true
                 startFilesForResult(importFile, "*/*")
             }
@@ -1153,6 +1285,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 startActivity(Intent(requireContext(), GroupSettingsActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                     putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, 0L)
+                    currentScopeTag()?.let { putExtra(GroupSettingsActivity.EXTRA_TAG_ID, it) }
                 })
             }
 
@@ -2163,8 +2296,16 @@ class ConfigurationFragment @JvmOverloads constructor(
             groupPager.unregisterOnPageChangeCallback(updateSelectedCallback)
 
             runOnDefaultDispatcher {
-                var newGroupList = ArrayList(SagerDatabase.groupDao.allGroups().filterNot { io.nekohasekai.sagernet.database.PendingGroupDeletes.contains(it.id) })
-                if (newGroupList.isEmpty()) {
+                val requestedTag = currentScopeTag()
+                if (requestedTag != null && TagGroupStore.get(requestedTag) == null) {
+                    onMainDispatcher { if (generation == reloadGeneration.get()) exitTagScope() }
+                    return@runOnDefaultDispatcher
+                }
+                val memberIds = requestedTag?.let { TagGroupStore.members(it) }
+                var newGroupList = ArrayList(SagerDatabase.groupDao.allGroups()
+                    .filterNot { io.nekohasekai.sagernet.database.PendingGroupDeletes.contains(it.id) }
+                    .filter { requestedTag == null || it.id in memberIds.orEmpty() })
+                if (newGroupList.isEmpty() && requestedTag == null) {
                     SagerDatabase.groupDao.createGroup(ProxyGroup(ungrouped = true))
                     newGroupList = ArrayList(SagerDatabase.groupDao.allGroups().filterNot { io.nekohasekai.sagernet.database.PendingGroupDeletes.contains(it.id) })
                 }
@@ -2277,6 +2418,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         override suspend fun groupAdd(group: ProxyGroup) {
             onMainDispatcher {
                 if (viewLifecycleOwnerLiveData.value == null || !isCurrentGroupPagerAdapter(this@GroupPagerAdapter)) return@onMainDispatcher
+                if (currentScopeTag() != null && group.id !in scopedTagMembers(currentScopeTag()!!)) return@onMainDispatcher
                 if (groupList.any { it.id == group.id }) return@onMainDispatcher
                 tabMutation.change(tabMutation.capture(group.id), centerSelected = true) {
                     val newIndex = groupList.size
@@ -3464,6 +3606,36 @@ class ConfigurationFragment @JvmOverloads constructor(
                     // listener, whose invalidateControlLatency() wipes the control
                     // bar's live speed/latency back to 0.00/-- ms.
                     if (proxyEntity.id == DataStore.selectedProxy && !SagerNet.isTv) {
+                        return@runOnDefaultDispatcher
+                    }
+                    // Global selector is an acknowledged operation on the current
+                    // Box, not a preference write followed by a reload broadcast.
+                    if (DataStore.globalSelector && DataStore.serviceState.started) {
+                        profileAccess.withLock {
+                            val previous = DataStore.selectedProxy
+                            val receipt = try {
+                                val service = (pf.activity as? MainActivity)?.connection?.service
+                                    ?: error("后台服务未连接")
+                                org.json.JSONObject(service.selectSelectorNode(proxyEntity.id))
+                            } catch (e: Exception) {
+                                onMainDispatcher {
+                                    if (pf.isAdded && pf.view != null) pf.snackbar(e.readableMessage).show()
+                                }
+                                return@withLock
+                            }
+                            if (receipt.optBoolean("ok") && receipt.optBoolean("ack") &&
+                                receipt.optLong("profileId", -1L) == proxyEntity.id) {
+                                onMainDispatcher {
+                                    if (pf.isAdded && pf.view != null) pf.refreshProfileState()
+                                }
+                                ProfileManager.postUpdate(previous, noTraffic = true)
+                                ProfileManager.postUpdate(proxyEntity.id, noTraffic = true)
+                            } else onMainDispatcher {
+                                if (pf.isAdded && pf.view != null) pf.snackbar(
+                                    receipt.optString("message", "免重载切换失败；请重新连接以载入最新配置")
+                                ).show()
+                            }
+                        }
                         return@runOnDefaultDispatcher
                     }
                     var update: Boolean

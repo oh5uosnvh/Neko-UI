@@ -43,7 +43,7 @@ class BaseService {
 
     interface ExpectedException
 
-    class Data internal constructor(private val service: Interface) {
+    class Data internal constructor(internal val service: Interface) {
         @Volatile var state = State.Stopped
         var proxy: ProxyInstance? = null
         var notification: ServiceNotification? = null
@@ -83,6 +83,8 @@ class BaseService {
             }
         }
         @Volatile var closeReceiverRegistered = false
+        /** Serializes UI selector requests with service teardown. */
+        val selectorMutationLock = Any()
 
         val binder = Binder(this)
         var connectingJob: Job? = null
@@ -121,6 +123,43 @@ class BaseService {
         override fun getState(): Int = (data?.state ?: State.Idle).ordinal
         override fun getProfileName(): String = data?.proxy?.displayProfileName ?: "Idle"
         override fun getConnectionProbe(): String = data?.connectionProbe.orEmpty()
+
+        override fun selectSelectorNode(profileId: Long): String {
+            val current = data ?: return selectorError("SERVICE_GONE", "service is closed")
+            synchronized(current.selectorMutationLock) {
+                if (current.state != State.Connected) {
+                    val code = if (current.state == State.Connecting) "BUSY" else "NOT_CONNECTED"
+                    return selectorError(code, "service is ${current.state.name.lowercase()}")
+                }
+                val running = current.proxy ?: return selectorError("NO_PROXY", "proxy is not initialized")
+                if (!running.config.globalSelector && running.config.selectorGroupId < 0L) {
+                    return selectorError("NOT_SELECTOR", "running config has no selector")
+                }
+                if (!current.service.isCompiledSelectorCurrent(profileId)) {
+                    return selectorError("STALE_CONFIG", "selector membership or policy changed")
+                }
+                val tag = running.config.profileTagMap[profileId]
+                    ?: return selectorError("NOT_MEMBER", "profile is not compiled")
+                if (!running.box.selectOutbound(tag)) {
+                    return selectorError("CORE_REJECTED", "native selector rejected tag")
+                }
+                // The callback is asynchronous and a same-node SelectOutbound may
+                // emit no callback. Persist only after native acknowledgement, and
+                // only if teardown has not swapped the running ProxyInstance.
+                if (current.proxy !== running) {
+                    return selectorError("SERVICE_CHANGED", "running proxy changed during selection")
+                }
+                DataStore.selectedProxy = profileId
+                DataStore.currentProfile = profileId
+                return JSONObject().put("ok", true).put("ack", true)
+                    .put("profileId", profileId).put("actualId", profileId)
+                    .put("tag", tag).toString()
+            }
+        }
+
+        private fun selectorError(code: String, message: String): String =
+            JSONObject().put("ok", false).put("ack", false)
+                .put("error", code).put("message", message).toString()
 
         fun connectionProbeChanged(snapshot: String) = launch {
             broadcast { it.connectionProbe(snapshot) }
@@ -213,14 +252,21 @@ class BaseService {
                 stopRunner(false, (this as Context).getString(R.string.profile_empty))
                 return
             }
+            if (data.proxy?.config?.globalSelector == true && DataStore.globalSelector && !canReloadSelector()) {
+                // A global selector must never silently downgrade to a restart
+                // using a stale or incompatible policy.
+                Logs.w("global selector live switch rejected: runtime membership or policy changed")
+                return
+            }
             if (canReloadSelector()) {
                 val ent = SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
                 val tag = data.proxy!!.config.profileTagMap[ent?.id] ?: ""
                 if (tag.isNotBlank() && ent != null) {
-                    // select from GUI
-                    data.proxy!!.box.selectOutbound(tag)
-                    // or select from webui
-                    // => selector_OnProxySelected
+                    // Select on this exact running Box. A false native result is a
+                    // hard rejection: never hide it by falling back to reload.
+                    if (!data.proxy!!.box.selectOutbound(tag)) {
+                        Logs.w("selector rejected compiled node id=${ent.id} tag=$tag")
+                    }
                 }
                 return
             }
@@ -231,16 +277,30 @@ class BaseService {
             }
         }
 
-        fun canReloadSelector(): Boolean {
-            if ((data.proxy?.config?.selectorGroupId ?: -1L) < 0) return false
-            val ent = SagerDatabase.proxyDao.getById(DataStore.selectedProxy) ?: return false
-            val tmpBox = ProxyInstance(ent)
-            tmpBox.buildConfigTmp()
-            if (tmpBox.lastSelectorGroupId == data.proxy?.lastSelectorGroupId) {
-                return true
+        /** Validate the current database against the exact running selector. */
+        fun isCompiledSelectorCurrent(id: Long): Boolean {
+            val running = data.proxy ?: return false
+            if (running.config.selectorGroupId < 0L) return false
+            val ent = SagerDatabase.proxyDao.getById(id) ?: return false
+            val runningTag = running.config.profileTagMap[ent.id] ?: return false
+            if (runningTag.isBlank()) return false
+            return try {
+                val tmpBox = ProxyInstance(ent)
+                tmpBox.buildConfigTmp()
+                val rebuilt = tmpBox.config
+                // Membership, chain order and selector policy must be exactly the
+                // same. Group id alone is insufficient for cross-group selectors.
+                rebuilt.selectorGroupId == running.config.selectorGroupId &&
+                    rebuilt.globalSelector == running.config.globalSelector &&
+                    rebuilt.selectorFingerprint == running.config.selectorFingerprint &&
+                    rebuilt.profileTagMap[ent.id] == runningTag
+            } catch (e: Throwable) {
+                Logs.w("selector live switch rejected: ${e.message}")
+                false
             }
-            return false
         }
+
+        fun canReloadSelector(): Boolean = isCompiledSelectorCurrent(DataStore.selectedProxy)
 
         suspend fun startProcesses() {
             data.proxy!!.launch()
@@ -272,8 +332,11 @@ class BaseService {
                 BootReceiver.enabled = false
                 Logs.d("Service user stop: epoch=$epoch")
             }
-            if (data.state == State.Stopping) return
-            data.pendingRestartEpoch = if (restart) ServiceStartPolicy.fence.snapshot() else null
+            synchronized(data.selectorMutationLock) {
+                if (data.state == State.Stopping) return
+                data.pendingRestartEpoch = if (restart) ServiceStartPolicy.fence.snapshot() else null
+                data.changeState(State.Stopping)
+            }
 
             DataStore.baseService = null
             DataStore.vpnService = null

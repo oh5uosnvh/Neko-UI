@@ -11,5 +11,7 @@ interface ISagerNetService {
   oneway void resetTraffic(in long[] profileIds);
 
   int urlTest();
+  /** Select a compiled selector member on the running Box; returns JSON ack/error. */
+  String selectSelectorNode(long profileId);
   String getConnectionProbe();
 }

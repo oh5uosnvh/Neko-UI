@@ -212,6 +212,7 @@ object Key {
     const val WEBDAV_PATH = "webdavPath"
 
     const val GLOBAL_MODE = "globalMode"
+    const val GLOBAL_SELECTOR = "globalSelector"
 }
 
 object TunImplementation {

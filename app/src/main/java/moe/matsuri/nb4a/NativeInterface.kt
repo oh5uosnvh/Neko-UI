@@ -86,14 +86,27 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
             Logs.d("other selector: $selectorTag")
             return
         }
-        Libcore.resetAllConnections(true)
         DataStore.baseService?.apply {
             runOnDefaultDispatcher {
-                val id = data.proxy!!.config.profileTagMap
-                    .filterValues { it == tag }.keys.firstOrNull() ?: -1
+                val running = data.proxy ?: return@runOnDefaultDispatcher
+                val id = running.config.profileTagMap
+                    .filterValues { it == tag }.keys.firstOrNull() ?: return@runOnDefaultDispatcher
                 val ent = SagerDatabase.proxyDao.getById(id) ?: return@runOnDefaultDispatcher
+                // Validate the callback against the exact compiled runtime map;
+                // never let a stale/web-ui tag update host state.
+                val compiled = running.config.trafficMap[tag].orEmpty()
+                if (compiled.none { it.id == id } || tag.isBlank() ||
+                    !isCompiledSelectorCurrent(id)) {
+                    Logs.w("reject selector callback outside current compiled membership: $tag/$id")
+                    return@runOnDefaultDispatcher
+                }
+                if (data.proxy !== running || !data.state.connected) return@runOnDefaultDispatcher
+                if (running.config.globalSelector && DataStore.currentProfile != id) return@runOnDefaultDispatcher
+                // Preserve legacy group-local reset behavior. Global selector is
+                // already acknowledged by the service; don't reset every VPN flow.
+                if (!running.config.globalSelector) Libcore.resetAllConnections(true)
                 // traffic & title
-                data.proxy?.apply {
+                running.apply {
                     looper?.selectMain(id)
                     displayProfileName = ServiceNotification.genTitle(ent)
                     data.notification?.postNotificationTitle(displayProfileName)

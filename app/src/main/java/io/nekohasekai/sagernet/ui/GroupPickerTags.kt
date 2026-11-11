@@ -22,9 +22,29 @@ import androidx.recyclerview.widget.RecyclerView
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.TagGroup
+import io.nekohasekai.sagernet.widget.QuickLongPress
 import io.nekohasekai.sagernet.widget.SubmenuBackIcon
 
 /** Navigation only: none of these transitions select, reorder or mutate a root group. */
+/** Bridge used by the picker (owned by TopBarController) without coupling that controller to scopes. */
+internal object GroupPickerTagScopeBridge {
+    @Volatile var onLongPress: ((Long, View) -> Boolean)? = null
+}
+
+/** Pure scope rules kept small so empty/deleted tags and stale results are testable. */
+internal object GroupPickerTagScope {
+    fun groups(roots: List<ProxyGroup>, memberIds: Set<Long>): List<ProxyGroup> =
+        tagPickerMembers(roots, memberIds)
+    fun valid(tagId: Long?, tags: List<TagGroup>): Boolean =
+        tagId != null && tagId > 0L && tags.any { it.id == tagId }
+
+    fun importTarget(roots: List<ProxyGroup>, members: Set<Long>, selectedId: Long): ProxyGroup? {
+        val manual = groups(roots, members).filter { it.type == io.nekohasekai.sagernet.GroupType.BASIC &&
+            !io.nekohasekai.sagernet.database.PendingGroupDeletes.contains(it.id) }
+        return manual.firstOrNull { it.id == selectedId } ?: manual.firstOrNull()
+    }
+}
+
 internal class GroupPickerNavigation {
     sealed class Page {
         data object Configuration : Page()
@@ -77,6 +97,7 @@ internal class GroupPickerHeader(
     back: () -> Unit,
 ) : LinearLayout(context) {
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+    private var boundTagId: Long? = null
     private lateinit var configurationEntry: TextView
     private lateinit var tagsEntry: TextView
     private val entries = LinearLayout(context).apply {
@@ -126,12 +147,17 @@ internal class GroupPickerHeader(
         orientation = VERTICAL
         setPadding(dp(12), dp(4), dp(12), 0)
         minimumHeight = dp(52)
+        QuickLongPress(backRow) { view ->
+            val id = boundTagId
+            if (id == null) false else GroupPickerTagScopeBridge.onLongPress?.invoke(id, view) ?: false
+        }
         addView(entries, LayoutParams(-1, dp(48)))
         addView(backRow, LayoutParams(-1, dp(48)))
         // Initial state is already configured by the entry defaults; bind() is
         // called after construction when the actual page is known.
     }
     fun bind(page: GroupPickerNavigation.Page, tagName: String?) {
+        boundTagId = (page as? GroupPickerNavigation.Page.Members)?.tagId
         val members = page is GroupPickerNavigation.Page.Members
         // Keep the two-scope switch visible on the configuration and tag pages.
         // The member page gets the dedicated back/title row to avoid duplicate headers.

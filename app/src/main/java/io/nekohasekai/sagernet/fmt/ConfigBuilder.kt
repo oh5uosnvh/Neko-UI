@@ -61,6 +61,8 @@ const val TAG_BYPASS = "bypass"
 const val TAG_BLOCK = "block"
 const val TAG_FRAGMENT = "fragment"
 const val TAG_DNS_HOSTS = "dns-hosts"
+/** Stable selector scope marker; group IDs must not change during global live switches. */
+const val GLOBAL_SELECTOR_GROUP_ID = 0L
 
 const val LOCALHOST = "127.0.0.1"
 
@@ -71,6 +73,10 @@ class ConfigBuildResult(
     var trafficMap: Map<String, List<ProxyEntity>>,
     var profileTagMap: Map<Long, String>,
     val selectorGroupId: Long,
+    /** True when the running config owns a global selector, not a group-local one. */
+    val globalSelector: Boolean = false,
+    /** Fingerprint of selector membership, chains and DNS policy at build time. */
+    val selectorFingerprint: String = "",
 ) {
     data class IndexEntity(var chain: LinkedHashMap<Int, ProxyEntity>)
 }
@@ -114,6 +120,9 @@ fun buildConfig(
     if (proxy.type == TYPE_CONFIG) {
         val bean = proxy.requireBean() as ConfigBean
         if (bean.type == 0) {
+            if (DataStore.globalSelector && !forTest && !forExport) {
+                throw IllegalArgumentException("Global selector does not support raw custom configurations")
+            }
             val tagProxy = proxy.displayName()
             return ConfigBuildResult(
                 bean.config,
@@ -176,7 +185,11 @@ fun buildConfig(
         if (forTest) mapOf() else SagerDatabase.proxyDao.getEntities(extraRules.mapNotNull { rule ->
             rule.outbound.takeIf { it > 0 && it != proxy.id }
         }.toHashSet().toList()).associateBy { it.id }
-    val buildSelector = !forTest && group?.isSelector == true && !forExport
+    val globalSelector = !forTest && !forExport && DataStore.globalSelector
+    val buildSelector = !forTest && !forExport && (globalSelector || group?.isSelector == true)
+    if (globalSelector && group == null) {
+        throw IllegalArgumentException("Global selector requires the selected node to belong to an existing group")
+    }
     val userDNSRuleList = mutableListOf<DNSRule_DefaultOptions>()
     val domainListDNSDirectForce = mutableListOf<String>()
     val bypassDNSBeans = hashSetOf<AbstractBean>()
@@ -199,6 +212,7 @@ fun buildConfig(
     val needSniff = DataStore.trafficSniffing > 0
     val needSniffOverride = DataStore.trafficSniffing == 2
     val externalIndexMap = ArrayList<IndexEntity>()
+    val selectorFingerprintParts = mutableListOf<String>()
     val ipv6Mode = if (forTest) IPv6Mode.ENABLE else DataStore.ipv6Mode
 
     fun genDomainStrategy(noAsIs: Boolean): String {
@@ -594,17 +608,77 @@ fun buildConfig(
             return chainTagOut
         }
 
-        // build outbounds
+        // Build one selector over every group when the global switch is enabled.
+        // Each member still enters through resolveChain(), which applies its own
+        // group's front/landing proxies and subscription-scoped node DNS.
         if (buildSelector) {
-            val list = group.id.let { SagerDatabase.proxyDao.getByGroup(it) }
-            list.forEach {
+            val members = if (globalSelector) {
+                val groups = SagerDatabase.groupDao.allGroups()
+                fun dnsPolicy(item: ProxyGroup): String {
+                    val s = item.subscription
+                    return listOf(
+                        s?.serverDnsResolver.orEmpty(), s?.directDnsResolver.orEmpty(),
+                        s?.privateDnsConfig.orEmpty(), s?.hostsConfig.orEmpty(),
+                        s?.importedDnsConfig.orEmpty(), (s?.applyHosts != false).toString(),
+                    ).joinToString("\u0000")
+                }
+                val basePolicy = dnsPolicy(group!!)
+                groups.filter { dnsPolicy(it) != basePolicy }.firstOrNull()?.let { incompatible ->
+                    throw IllegalArgumentException(
+                        "Global selector cannot mix subscription DNS policies: ${incompatible.displayName()}"
+                    )
+                }
+                // Policy is part of the runtime fingerprint as well: even a
+                // uniform edit must invalidate a running config before switching.
+                selectorFingerprintParts += groups.sortedBy { it.id }.map {
+                    "group:${it.id}:dns:${dnsPolicy(it)}"
+                }
+                groups.flatMap { groupItem -> SagerDatabase.proxyDao.getByGroup(groupItem.id) }
+            } else {
+                SagerDatabase.proxyDao.getByGroup(group!!.id)
+            }.distinctBy { it.id }
+            if (members.none { it.id == proxy.id }) {
+                throw IllegalArgumentException("Selected node is not a member of the compiled selector")
+            }
+            if (globalSelector) {
+                if (DataStore.globalCustomConfig.isNotBlank()) {
+                    throw IllegalArgumentException("Global selector does not support a global custom config")
+                }
+                members.forEach { member ->
+                    val bean = member.requireBean()
+                    if (member.needExternal() || !bean.customConfigJson.isNullOrBlank() ||
+                        !bean.customOutboundJson.isNullOrBlank()) {
+                        throw IllegalArgumentException(
+                            "Global selector does not support external or custom-config node: ${member.displayName()}"
+                        )
+                    }
+                }
+            }
+            members.forEach {
+                val chain = it.resolveChain()
+                selectorFingerprintParts += buildString {
+                    append(it.id).append(':').append(it.groupId).append(':')
+                    append(chain.joinToString(",") { member -> member.id.toString() }).append(':')
+                    // Include every chain hop's persisted config, not only the
+                    // selected node. Front/landing edits must invalidate a live switch.
+                    append(chain.joinToString("|") { member -> gson.toJson(member.requireBean()) })
+                    val bean = it.requireBean()
+                    append(':').append(bean.javaClass.name).append(':')
+                    // Include the selected node config, not only its ID/type;
+                    // edits to a compiled member must invalidate live switching.
+                    append(gson.toJson(bean))
+                }
                 tagMap[it.id] = buildChain(it.id, it)
+            }
+            val memberTags = members.mapNotNull { tagMap[it.id] }.distinct()
+            if (memberTags.isEmpty()) {
+                throw IllegalArgumentException("Selector has no compilable members")
             }
             outbounds.add(0, Outbound_SelectorOptions().apply {
                 type = "selector"
                 tag = TAG_PROXY
                 default_ = tagMap[proxy.id]
-                outbounds = tagMap.values.toList()
+                outbounds = memberTags
             })
         } else {
             val mainTag = buildChain(0, proxy)
@@ -1047,7 +1121,11 @@ fun buildConfig(
             proxy.id,
             trafficMap,
             tagMap,
-            if (buildSelector) group.id else -1L
+            if (buildSelector) if (globalSelector) GLOBAL_SELECTOR_GROUP_ID else group!!.id else -1L,
+            globalSelector = globalSelector,
+            selectorFingerprint = if (buildSelector) {
+                SelectorFingerprint.of(selectorFingerprintParts + SelectorFingerprint.policy(configMap))
+            } else ""
         )
     }
 

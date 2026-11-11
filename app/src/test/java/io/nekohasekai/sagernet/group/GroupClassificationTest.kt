@@ -24,4 +24,16 @@ class GroupClassificationTest {
         val selected = setOf(names[0])
         assertEquals(listOf("花云", "花云云", "其他"), names.filter { it in selected } + names.filter { it !in selected })
     }
+
+    @Test fun numberedNamesClusterStablyWithoutMergingOrDeletingCards() {
+        val source = listOf(
+            1L to "Other", 2L to "Tokyo-02", 3L to "Keep", 4L to "Tokyo-01", 5L to "Tokyo-03"
+        )
+        assertEquals(listOf(1L, 2L, 4L, 5L, 3L), GroupClassification.stableClusterIds(source))
+    }
+
+    @Test fun conservativeClassifierLeavesUnrelatedAndShortNamesAlone() {
+        val source = listOf(1L to "A-1", 2L to "A-2", 3L to "Tokyo 2", 4L to "Tokyo 1")
+        assertEquals(listOf(1L, 2L, 3L, 4L), GroupClassification.stableClusterIds(source))
+    }
 }

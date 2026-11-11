@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="global_selector">全局 selector（跨分组免重载切换节点）</string>
+    <string name="global_selector_summary">对全部分组启用 selector。启用后需重新连接一次以载入节点；仅已载入且策略兼容的节点可跨分组免重载切换。</string>
+</resources>

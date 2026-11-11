@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="group_classify_one_click">一键归类</string>
+    <string name="group_classify_preview_title">预览相似分组</string>
+    <string name="group_classify_preview_message">仅调整分组卡片顺序，不会合并或删除任何分组及配置。建议顺序：\n%s</string>
+    <string name="group_classify_reordered">分组已重新排序</string>
+    <string name="group_classify_no_matches">没有找到保守的相似名称分组</string>
+</resources>

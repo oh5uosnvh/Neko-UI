@@ -157,7 +157,7 @@ jobs:
             https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/2.0.21/kotlin-compiler-embeddable-2.0.21.pom \
             -o "$compiler_cache/kotlin-compiler-embeddable-2.0.21.pom"
           echo "bd4656a46ec418252e5bc5e1c20eb2029fb2a8e0e3cc94eeddfac7e87c8cd5b6  $compiler_cache/kotlin-compiler-embeddable-2.0.21.pom" | sha256sum -c -
-          ./gradlew --no-daemon app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.group.*' --tests 'io.nekohasekai.sagernet.ui.*' --tests 'io.nekohasekai.sagernet.database.*'
+          ./gradlew --no-daemon app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.group.*' --tests 'io.nekohasekai.sagernet.ui.*' --tests 'io.nekohasekai.sagernet.database.*' --tests 'io.nekohasekai.sagernet.fmt.*'
           ./gradlew --no-daemon app:assemblePreviewRelease
           mkdir -p release
           shopt -s nullglob

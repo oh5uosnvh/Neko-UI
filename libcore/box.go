@@ -131,11 +131,15 @@ func (b *BoxInstance) Start() (err error) {
 
 	defer device.DeferPanicToError("box.Start", func(err_ error) { err = err_ })
 
-	if b.state == 0 {
-		b.state = 1
-		return b.Box.Start()
+	if b.state != 0 {
+		return errors.New("already started, failed, or closed")
 	}
-	return errors.New("already started")
+	b.state = 3 // failed/starting is never a selectable running Box
+	if err = b.Box.Start(); err != nil {
+		return err
+	}
+	b.state = 1
+	return nil
 }
 
 func (b *BoxInstance) Close() (err error) {
@@ -206,11 +210,15 @@ func (b *BoxInstance) QueryStats(tag, direct string) int64 {
 	return b.v2api.QueryStats(fmt.Sprintf("outbound>>>%s>>>traffic>>>%s", tag, direct))
 }
 
-func (b *BoxInstance) SelectOutbound(tag string) bool {
-	if b.selector != nil {
-		return b.selector.SelectOutbound(tag)
+func (b *BoxInstance) SelectOutbound(tag string) (selected bool) {
+	b.access.Lock()
+	defer b.access.Unlock()
+	if b.state != 1 || b.selector == nil || strings.TrimSpace(tag) == "" {
+		return false
 	}
-	return false
+	// sing-box owns selector membership; do not emulate a successful switch in
+	// the host. The native bool is the acknowledgement consumed by BaseService.
+	return b.selector.SelectOutbound(tag)
 }
 
 func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err error) {
