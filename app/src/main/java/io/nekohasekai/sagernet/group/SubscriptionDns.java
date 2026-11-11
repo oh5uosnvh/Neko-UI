@@ -113,16 +113,30 @@ public final class SubscriptionDns {
         return fromDocument(root, true);
     }
 
+    /** Restrict automatic mappings to successfully parsed nodes, not unsupported YAML entries. */
+    public static Config fromSubscriptionDocument(Map<?, ?> root, List<String> nodeServers) {
+        Map<Object, Object> source = new LinkedHashMap<>(root);
+        List<Map<String, String>> nodes = new ArrayList<>();
+        for (String server : nodeServers) nodes.add(Collections.singletonMap("server", server));
+        source.put("proxies", nodes);
+        return fromDocument(source, true);
+    }
+
     private static Config fromDocument(Map<?, ?> root, boolean remote) {
         Config result = new Config();
         Object dnsObject = root.get("dns");
         Map<?, ?> dns = dnsObject == null ? Collections.emptyMap() : asMap(dnsObject, "dns");
-        if (!Boolean.FALSE.equals(dns.get("use-hosts"))) readHosts(root.get("hosts"), result.hosts);
+        if (remote) readSubscriptionHosts(root, dns, result.hosts, result.warnings);
+        else if (!Boolean.FALSE.equals(dns.get("use-hosts"))) readHosts(root.get("hosts"), result.hosts);
         if (!Boolean.FALSE.equals(dns.get("enable"))) {
             readPolicy(dns.get("nameserver-policy"), result.policy, remote, result.warnings);
             readPolicy(dns.get("proxy-server-nameserver-policy"), result.serverPolicy, remote, result.warnings);
-            result.serverDns.addAll(remote ? sourceEndpoints(dns.get("proxy-server-nameserver"), result.warnings) : endpoints(dns.get("proxy-server-nameserver")));
-            result.directDns.addAll(remote ? sourceEndpoints(dns.get("direct-nameserver"), result.warnings) : endpoints(dns.get("direct-nameserver")));
+            // These defaults belong exclusively to user-authored settings. Even malformed
+            // source values must neither populate those fields nor reject valid nodes.
+            if (!remote) {
+                result.serverDns.addAll(endpoints(dns.get("proxy-server-nameserver")));
+                result.directDns.addAll(endpoints(dns.get("direct-nameserver")));
+            }
             result.bootstrap.addAll(remote ? sourceEndpoints(dns.get("default-nameserver"), result.warnings) : endpoints(dns.get("default-nameserver")));
             // Clash often points node DNS back at its own listener. NekoBox does not run that listener.
             int listenPort = listenerPort(dns.get("listen"));
@@ -150,8 +164,49 @@ public final class SubscriptionDns {
         return result;
     }
 
+    /** Read persisted automatic metadata, including older snapshots, without manual defaults. */
+    public static Config fromImportedSnapshot(String text) {
+        return fromImportedDocument(loadDocument(text));
+    }
+
+    private static Config fromImportedDocument(Map<?, ?> root) {
+        Map<String, Object> safe = new LinkedHashMap<>();
+        if (root.containsKey("hosts")) safe.put("hosts", root.get("hosts"));
+        Object value = root.get("dns");
+        if (value != null) {
+            Map<?, ?> dns = asMap(value, "dns");
+            Map<String, Object> policies = new LinkedHashMap<>();
+            for (String key : Arrays.asList("enable", "use-hosts", "nameserver-policy",
+                    "proxy-server-nameserver-policy", "default-nameserver")) {
+                if (dns.containsKey(key)) policies.put(key, dns.get(key));
+            }
+            safe.put("dns", policies);
+        }
+        return fromDocument(safe);
+    }
+
+    /** Migrate legacy snapshots with the current dial origins, without retaining unrelated hosts. */
+    public static Config fromImportedSnapshot(String text, List<String> nodeServers) {
+        Map<?, ?> source = loadDocument(text);
+        Map<String, Object> root = new LinkedHashMap<>();
+        if (source.containsKey("hosts")) root.put("hosts", source.get("hosts"));
+        List<Map<String, String>> proxies = new ArrayList<>();
+        for (String server : nodeServers) proxies.add(Collections.singletonMap("server", server));
+        root.put("proxies", proxies);
+        Map<String, List<String>> hosts = new LinkedHashMap<>();
+        List<String> warnings = new ArrayList<>();
+        Map<?, ?> dns = source.get("dns") == null ? Collections.emptyMap() : asMap(source.get("dns"), "dns");
+        readSubscriptionHosts(root, dns, hosts, warnings);
+        Map<String, Object> filtered = new LinkedHashMap<>();
+        if (source.containsKey("dns")) filtered.put("dns", source.get("dns"));
+        filtered.put("hosts", hosts);
+        Config config = fromImportedDocument(filtered);
+        config.warnings.addAll(warnings);
+        return config;
+    }
+
     public static Config effective(String imported, String privateOverride, String hostsOverride, String serverOverride) {
-        Config config = fromDocument(loadDocument(imported));
+        Config config = fromImportedSnapshot(imported);
         if (privateOverride != null && !privateOverride.trim().isEmpty()) {
             Config custom = parsePrivate(privateOverride);
             config.policy.clear(); config.policy.putAll(custom.policy);
@@ -327,6 +382,63 @@ public final class SubscriptionDns {
             if (target.put(key, servers) != null) throw invalid("Duplicate normalized DNS policy");
         }
     }
+    /** Import only mappings reachable from actual node dial hostnames, never SNI/WS Host. */
+    private static void readSubscriptionHosts(Map<?, ?> root, Map<?, ?> dns,
+            Map<String, List<String>> target, List<String> warnings) {
+        if (Boolean.FALSE.equals(dns.get("use-hosts")) || root.get("hosts") == null) return;
+        Set<String> nodes = new LinkedHashSet<>();
+        Object proxies = root.get("proxies");
+        if (proxies instanceof List) {
+            for (Object proxy : (List<?>) proxies) {
+                if (!(proxy instanceof Map)) continue;
+                Object server = ((Map<?, ?>) proxy).get("server");
+                if (!(server instanceof String) || isIp(((String) server).trim())) continue;
+                try { nodes.add(domain((String) server)); }
+                catch (IllegalArgumentException ignored) { /* Node parser handles invalid addresses. */ }
+            }
+        }
+        if (nodes.isEmpty()) return;
+        Map<String, Object> candidates = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : asMap(root.get("hosts"), "hosts").entrySet()) {
+            String key;
+            try { key = pattern(entry.getKey()); }
+            catch (IllegalArgumentException ignored) {
+                warnings.add("Invalid source hosts pattern omitted");
+                continue;
+            }
+            if (candidates.containsKey(key)) throw invalid("Duplicate normalized hosts entry");
+            candidates.put(key, entry.getValue());
+        }
+        // Preserve matching patterns and only their alias dependencies. An unrelated
+        // time service, malformed value or alias cycle must not become node metadata.
+        for (String node : nodes) {
+            String name = node;
+            Set<String> seen = new LinkedHashSet<>();
+            for (int depth = 0; depth <= MAX_ALIAS_DEPTH; depth++) {
+                String key = bestMatch(candidates, name);
+                if (key == null) break;
+                if (!seen.add(key)) throw invalid("Cyclic hosts aliases");
+                if (seen.size() > MAX_ALIAS_DEPTH) throw invalid("hosts alias chain exceeds 16 levels");
+                if (!target.containsKey(key)) {
+                    Map<String, List<String>> parsed = new LinkedHashMap<>();
+                    readHosts(Collections.singletonMap(key, candidates.get(key)), parsed);
+                    List<String> value = parsed.get(key);
+                    // Several real providers emit A:A placeholders. They convey no
+                    // mapping and must not reject otherwise valid imported nodes.
+                    // Other alias cycles (including wildcard cycles) remain errors.
+                    if (value.size() == 1 && key.equals(value.get(0))) {
+                        warnings.add("Source identity hosts alias omitted");
+                        break;
+                    }
+                    target.putAll(parsed);
+                }
+                List<String> values = target.get(key);
+                if (values.size() != 1 || isIp(values.get(0))) break;
+                name = values.get(0);
+            }
+        }
+    }
+
     private static void readHosts(Object value, Map<String, List<String>> target) {
         if (value == null) return;
         for (Map.Entry<?, ?> entry : asMap(value, "hosts").entrySet()) {
@@ -339,7 +451,10 @@ public final class SubscriptionDns {
                 if (!(item instanceof String)) throw invalid("hosts values must be IP addresses or a domain alias");
                 String s = ((String) item).trim();
                 if (isIp(s)) output.add(unbracket(s));
-                else if (input.size() == 1) output.add(domain(s));
+                else if (input.size() == 1) {
+                    if (s.matches("[0-9.]+")) throw invalid("Invalid hosts IP address");
+                    output.add(domain(s));
+                }
                 else throw invalid("hosts cannot mix IP addresses with domain aliases");
             }
             if (target.put(key, new ArrayList<>(new LinkedHashSet<>(output))) != null) throw invalid("Duplicate normalized hosts entry");

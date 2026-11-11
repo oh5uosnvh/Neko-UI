@@ -119,7 +119,7 @@ public class SubscriptionDnsTest {
 
     @Test public void hostsRejectMixedEmptyAndWrongTypedValues() {
         for (String value : Arrays.asList("[]", "[192.0.2.1, alias.example]", "[a.example, b.example]",
-                "123", "true", "null", "{}", "[[192.0.2.1]]")) {
+                "123", "true", "null", "{}", "[[192.0.2.1]]", "192.0.2.999", "01.2.3.4")) {
             assertThrows(IllegalArgumentException.class, () -> parse("hosts: {a.example: " + value + "}\n"));
         }
         assertThrows(IllegalArgumentException.class,
@@ -218,7 +218,7 @@ public class SubscriptionDnsTest {
     }
 
     @Test public void blankOverridesInheritAndEmptyMapsDisableOnlyTheirScope() {
-        SubscriptionDns.Config original = parse(IMPORTED);
+        SubscriptionDns.Config original = SubscriptionDns.fromImportedSnapshot(IMPORTED);
         assertEquals(original.asDocument(), SubscriptionDns.effective(IMPORTED, " \n", "\t", "").asDocument());
         assertEquals(original.asDocument(), SubscriptionDns.effective(IMPORTED, null, null, null).asDocument());
         SubscriptionDns.Config noPrivate = SubscriptionDns.effective(IMPORTED, "{}", "", "");
@@ -387,6 +387,123 @@ public class SubscriptionDnsTest {
         assertSnapshotShape(config);
     }
 
+    private static SubscriptionDns.Config imported(String yaml) {
+        return SubscriptionDns.fromSubscriptionDocument(SubscriptionDns.loadDocument(yaml));
+    }
+
+    @Test public void automaticImportNeverCopiesManualResolverDefaultsOrSourceListener() {
+        for (String defaults : Arrays.asList(
+                "proxy-server-nameserver: [9.9.9.9]\n  direct-nameserver: [8.8.8.8]",
+                "proxy-server-nameserver: malformed\n  direct-nameserver: {unsafe: value}",
+                "listen: '127.0.0.1:7874'\n  proxy-server-nameserver: ['127.0.0.1:7874']\n  nameserver: ['https://dns.invalid/private/query']")) {
+            SubscriptionDns.Config config = imported("dns:\n  " + defaults + "\n"
+                    + "  nameserver-policy: {node.example: 192.0.2.53}\n"
+                    + "  default-nameserver: [192.0.2.54]\n");
+            assertTrue(config.serverDns.isEmpty());
+            assertTrue(config.directDns.isEmpty());
+            assertEquals(Collections.singletonList("192.0.2.53"), config.policy.get("node.example"));
+            assertEquals(Collections.singletonList("192.0.2.54"), config.bootstrap);
+            assertFalse(config.snapshot().contains("proxy-server-nameserver:"));
+            assertFalse(config.snapshot().contains("direct-nameserver:"));
+            assertFalse(config.snapshot().contains("private/query"));
+        }
+        assertEquals("", imported("dns: {proxy-server-nameserver: 1.1.1.1, direct-nameserver: 8.8.8.8}").snapshot());
+    }
+
+    @Test public void automaticHostsOnlyFollowNodeServerAndReachableAliasDependencies() {
+        SubscriptionDns.Config config = imported("proxies:\n"
+                + "  - {type: ss, server: 'ENTRY.Example.', password: synthetic-only}\n"
+                + "  - {type: vmess, server: 192.0.2.2, sni: time.android.com, host: time.facebook.com}\n"
+                + "hosts:\n  entry.example: middle.example\n  middle.example: edge.example\n"
+                + "  edge.example: [192.0.2.10, '[2001:db8::10]', 192.0.2.10]\n"
+                + "  time.facebook.com: 192.0.2.11\n  time.android.com: 192.0.2.12\n"
+                + "  unrelated.example: [not, a, valid, rrset]\n"
+                + "  loop.example: loop.example\n");
+        assertEquals(new LinkedHashSet<>(Arrays.asList("entry.example", "middle.example", "edge.example")), config.hosts.keySet());
+        assertEquals(Arrays.asList("192.0.2.10", "2001:db8::10"), config.hosts.get("edge.example"));
+        assertFalse(config.snapshot().contains("time."));
+        assertFalse(config.snapshot().contains("password"));
+    }
+
+    @Test public void automaticHostsWildcardSelectionKeepsBoundariesAndPrecedence() {
+        SubscriptionDns.Config config = imported("proxies:\n"
+                + "  - {server: 'ONE.Nodes.Example.'}\n  - {server: deep.child.nodes.example}\n"
+                + "  - {server: Exact.nodes.example}\n  - {server: nodes.example}\n"
+                + "  - {server: alias.example}\n  - {server: Bücher.example}\n"
+                + "hosts:\n  '+.nodes.example': 192.0.2.1\n  '*.nodes.example': 192.0.2.2\n"
+                + "  '.nodes.example': 192.0.2.3\n  exact.nodes.example: 192.0.2.4\n"
+                + "  alias.example: jump.edge.example\n  '*.edge.example': '2001:db8::5'\n"
+                + "  'Bücher.Example.': target.external.example\n  '*.unused.example': 192.0.2.6\n");
+        assertEquals(7, config.hosts.size());
+        assertEquals("*.nodes.example", SubscriptionDns.bestMatch(config.hosts, "one.nodes.example"));
+        assertEquals(".nodes.example", SubscriptionDns.bestMatch(config.hosts, "deep.child.nodes.example"));
+        assertEquals("exact.nodes.example", SubscriptionDns.bestMatch(config.hosts, "exact.nodes.example"));
+        assertEquals("+.nodes.example", SubscriptionDns.bestMatch(config.hosts, "nodes.example"));
+        assertEquals(Collections.singletonList("target.external.example"), config.hosts.get("xn--bcher-kva.example"));
+        assertFalse(config.hosts.containsKey("*.unused.example"));
+    }
+
+    @Test public void automaticHostsWithoutNodeDomainsOrDisabledHostsAreEmpty() {
+        for (String nodes : Arrays.asList("", "proxies: [{server: 192.0.2.1}, {server: '[2001:db8::1]'}]\n")) {
+            assertTrue(imported(nodes + "hosts: {time.android.com: 192.0.2.2}\n").hosts.isEmpty());
+        }
+        assertTrue(imported("proxies: [{server: node.example}]\nhosts: {node.example: node.example}\n"
+                + "dns: {use-hosts: false}\n").hosts.isEmpty());
+        assertTrue(imported("proxies: [{server: node.example}]\nhosts: {node.example: 192.0.2.1}\n"
+                + "dns: {enable: false}\n").policy.isEmpty());
+    }
+
+    @Test public void reachableInvalidHostsStillFailInsteadOfGuessingValues() {
+        for (String value : Arrays.asList("[]", "[192.0.2.1, alias.example]", "true")) {
+            assertThrows(IllegalArgumentException.class, () -> imported("proxies: [{server: node.example}]\n"
+                    + "hosts: {node.example: " + value + "}\n"));
+        }
+        assertThrows(IllegalArgumentException.class, () -> imported("proxies: [{server: node.example}]\n"
+                + "hosts: {node.example: edge.example, '*.example': node.example}\n"));
+    }
+
+    @Test public void actualImportedServersExcludeUnsupportedSourceNodesAndIdentityFields() {
+        Map<?, ?> root = SubscriptionDns.loadDocument("proxies: [{server: supported.example}, {server: unsupported.example}]\n"
+                + "hosts: {supported.example: 192.0.2.1, unsupported.example: 192.0.2.2}\n");
+        SubscriptionDns.Config config = SubscriptionDns.fromSubscriptionDocument(root, Collections.singletonList("supported.example"));
+        assertEquals(Collections.singleton("supported.example"), config.hosts.keySet());
+        assertTrue(SubscriptionDns.fromSubscriptionDocument(root, Collections.emptyList()).hosts.isEmpty());
+    }
+
+    @Test public void sourceIdentityAliasesAreOmittedButManualAndIndirectCyclesStayStrict() {
+        String identity = "hosts: {Node.Example.: 'NODE.Example.'}\n";
+        SubscriptionDns.Config config = imported("proxies: [{server: node.example}]\n" + identity);
+        assertTrue(config.hosts.isEmpty());
+        assertEquals("", config.snapshot());
+        assertEquals(1, config.warnings.size());
+        assertTrue(SubscriptionDns.fromImportedSnapshot(identity, Collections.singletonList("node.example")).hosts.isEmpty());
+        assertThrows(IllegalArgumentException.class, () -> parse(identity));
+        assertNotNull(SubscriptionDns.validateHostsConfig("node.example: node.example"));
+        assertThrows(IllegalArgumentException.class, () -> imported("proxies: [{server: node.example}]\n"
+                + "hosts: {node.example: other.example, other.example: node.example}\n"));
+    }
+
+    @Test public void legacyAutomaticDefaultsAreIgnoredWhileManualValuesSurviveRefresh() {
+        String old = "hosts: {node.example: 192.0.2.1}\ndns:\n"
+                + "  proxy-server-nameserver: [9.9.9.9]\n  direct-nameserver: [8.8.8.8]\n"
+                + "  proxy-server-nameserver-policy: {node.example: 192.0.2.53}\n";
+        SubscriptionDns.Config inherited = SubscriptionDns.effective(old, "", "", "");
+        assertTrue(inherited.serverDns.isEmpty()); assertTrue(inherited.directDns.isEmpty());
+        assertFalse(inherited.serverPolicy.isEmpty());
+        assertEquals(Collections.singletonList("tls://192.0.2.54"),
+                SubscriptionDns.effective(old, "", "", "tls://192.0.2.54").serverDns);
+        assertEquals(Collections.singletonList("tls://192.0.2.54"),
+                SubscriptionDns.effective("", "", "", "tls://192.0.2.54").serverDns);
+        assertEquals(Collections.singletonList("192.0.2.55"),
+                SubscriptionDns.effective(old, "proxy-server-nameserver: [192.0.2.55]", "", "").serverDns);
+        assertTrue(SubscriptionDns.fromImportedSnapshot("dns: {proxy-server-nameserver: invalid, direct-nameserver: []}").serverDns.isEmpty());
+        SubscriptionDns.Config migrated = SubscriptionDns.fromImportedSnapshot(old.replace(
+                "hosts: {node.example: 192.0.2.1}", "hosts: {node.example: 192.0.2.1, time.android.com: 192.0.2.2}"),
+                Collections.singletonList("node.example"));
+        assertEquals(Collections.singleton("node.example"), migrated.hosts.keySet());
+        assertTrue(migrated.serverDns.isEmpty()); assertTrue(migrated.directDns.isEmpty());
+    }
+
     private static void assertSnapshotShape(SubscriptionDns.Config config) {
         Map<?, ?> snapshot = SubscriptionDns.loadDocument(config.snapshot());
         assertTrue(new LinkedHashSet<>(Arrays.asList("hosts", "dns")).containsAll(snapshot.keySet()));
@@ -409,7 +526,7 @@ public class SubscriptionDnsTest {
                 if (Files.size(path) > 16 * 1024 * 1024) throw new IllegalArgumentException();
                 String text = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
                 Map<?, ?> document = SubscriptionDns.loadDocument(text);
-                SubscriptionDns.Config config = SubscriptionDns.fromDocument(document);
+                SubscriptionDns.Config config = SubscriptionDns.fromSubscriptionDocument(document);
                 assertSnapshotShape(config);
                 // policy includes both ordinary and node-server-specific policy entries.
                 hosts = config.hosts.size();

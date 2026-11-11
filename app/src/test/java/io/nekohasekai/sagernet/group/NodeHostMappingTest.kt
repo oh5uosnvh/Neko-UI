@@ -15,6 +15,7 @@ class NodeHostMappingTest {
         assertFalse(NodeHostMapping.apply(b,hosts,true));assertEquals("b.example",b.serverAddress)
         assertTrue(NodeHostMapping.apply(b,hosts,false));assertEquals("a.example",b.serverAddress)
         assertEquals("",b.sni);assertEquals("",b.host)
+        assertEquals("",b.mappedOriginalAddress);assertEquals("",b.mappedTargetAddress);assertEquals("",b.mappedIdentityFields)
         assertFalse(NodeHostMapping.apply(b,hosts,false))
         assertTrue(NodeHostMapping.apply(b,hosts,true));assertEquals("b.example",b.serverAddress)
     }

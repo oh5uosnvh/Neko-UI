@@ -85,7 +85,7 @@ class GroupDnsUiTest {
                 assertEquals(GroupDnsUi.Summary.UNSET, state.summary)
                 assertEquals("", state.content)
                 assertFalse(state.hasContent)
-                assertTrue(state.hasAutomatic)
+                assertEquals(auto.isNotBlank(), state.hasAutomatic)
                 assertNull(state.edited(""))
                 assertEquals(manual, state.manual)
             }
@@ -110,7 +110,7 @@ class GroupDnsUiTest {
     }
 
     @Test fun clearingAutomaticContentWritesDisableSentinelForEveryField() {
-        for (auto in fields(GroupDnsUi.automatic(imported))) {
+        for (auto in fields(GroupDnsUi.automatic(imported)).filter { it.isNotBlank() }) {
             val state = GroupDnsUi.state("", auto, "subscription", true)
             assertEquals("{}", state.edited(""))
             assertEquals("{}", state.edited(" \n"))
@@ -145,8 +145,9 @@ class GroupDnsUiTest {
 
     @Test fun autoEditorsContainOnlyTheirSupportedConfigFields() {
         val auto = GroupDnsUi.automatic(imported)
-        assertEquals("https://resolver.example/dns-query\ntcp://192.0.2.53:5353", auto.server)
-        assertEquals("223.5.5.5\ntls://1.1.1.1", auto.direct)
+        assertEquals("", auto.server)
+        assertEquals("", auto.direct)
+        assertEquals(auto, GroupDnsUi.automatic(SubscriptionDns.fromDocument(SubscriptionDns.loadDocument(imported))))
         assertTrue(SubscriptionDns.isValidEndpointList(auto.server))
         assertTrue(SubscriptionDns.isValidEndpointList(auto.direct))
         assertNull(SubscriptionDns.validatePrivateConfig(auto.privateDns))
@@ -170,6 +171,32 @@ class GroupDnsUiTest {
             assertFalse(text.contains("do-not-display"))
             assertFalse(text.contains("proxies:"))
         }
+    }
+
+    @Test fun manualResolversRemainCustomAcrossLocalAndRemoteAutomaticRefresh() {
+        val original = GroupDnsUi.automatic(imported)
+        val next = GroupDnsUi.automatic(imported.replace("9.9.9.9", "192.0.2.53"))
+        for (source in listOf("file", "subscription")) {
+            for (auto in listOf(original, next, GroupDnsUi.automatic(""))) {
+                for (field in listOf(auto.server, auto.direct)) {
+                    val blank = GroupDnsUi.state("", field, source, true)
+                    assertEquals(GroupDnsUi.Summary.UNSET, blank.summary)
+                    assertEquals("", blank.content)
+                    assertNull(blank.edited(""))
+                    val custom = GroupDnsUi.state("tls://192.0.2.54", field, source, true)
+                    assertEquals(GroupDnsUi.Summary.CUSTOM, custom.summary)
+                    assertEquals("tls://192.0.2.54", custom.content)
+                    assertNull(custom.edited(custom.content))
+                    assertEquals("", custom.edited(""))
+                }
+            }
+        }
+    }
+
+    @Test fun invalidOldAutomaticDefaultsDoNotHideValidPrivatePolicies() {
+        val auto = GroupDnsUi.automatic("dns: {proxy-server-nameserver: invalid, direct-nameserver: [], nameserver-policy: {node.example: 192.0.2.53}}")
+        assertEquals("", auto.server); assertEquals("", auto.direct)
+        assertTrue(auto.privateDns.contains("node.example"))
     }
 
     @Test fun bootstrapAloneDoesNotClaimPrivateDomainPolicyWasProvided() {

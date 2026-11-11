@@ -59,6 +59,8 @@ object NodeHostMapping {
             }
         } else original = bean.serverAddress
         if (!enabled || SubscriptionDns.isIp(original)) {
+            bean.mappedOriginalAddress = ""
+            bean.mappedTargetAddress = ""
             return before != listOf(bean.serverAddress, bean.mappedOriginalAddress, bean.mappedTargetAddress, bean.mappedIdentityFields)
         }
         var target = original

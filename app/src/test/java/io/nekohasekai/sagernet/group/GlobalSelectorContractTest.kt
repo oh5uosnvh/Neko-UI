@@ -25,11 +25,13 @@ class GlobalSelectorContractTest {
         assertFalse(settings.contains("findPreference<SwitchPreference>(Key.GLOBAL_SELECTOR)"))
     }
 
-    @Test fun selectorIsPerGroupAndToolbarActionOnlyBatchesGroupFlags() {
+    @Test fun selectorGraphIsCrossGroupAndToolbarStillOnlyBatchesGroupFlags() {
         val builder = source("java/io/nekohasekai/sagernet/fmt/ConfigBuilder.kt")
         val fragment = source("java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt")
         assertTrue(builder.contains("group?.isSelector == true"))
-        assertTrue(builder.contains("SagerDatabase.proxyDao.getByGroup(group!!.id)"))
+        assertTrue(builder.contains("SagerDatabase.groupDao.allGroups()"))
+        assertTrue(builder.contains(".filter { it.isSelector }.sortedBy { it.id }"))
+        assertTrue(builder.contains("GLOBAL_SELECTOR_GROUP_ID else -1L"))
         assertFalse(builder.contains("DataStore.globalSelector"))
         assertFalse(builder.contains("Global selector does not support"))
         assertTrue(fragment.contains("group.isSelector = enable"))
@@ -37,7 +39,7 @@ class GlobalSelectorContractTest {
         assertTrue(builder.contains("selectorFingerprint"))
     }
 
-    @Test fun liveSwitchRejectsStaleGlobalMembershipInsteadOfReloading() {
+    @Test fun liveSwitchAcknowledgesCoreAndAutomaticallyReconnectsIncompatibleGraphs() {
         val service = source("java/io/nekohasekai/sagernet/bg/BaseService.kt")
         val aidl = sequenceOf(
             File("app/src/main/aidl/io/nekohasekai/sagernet/aidl/ISagerNetService.aidl"),
@@ -45,12 +47,28 @@ class GlobalSelectorContractTest {
         ).first { it.exists() }.readText()
         assertTrue(aidl.contains("String selectSelectorNode(long profileId)"))
         val selectBody = service.substringAfter("override fun selectSelectorNode").substringBefore("private fun selectorError")
-        assertTrue(selectBody.contains("STALE_CONFIG"))
-        assertFalse(selectBody.contains("stopRunner"))
-        assertFalse(selectBody.contains("reload()"))
+        assertFalse(selectBody.contains("STALE_CONFIG"))
+        assertTrue(selectBody.contains("reconnectSelector"))
+        assertTrue(selectBody.contains("stopRunner(restart = true)"))
+        assertTrue(selectBody.contains("put(\"ack\", false).put(\"accepted\", true)"))
+        assertTrue(selectBody.contains("put(\"mode\", \"hot\")"))
+        assertTrue(selectBody.contains("put(\"mode\", \"reload\")"))
+        assertTrue(selectBody.contains("disableSelector = true"))
         assertTrue(service.contains("rebuilt.selectorFingerprint == running.config.selectorFingerprint"))
         assertTrue(service.contains("box.selectOutbound(tag)"))
         assertTrue(service.contains("selector rejected compiled node"))
+    }
+
+    @Test fun compiledGraphNormalizesOnlyAllocatedPortsAndScopesNodeDns() {
+        val builder = source("java/io/nekohasekai/sagernet/fmt/ConfigBuilder.kt")
+        assertTrue(builder.contains("SelectorFingerprint.policy(configMap, runtimePorts)"))
+        assertTrue(builder.contains("selectorDns.nodeFallback(nodeDnsConfig, nodeSubscription)"))
+        assertTrue(builder.contains("selectorDns.dispatch(\"dns-direct\", selectorDirectChoices)"))
+        assertTrue(builder.contains("rule.disable_cache = true"))
+        assertTrue(builder.contains("hop.requireBean().clone()"))
+        val fragment = source("java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt")
+        assertTrue(fragment.contains("receipt.optBoolean(\"accepted\")"))
+        assertTrue(fragment.contains("receipt.optBoolean(\"reloading\")"))
     }
 
     @Test fun nativeBoolAndRunningBoxAreRequired() {

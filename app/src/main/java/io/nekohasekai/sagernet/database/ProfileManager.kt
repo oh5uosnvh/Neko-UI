@@ -167,6 +167,7 @@ object ProfileManager {
     suspend fun createRule(rule: RuleEntity, post: Boolean = true): RuleEntity {
         rule.userOrder = SagerDatabase.rulesDao.nextOrder() ?: 1
         rule.id = SagerDatabase.rulesDao.createRule(rule)
+        RuntimeRouteUpdater.request()
         if (post) {
             ruleIterator { onAdd(rule) }
         }
@@ -175,16 +176,19 @@ object ProfileManager {
 
     suspend fun updateRule(rule: RuleEntity) {
         SagerDatabase.rulesDao.updateRule(rule)
+        RuntimeRouteUpdater.request()
         ruleIterator { onUpdated(rule) }
     }
 
     suspend fun deleteRule(ruleId: Long) {
         SagerDatabase.rulesDao.deleteById(ruleId)
+        RuntimeRouteUpdater.request()
         ruleIterator { onRemoved(ruleId) }
     }
 
     suspend fun deleteRules(rules: List<RuleEntity>) {
         SagerDatabase.rulesDao.deleteRules(rules)
+        RuntimeRouteUpdater.request()
         ruleIterator {
             rules.forEach {
                 onRemoved(it.id)

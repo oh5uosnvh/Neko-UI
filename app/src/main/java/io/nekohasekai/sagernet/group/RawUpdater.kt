@@ -78,7 +78,7 @@ object RawUpdater : GroupUpdater() {
             var titleHeader = ""
             var dispositionHeader = ""
             var parsed: List<AbstractBean>? = null
-            val failures = ArrayList<String>()
+            var failure = "Response contains no supported nodes"
             try {
                 for ((attempt, ua) in userAgents.withIndex()) {
                     try {
@@ -98,7 +98,7 @@ object RawUpdater : GroupUpdater() {
                             // Consume/close the body before trying the next UA; this
                             // also preserves a short server message in native logs.
                             runCatching { response.contentString }
-                            failures += "$ua → HTTP $status $statusText"
+                            failure = SubscriptionRequestError.http(status, statusText)
                             continue
                         }
                         val body = Util.getStringBox(response.contentString)
@@ -113,25 +113,16 @@ object RawUpdater : GroupUpdater() {
                     } catch (cancelled: kotlinx.coroutines.CancellationException) {
                         throw cancelled
                     } catch (error: Exception) {
-                        // Exception strings may contain the subscription token. Keep the
-                        // user-facing reason typed, but never include the URL or token.
-                        val detail = when (error) {
-                            is java.net.UnknownHostException -> "DNS/域名解析失败"
-                            is java.net.ConnectException -> "连接代理或服务器失败"
-                            is java.net.SocketTimeoutException -> "连接超时"
-                            else -> error.message?.takeIf { it.isNotBlank() }?.take(180)
-                                ?: error.javaClass.simpleName
-                        }
-                        failures += "$ua → $detail"
+                        // Keep the concrete request error, without UA names or
+                        // aggregation. Never copy the URL/token into native logs.
+                        failure = SubscriptionRequestError.describe(error)
                         Logs.w("Subscription UA attempt ${attempt + 1} failed: ${error.javaClass.simpleName}")
                     }
                 }
             } finally {
                 httpClient.close()
             }
-            proxies = parsed ?: error(
-                "订阅拉取/解析失败：${failures.distinct().joinToString("；")}".take(1200)
-            )
+            proxies = parsed ?: error(failure)
 
             var userinfo = userInfoHeader
             if (userinfo.isBlank()) {
@@ -427,11 +418,6 @@ object RawUpdater : GroupUpdater() {
             try {
 
                 val yaml = SubscriptionDns.loadDocument(text)
-                val importedDns = SubscriptionDns.fromSubscriptionDocument(yaml)
-                importedDns.warnings.forEach { warning ->
-                    android.util.Log.w("SubscriptionDns", warning)
-                }
-                val dnsSnapshot = importedDns.snapshot()
 
                 val globalClientFingerprint = yaml["global-client-fingerprint"]?.toString() ?: ""
 
@@ -1098,6 +1084,14 @@ object RawUpdater : GroupUpdater() {
                         }
                     }
                 }
+
+                // Only successfully parsed node dial addresses may seed automatic hosts.
+                // Unsupported source protocols or transport SNI/Host are not node mappings.
+                val importedDns = SubscriptionDns.fromSubscriptionDocument(yaml, proxies.map { it.serverAddress })
+                importedDns.warnings.forEach { warning ->
+                    android.util.Log.w("SubscriptionDns", warning)
+                }
+                val dnsSnapshot = importedDns.snapshot()
 
                 // Fix ent
                 proxies.forEach {

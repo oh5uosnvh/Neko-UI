@@ -15,6 +15,10 @@ checkout_dep() {
     echo "Not a Git checkout: $dir" >&2; exit 1
   fi
   if [ -n "$(git -C "$dir" status --porcelain)" ]; then
+    if [ "$name" = sing-box ] && [ -f "$dir/.git/neko-runtime-routing.json" ]; then
+      python3 "$ROOT/libcore/runtimepatch/apply.py" --verify-existing "$dir" "$commit"
+      return
+    fi
     echo "Refusing to overwrite dirty dependency: $dir" >&2; exit 1
   fi
   git -C "$dir" cat-file -e "$commit^{commit}" 2>/dev/null || git -C "$dir" fetch origin "$commit"
@@ -29,3 +33,6 @@ for name in sing-anytls-shanlian sing-shadowsocks2-vt fastup-mod oppa-mod; do
     exit 1
   fi
 done
+
+# Extend the pinned router with a tested, atomic route+DNS snapshot API.
+python3 "$ROOT/libcore/runtimepatch/apply.py" "$DEPS/sing-box"

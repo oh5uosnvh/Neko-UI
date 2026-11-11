@@ -39,6 +39,19 @@ class SelectorFingerprintTest {
         assertNotEquals(old, edited)
     }
 
+    @Test fun onlyAllocatedLoopbackPortsAreNormalizedAndPersistedPortsRemainBoundaries() {
+        fun graph(port: Int, remotePort: Int = 443) = mapOf<String, Any?>(
+            "outbounds" to listOf(mapOf("type" to "socks", "server" to "127.0.0.1", "server_port" to port),
+                mapOf("type" to "socks", "server" to "192.0.2.1", "server_port" to remotePort)),
+            "inbounds" to listOf(mapOf("listen" to "127.0.0.1", "listen_port" to port)),
+        )
+        val a = SelectorFingerprint.policy(graph(41001), mapOf(41001 to "mapping:1:2"))
+        assertEquals(a, SelectorFingerprint.policy(graph(52001), mapOf(52001 to "mapping:1:2")))
+        assertNotEquals(a, SelectorFingerprint.policy(graph(52001, 8443), mapOf(52001 to "mapping:1:2")))
+        assertNotEquals(a, SelectorFingerprint.policy(graph(52001), mapOf(52001 to "mapping:1:3")))
+        assertNotEquals(SelectorFingerprint.policy(graph(41001)), SelectorFingerprint.policy(graph(52001)))
+    }
+
     @Test fun runtimeSelectionAndPortAreNotFingerprintInputs() {
         val old = SelectorFingerprint.of(listOf("node:10:group:1:chain:10:config:a"))
         val selectedAgain = SelectorFingerprint.of(listOf("node:10:group:1:chain:10:config:a"))

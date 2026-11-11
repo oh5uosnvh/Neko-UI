@@ -1556,8 +1556,8 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             R.id.action_global_no_reload -> {
-                // Batch operation: this switch is only a convenience for the
-                // per-group “启用 selector（免重载切换节点）” setting.
+                // Batch the group switches; every enabled group contributes to one
+                // compiled runtime selector. Changing membership applies a rebuild once.
                 val groups = SagerDatabase.groupDao.allGroups()
                 val enable = groups.isNotEmpty() && !groups.all { it.isSelector }
                 runOnDefaultDispatcher {
@@ -1585,33 +1585,11 @@ class ConfigurationFragment @JvmOverloads constructor(
             R.id.action_global_mode -> {
                 item.isChecked = !item.isChecked
                 DataStore.globalMode = item.isChecked
-                if (DataStore.serviceState.canStop) {
-                    runOnDefaultDispatcher {
-                        try {
-                            // 等待一段时间确保配置已保存
-                            delay(500)
-                            snackbar(getString(R.string.need_reload)).setAction(R.string.apply) {
-                                runOnDefaultDispatcher {
-                                    try {
-                                        // 再次等待确保配置已保存
-                                        delay(100)
-                                        SagerNet.reloadService()
-                                    } catch (e: Exception) {
-                                        Logs.w(e)
-                                        onMainDispatcher {
-                                            snackbar(getString(R.string.service_failed)).show()
-                                        }
-                                    }
-                                }
-                            }.show()
-                        } catch (e: Exception) {
-                            Logs.w(e)
-                            onMainDispatcher {
-                                snackbar(getString(R.string.service_failed)).show()
-                            }
-                        }
-                    }
-                }
+                // Room writes synchronously; the committed value is visible to :bg.
+                // Hot snapshot ACK / explicit reconnect fallback is owned by the service.
+                io.nekohasekai.sagernet.database.RuntimeRouteUpdater.request(
+                    io.nekohasekai.sagernet.database.RuntimeRouteUpdater.Reason.GLOBAL_MODE,
+                )
                 return true
             }
         }
@@ -3651,8 +3629,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                     if (proxyEntity.id == DataStore.selectedProxy && !SagerNet.isTv) {
                         return@runOnDefaultDispatcher
                     }
-                    // A per-group selector is an acknowledged operation on the
-                    // current Box, not a preference write followed by a reload.
+                    // An enabled-group member uses the global selector ACK path;
+                    // incompatible runtime graphs are automatically reconnected.
                     if (SagerDatabase.groupDao.getById(proxyEntity.groupId)?.isSelector == true && DataStore.serviceState.started) {
                         profileAccess.withLock {
                             val previous = DataStore.selectedProxy
@@ -3666,10 +3644,16 @@ class ConfigurationFragment @JvmOverloads constructor(
                                 }
                                 return@withLock
                             }
-                            if (receipt.optBoolean("ok") && receipt.optBoolean("ack") &&
+                            if (receipt.optBoolean("ok") &&
+                                (receipt.optBoolean("ack") || receipt.optBoolean("accepted")) &&
                                 receipt.optLong("profileId", -1L) == proxyEntity.id) {
                                 onMainDispatcher {
-                                    if (pf.isAdded && pf.view != null) pf.refreshProfileState()
+                                    if (pf.isAdded && pf.view != null) {
+                                        pf.refreshProfileState()
+                                        if (receipt.optBoolean("reloading")) pf.snackbar(
+                                            receipt.optString("message", "已自动重连（非免重载切换）")
+                                        ).show()
+                                    }
                                 }
                                 ProfileManager.postUpdate(previous, noTraffic = true)
                                 ProfileManager.postUpdate(proxyEntity.id, noTraffic = true)

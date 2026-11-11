@@ -49,6 +49,7 @@ var _ adapter.DNSTransport = (*Transport)(nil)
 
 func RegisterTransport(registry *boxdns.TransportRegistry) {
 	boxdns.RegisterTransport[Options](registry, Type, New)
+	boxdns.RegisterTransport[SelectorOptions](registry, SelectorType, newSelector)
 	registerStreams(registry)
 }
 func New(ctx context.Context, _ log.ContextLogger, tag string, options Options) (adapter.DNSTransport, error) {

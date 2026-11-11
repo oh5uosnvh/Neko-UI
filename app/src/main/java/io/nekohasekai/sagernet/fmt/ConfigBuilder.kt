@@ -73,12 +73,14 @@ class ConfigBuildResult(
     var trafficMap: Map<String, List<ProxyEntity>>,
     var profileTagMap: Map<Long, String>,
     val selectorGroupId: Long,
-    /** Compatibility field; runtime selector scope is always per-group. */
+    /** True when all enabled groups contribute to the runtime selector. */
     val globalSelector: Boolean = false,
-    /** Ordinary DNS table identity for the current group selector. */
+    /** Application DNS is separate from the immutable node resolver graph. */
     val selectorApplicationDnsFingerprint: String = "",
     /** Fingerprint of selector membership, chains and DNS policy at build time. */
     val selectorFingerprint: String = "",
+    /** Allocated loopback ports keyed by this build, values are stable chain identities. */
+    val runtimePorts: Map<Int, String> = emptyMap(),
 ) {
     data class IndexEntity(var chain: LinkedHashMap<Int, ProxyEntity>)
 }
@@ -116,7 +118,8 @@ private fun serverHostOf(bean: AbstractBean): String? {
 }
 
 fun buildConfig(
-    proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean = false
+    proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean = false,
+    disableSelector: Boolean = false
 ): ConfigBuildResult {
 
     if (proxy.type == TYPE_CONFIG) {
@@ -141,17 +144,21 @@ fun buildConfig(
     val readableNames = mutableSetOf(TAG_DIRECT, TAG_BYPASS, TAG_BLOCK, TAG_FRAGMENT, TAG_MIXED, TAG_PROXY)
     val group = SagerDatabase.groupDao.getById(proxy.groupId)
 
+    val resolvingChains = hashSetOf<Long>()
     fun ProxyEntity.resolveChainInternal(): MutableList<ProxyEntity> {
         val bean = requireBean()
         if (bean is ChainBean) {
-            val beans = SagerDatabase.proxyDao.getEntities(bean.proxies)
-            val beansMap = beans.associateBy { it.id }
-            val beanList = ArrayList<ProxyEntity>()
-            for (proxyId in bean.proxies) {
-                val item = beansMap[proxyId] ?: continue
-                beanList.addAll(item.resolveChainInternal())
-            }
-            return beanList.asReversed()
+            require(resolvingChains.add(id)) { "Cyclic proxy chain: $id" }
+            try {
+                val beansMap = SagerDatabase.proxyDao.getEntities(bean.proxies).associateBy { it.id }
+                val beanList = ArrayList<ProxyEntity>()
+                for (proxyId in bean.proxies) {
+                    val item = beansMap[proxyId] ?: error("Missing proxy chain member: $proxyId")
+                    beanList.addAll(item.resolveChainInternal())
+                }
+                require(beanList.isNotEmpty()) { "Empty proxy chain: $id" }
+                return beanList.asReversed()
+            } finally { resolvingChains.remove(id) }
         }
         return mutableListOf(this)
     }
@@ -183,14 +190,17 @@ fun buildConfig(
     val extraRules = if (forTest) listOf() else SagerDatabase.rulesDao.enabledRules()
         .filterNot { io.nekohasekai.sagernet.database.RemoteRulePolicy.waitingWithoutConditions(it) }
         .map { io.nekohasekai.sagernet.database.RemoteRulePolicy.effective(it) }
-    val extraProxies =
-        if (forTest) mapOf() else SagerDatabase.proxyDao.getEntities(extraRules.mapNotNull { rule ->
-            rule.outbound.takeIf { it > 0 && it != proxy.id }
-        }.toHashSet().toList()).associateBy { it.id }
-    // Selector is a per-group setting. The toolbar action named “all-groups
-    // selector” only batches ProxyGroup.isSelector; it never creates a
-    // cross-group selector or changes DNS scope.
-    val buildSelector = !forTest && !forExport && group?.isSelector == true
+    // isSelector is the only switch: each enabled group contributes runtime members.
+    // Toolbar batching therefore creates a real cross-group selector, including manual groups.
+    val buildSelector = !forTest && !forExport && !disableSelector && group?.isSelector == true
+    val selectorMembers = if (buildSelector) SagerDatabase.groupDao.allGroups()
+        .filter { it.isSelector }.sortedBy { it.id }
+        .flatMap { SagerDatabase.proxyDao.getByGroup(it.id).sortedBy { member -> member.id } }
+        .filter { member ->
+            val bean = member.requireBean()
+            // Whole-core configurations cannot be nested as an outbound. Selecting one reconnects.
+            bean !is ConfigBean || bean.type != 0
+        } else emptyList()
     val userDNSRuleList = mutableListOf<DNSRule_DefaultOptions>()
     val domainListDNSDirectForce = mutableListOf<String>()
     val bypassDNSBeans = hashSetOf<AbstractBean>()
@@ -208,7 +218,6 @@ fun buildConfig(
     val directDNS = DataStore.directDns.split("\n")
         .mapNotNull { dns -> dns.trim().takeIf { it.isNotBlank() && !it.startsWith("#") } }
     val selectorDns = SelectorDnsPolicy(directDNS)
-    val applicationDnsFingerprint = selectorDns.applicationFingerprint(activeDns, activeSubscription)
     val dnsHosts by lazy { parseDnsHosts(DataStore.dnsHosts) }
     val enableDnsRouting = DataStore.enableDnsRouting
     val useFakeDns = DataStore.enableFakeDns && !forTest
@@ -216,6 +225,11 @@ fun buildConfig(
     val needSniffOverride = DataStore.trafficSniffing == 2
     val externalIndexMap = ArrayList<IndexEntity>()
     val selectorFingerprintParts = mutableListOf<String>()
+    val selectorDirectChoices = linkedMapOf<String, String>()
+    val selectorGeneralChoices = linkedMapOf<String, String>()
+    val selectorGeneralRules = mutableListOf<DNSRule_DefaultOptions>()
+    val runtimePorts = linkedMapOf<Int, String>()
+    fun runtimePort(identity: String): Int = mkPort().also { runtimePorts[it] = identity }
     val ipv6Mode = if (forTest) IPv6Mode.ENABLE else DataStore.ipv6Mode
 
     fun genDomainStrategy(noAsIs: Boolean): String {
@@ -347,7 +361,9 @@ fun buildConfig(
         fun buildChain(
             chainId: Long, entity: ProxyEntity
         ): String {
-            val profileList = entity.resolveChain()
+            val profileList = entity.resolveChain().map { hop ->
+                hop.copy().apply { putBean(hop.requireBean().clone()) }
+            }
             val chainTrafficSet = HashSet<ProxyEntity>().apply {
                 plusAssign(profileList)
                 add(entity)
@@ -376,7 +392,9 @@ fun buildConfig(
                 val nodeSubscription = nodeGroup?.subscription
                 val nodeDnsConfig = subscriptionDns.config(bean, nodeSubscription)
                 NodeHostMapping.apply(bean, nodeDnsConfig.hosts, nodeSubscription?.applyHosts != false)
-                val nodeResolver = subscriptionDns.node(bean, nodeSubscription)
+                val fallbackResolver = if (buildSelector) selectorDns.nodeFallback(nodeDnsConfig, nodeSubscription) else "dns-direct"
+                val nodeResolver = subscriptionDns.node(bean, selectorDns.nodeSubscription(nodeDnsConfig), fallbackResolver)
+                    ?: if (buildSelector) fallbackResolver else null
                 val preserveMultiAddress = nodeSubscription?.applyHosts != false && NodeHostMapping.hasMultipleAddresses(bean, nodeDnsConfig.hosts)
                 // Keep all IP candidates in the resolver instead of freezing a multi-IP hosts entry.
                 if (preserveMultiAddress) bean.serverAddress = bean.mappedOriginalAddress
@@ -396,14 +414,19 @@ fun buildConfig(
                 // first profile set as global
                 if (index == profileList.lastIndex) {
                     needGlobal = true
-                    tagOut = "g-" + proxyEntity.id
+                    tagOut = if (buildSelector) {
+                        if (profileList.size == 1) "s-$chainId-${proxyEntity.id}" else "g-${proxyEntity.id}"
+                    } else "g-${proxyEntity.id}"
                     bypassDNSBeans += proxyEntity.requireBean()
                 }
 
                 if (index == 0) {
-                    tagOut = readableTag(bean.displayName())
+                    tagOut = if (buildSelector) "s-$chainId-${proxyEntity.id}" else readableTag(bean.displayName())
                 }
 
+                val shareGlobal = needGlobal && !(buildSelector && profileList.size == 1)
+                val existingGlobal = if (shareGlobal) globalOutbounds[proxyEntity.id] else null
+                if (existingGlobal != null) tagOut = existingGlobal
 
                 // chain rules
                 if (index > 0) {
@@ -422,16 +445,16 @@ fun buildConfig(
                 }
 
                 // now tagOut is determined
-                if (needGlobal) {
-                    globalOutbounds[proxyEntity.id]?.let {
-                        if (index == 0) chainTagOut = it // single, duplicate chain
+                if (shareGlobal) {
+                    if (existingGlobal != null) {
+                        if (index == 0) chainTagOut = existingGlobal
                         return@forEachIndexed
                     }
                     globalOutbounds[proxyEntity.id] = tagOut
                 }
 
                 if (proxyEntity.needExternal()) { // externel outbound
-                    val localPort = mkPort()
+                    val localPort = runtimePort("external:$chainId:${proxyEntity.id}")
                     externalChainMap[localPort] = proxyEntity
                     currentOutbound = Outbound_SocksOptions().apply {
                         type = "socks"
@@ -558,7 +581,7 @@ fun buildConfig(
                         }
                     }
                     if (needExternal) {
-                        val mappingPort = mkPort()
+                        val mappingPort = runtimePort("mapping:$chainId:${proxyEntity.id}")
                         bean.finalAddress = LOCALHOST
                         bean.finalPort = mappingPort
 
@@ -615,7 +638,7 @@ fun buildConfig(
         // Each member still enters through resolveChain(), which applies its own
         // group's front/landing proxies and subscription-scoped node DNS.
         if (buildSelector) {
-            val members = SagerDatabase.proxyDao.getByGroup(group!!.id)
+            val members = selectorMembers
             if (members.none { it.id == proxy.id }) {
                 throw IllegalArgumentException("Selected node is not a member of the compiled selector")
             }
@@ -634,6 +657,15 @@ fun buildConfig(
                     append(gson.toJson(bean))
                 }
                 tagMap[it.id] = buildChain(it.id, it)
+                val memberGroup = groupCache.getOrPut(it.groupId) { SagerDatabase.groupDao.getById(it.groupId) }
+                val memberDns = subscriptionDns.config(it.requireBean(), memberGroup?.subscription)
+                val memberTag = tagMap.getValue(it.id)
+                selectorDirectChoices[memberTag] = selectorDns.nodeFallback(memberDns, memberGroup?.subscription)
+                val rules = subscriptionDns.general(it.requireBean(), selectorDns.generalSubscription(memberDns), "dns-remote")
+                // A common dispatch rule table, not a union of group hosts. If the selected
+                // group has no matching entry, only that group's resolver falls back to remote.
+                selectorGeneralChoices[memberTag] = rules.firstOrNull()?.server ?: "dns-remote"
+                selectorGeneralRules += rules
             }
             val memberTags = members.mapNotNull { tagMap[it.id] }.distinct()
             if (memberTags.isEmpty()) {
@@ -650,8 +682,11 @@ fun buildConfig(
             tagMap[proxy.id] = mainTag
         }
         // build outbounds from route item
-        extraProxies.forEach { (key, p) ->
-            tagMap[key] = buildChain(key, p)
+        val extraProxyIds = (if (buildSelector) SagerDatabase.rulesDao.allRules() else extraRules).mapNotNull { rule ->
+            rule.outbound.takeIf { it > 0 && (buildSelector || it != proxy.id) }
+        }.toSet()
+        SagerDatabase.proxyDao.getEntities(extraProxyIds.toList()).sortedBy { it.id }.forEach { p ->
+            if (p.id !in tagMap) tagMap[p.id] = buildChain(p.id, p)
         }
 
         val mainProxyTag = (if (buildSelector) TAG_PROXY else tagMap[proxy.id]) ?: TAG_PROXY
@@ -879,7 +914,7 @@ fun buildConfig(
                         0L -> mainProxyTag
                         -1L -> TAG_BYPASS
                         -2L -> TAG_BLOCK
-                        else -> if (outId == proxy.id) mainProxyTag else tagMap[outId] ?: ""
+                        else -> if (!buildSelector && outId == proxy.id) mainProxyTag else tagMap[outId] ?: ""
                     }
 
                     _hack_custom_config = rule.config
@@ -967,7 +1002,14 @@ fun buildConfig(
             detour = TAG_DIRECT
         })
 
-        if (subscriptionDirectDns.isNotEmpty()) {
+        if (buildSelector) {
+            // Every node resolver exists before the dispatcher and before legacy remote
+            // address resolution. No node bootstrap depends on the dynamic dns-direct tag.
+            dns.servers.addAll(selectorDns.servers)
+            dns.servers.addAll(subscriptionDns.servers)
+            subscriptionDns.servers.clear()
+            dns.servers.add(selectorDns.dispatch("dns-direct", selectorDirectChoices))
+        } else if (subscriptionDirectDns.isNotEmpty()) {
             subscriptionDns.direct(subscriptionDirectDns)
             // Legacy remote DNS resolves its address_resolver during construction, not Start.
             // Materialize dns-direct before dns-remote so a group override is already available.
@@ -1066,13 +1108,27 @@ fun buildConfig(
             // force bypass (always top DNS rule)
             if (domainListDNSDirectForce.isNotEmpty()) {
                 dns.rules.add(0, DNSRule_DefaultOptions().apply {
-                    makeSingBoxRule(domainListDNSDirectForce.toHashSet().toList())
+                    makeSingBoxRule(domainListDNSDirectForce.toSortedSet().toList())
                     server = "dns-direct"
                 })
             }
             // Subscription policy is scoped to the active group. Only matched domains override app DNS.
-            val subscriptionRules = subscriptionDns.general(proxy.requireBean(), activeSubscription, "dns-remote")
+            val subscriptionRules = if (buildSelector) {
+                dns.servers.add(selectorDns.dispatch("dns-selector-general", selectorGeneralChoices))
+                selectorGeneralRules.onEach { rule ->
+                    rule.server = "dns-selector-general"
+                    // sing-box caches by transport tag. A dynamic dispatcher must not
+                    // reuse a previous group's answer, including in-flight responses.
+                    rule.disable_cache = true
+                }.distinctBy { gson.toJson(it.asMap()) }
+            } else subscriptionDns.general(proxy.requireBean(), activeSubscription, "dns-remote")
             dns.rules.addAll(0, subscriptionRules)
+            if (buildSelector) {
+                // dns-direct dispatch is shared by user direct rules and node-domain
+                // guards, so disable that dynamic tag's cache too.
+                dns.rules.filterIsInstance<DNSRule_DefaultOptions>()
+                    .filter { it.server == "dns-direct" }.forEach { it.disable_cache = true }
+            }
         }
 
         dns.servers.addAll(subscriptionDns.servers)
@@ -1086,12 +1142,14 @@ fun buildConfig(
             proxy.id,
             trafficMap,
             tagMap,
-            if (buildSelector) group!!.id else -1L,
-            globalSelector = false,
-            selectorApplicationDnsFingerprint = if (buildSelector) applicationDnsFingerprint else "",
+            if (buildSelector) GLOBAL_SELECTOR_GROUP_ID else -1L,
+            globalSelector = buildSelector,
+            selectorApplicationDnsFingerprint = if (buildSelector)
+                SelectorFingerprint.policy(mapOf("direct" to selectorDirectChoices, "general" to selectorGeneralChoices)) else "",
             selectorFingerprint = if (buildSelector) {
-                SelectorFingerprint.of(selectorFingerprintParts + SelectorFingerprint.policy(configMap))
-            } else ""
+                SelectorFingerprint.of(selectorFingerprintParts + SelectorFingerprint.policy(configMap, runtimePorts))
+            } else "",
+            runtimePorts = runtimePorts.toMap(),
         )
     }
 

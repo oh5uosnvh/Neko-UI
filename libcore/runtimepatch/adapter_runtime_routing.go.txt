@@ -1,0 +1,81 @@
+package adapter
+
+import (
+ "context"
+ "errors"
+ "sync"
+
+ "github.com/sagernet/sing-box/constant"
+)
+
+// RuntimeRoutingSnapshot is immutable after publication. A request pins one
+// generation in its context; nested DNS lookups reuse that exact generation.
+type RuntimeRoutingSnapshot struct {
+ Rules []Rule
+ DNSRules []DNSRule
+ Final Outbound
+ DNSFinal DNSTransport
+ DNSClient DNSClient
+ DNSStrategy constant.DomainStrategy
+ Generation uint64
+ ReleaseResources func()
+ refs int
+ retired bool
+}
+
+type RuntimeRoutingState struct {
+ mu sync.Mutex
+ current *RuntimeRoutingSnapshot
+ closed bool
+}
+type runtimeRoutingContextKey struct{}
+
+// WithoutRuntimeRouting is for async/session callbacks: each actual DNS query
+// must acquire the then-current snapshot, not a borrowed context from routing.
+func WithoutRuntimeRouting(ctx context.Context) context.Context {
+ return context.WithValue(ctx, runtimeRoutingContextKey{}, (*RuntimeRoutingSnapshot)(nil))
+}
+
+func (s *RuntimeRoutingState) Pin(ctx context.Context) (context.Context, func(), error) {
+ p, _ := ctx.Value(runtimeRoutingContextKey{}).(*RuntimeRoutingSnapshot)
+ s.mu.Lock()
+ if s.closed { s.mu.Unlock(); return ctx, func(){}, errors.New("runtime routing closed") }
+ if p == nil || (p.retired && p.refs == 0) { p = s.current }
+ if p == nil { s.mu.Unlock(); return ctx, func(){}, nil }
+ p.refs++
+ s.mu.Unlock()
+ return context.WithValue(ctx, runtimeRoutingContextKey{}, p), func(){s.release(p)}, nil
+}
+func RuntimeRoutingFromContext(ctx context.Context) *RuntimeRoutingSnapshot {
+ p, _ := ctx.Value(runtimeRoutingContextKey{}).(*RuntimeRoutingSnapshot)
+ return p
+}
+func (s *RuntimeRoutingState) Publish(p *RuntimeRoutingSnapshot) (uint64, error) {
+ s.mu.Lock()
+ if s.closed { s.mu.Unlock(); return 0, errors.New("runtime routing closed") }
+ old := s.current
+ p.Generation = 1
+ if old != nil { p.Generation = old.Generation + 1 }
+ p.refs = 1 // state owns one reference
+ s.current = p
+ if old != nil { old.retired = true }
+ s.mu.Unlock()
+ if old != nil { s.release(old) }
+ return p.Generation, nil
+}
+func (s *RuntimeRoutingState) release(p *RuntimeRoutingSnapshot) {
+ s.mu.Lock()
+ p.refs--
+ cleanup := p.refs == 0 && p.retired
+ s.mu.Unlock()
+ if cleanup && p.ReleaseResources != nil { p.ReleaseResources() }
+}
+func (s *RuntimeRoutingState) Close() {
+ s.mu.Lock()
+ s.closed = true
+ old := s.current
+ s.current = nil
+ if old != nil { old.retired = true }
+ s.mu.Unlock()
+ if old != nil { s.release(old) }
+}

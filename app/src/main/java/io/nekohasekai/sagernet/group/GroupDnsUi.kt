@@ -13,7 +13,7 @@ object GroupDnsUi {
 
     /** Only extract supported DNS fields, never the source document or node credentials. */
     fun automatic(imported: String?): Automatic = try {
-        automatic(SubscriptionDns.fromDocument(SubscriptionDns.loadDocument(imported.orEmpty())))
+        automatic(SubscriptionDns.fromImportedSnapshot(imported.orEmpty()))
     } catch (_: IllegalArgumentException) {
         Automatic()
     }
@@ -29,8 +29,10 @@ object GroupDnsUi {
             }.joinToString("\n")
         }
         return Automatic(
-            server = config.serverDns.joinToString("\n"),
-            direct = config.directDns.joinToString("\n"),
+            // Automatic metadata can never populate the two user-only DNS editors,
+            // even if a caller passes a legacy Config instead of a snapshot.
+            server = "",
+            direct = "",
             privateDns = privateText,
             hosts = if (config.hosts.isEmpty()) "" else SubscriptionDns.dump(compact(config.hosts)).trimEnd(),
         )

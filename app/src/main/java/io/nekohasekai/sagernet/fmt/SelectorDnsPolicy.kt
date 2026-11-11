@@ -4,8 +4,8 @@ import io.nekohasekai.sagernet.database.SubscriptionBean
 import io.nekohasekai.sagernet.group.SubscriptionDns
 import moe.matsuri.nb4a.SingBoxOptions.DNSServerOptions
 
-/** A selector changes outbounds, not the running application's DNS rule table.
- * Node resolvers are independently scoped; application DNS is a reload boundary.
+/** A selector must never borrow the selected group's node resolver.
+ * Immutable resolver graphs are compiled once and dispatch uses native selector.Now().
  */
 internal class SelectorDnsPolicy(private val globalDirect: List<String>) {
     val servers = mutableListOf<DNSServerOptions>()
@@ -59,6 +59,29 @@ internal class SelectorDnsPolicy(private val globalDirect: List<String>) {
             importedDnsConfig = general.snapshot()
             importedDnsSource = "subscription"
         }
+    }
+
+    /** Canonical node-only configuration; YAML insertion order is not runtime identity. */
+    fun nodeSubscription(config: SubscriptionDns.Config): SubscriptionBean {
+        val node = SubscriptionDns.Config().apply {
+            hosts.putAll(config.hosts.toSortedMap())
+            policy.putAll(config.policy.toSortedMap())
+            serverPolicy.putAll(config.serverPolicy.toSortedMap())
+            bootstrap.addAll(config.bootstrap)
+            serverDns.addAll(config.serverDns)
+            directDns.addAll(config.directDns)
+        }
+        return SubscriptionBean().apply {
+            initializeDefaultValues()
+            importedDnsConfig = node.snapshot()
+            importedDnsSource = "subscription"
+        }
+    }
+
+    fun dispatch(tag: String, choices: Map<String, String>): DNSServerOptions = DNSServerOptions().apply {
+        require(choices.isNotEmpty()) { "Empty selector DNS choices" }
+        _hack_config_map.putAll(mapOf("type" to "neko-selector", "tag" to tag,
+            "selector" to "proxy", "choices" to choices.toSortedMap()))
     }
 
     fun applicationFingerprint(config: SubscriptionDns.Config, subscription: SubscriptionBean?): String =

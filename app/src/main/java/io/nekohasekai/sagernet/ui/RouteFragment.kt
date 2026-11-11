@@ -19,6 +19,7 @@ import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.database.RuntimeRouteUpdater
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.RemoteRouteUpdater
@@ -90,6 +91,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                     if (isAdded) snackbar(getString(R.string.route_quick_save_failed)).show()
                     return@launch
                 }
+                RuntimeRouteUpdater.request(RuntimeRouteUpdater.Reason.OUTBOUND)
                 // UI labels are published from the latest persisted row so parallel switch updates win correctly.
                 val latest = withContext(Dispatchers.IO) { SagerDatabase.rulesDao.getById(ruleId) } ?: return@launch
                 ProfileManager.ruleIterator { onUpdated(latest) }
@@ -211,6 +213,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                         runOnDefaultDispatcher {
                             // Restore only the catalog entries; custom routes and manual rules survive.
                             ProfileManager.ensureDefaultRoutes(reset = true)
+                            RuntimeRouteUpdater.request(RuntimeRouteUpdater.Reason.RESET)
                             ruleAdapter.reload()
                         }
                     }
@@ -221,7 +224,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 lifecycleScope.launch {
                     val failures = withContext(Dispatchers.IO) { RemoteRouteUpdater.updateAll() }
                     ruleAdapter.reload()
-                    if (isAdded) needReload()
+                    RuntimeRouteUpdater.request(RuntimeRouteUpdater.Reason.REMOTE)
                     if (failures.isNotEmpty() && isAdded) {
                         snackbar(getString(R.string.route_update_failed,
                             failures.joinToString("\n") { "${it.first}：${it.second}" })).show()
@@ -315,7 +318,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                         changes.forEach { (id, order) -> SagerDatabase.rulesDao.updateOrder(id, order) }
                     }
                 }
-                needReload()
+                RuntimeRouteUpdater.request(RuntimeRouteUpdater.Reason.ORDER)
             }
         }
 
@@ -342,7 +345,6 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             ruleListView.post {
                 ruleList.add(rule)
                 ruleAdapter.notifyItemInserted(ruleList.size)
-                needReload()
             }
         }
 
@@ -354,20 +356,15 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 val visible = ruleList[index]
                 ruleList[index] = rule.copy(userOrder = visible.userOrder)
                 ruleAdapter.notifyItemChanged(index + 1)
-                needReload()
             }
         }
 
         override suspend fun onRemoved(ruleId: Long) {
-            val index = ruleList.indexOfFirst { it.id == ruleId }
-            if (index == -1) {
-                onMainDispatcher {
-                    needReload()
-                }
-            } else ruleListView.post {
+            ruleListView.post {
+                val index = ruleList.indexOfFirst { it.id == ruleId }
+                if (index < 0) return@post
                 ruleList.removeAt(index)
                 ruleAdapter.notifyItemRemoved(index + 1)
-                needReload()
             }
         }
 
@@ -375,7 +372,6 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             ruleListView.post {
                 ruleList.clear()
                 ruleAdapter.notifyDataSetChanged()
-                needReload()
             }
         }
 
@@ -436,6 +432,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                         lifecycleScope.launch {
                             try {
                                 RemoteRouteUpdater.updateRule(rule.id)
+                                RuntimeRouteUpdater.request(RuntimeRouteUpdater.Reason.REMOTE)
                                 ruleAdapter.reload()
                             } catch (_: Exception) {
                                 if (isAdded) snackbar(getString(R.string.route_update_failed, rule.displayName())).show()
@@ -456,10 +453,8 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                     rule.enabled = isChecked
                     runOnDefaultDispatcher {
                         SagerDatabase.rulesDao.updateEnabled(ruleId, isChecked)
+                        RuntimeRouteUpdater.request(RuntimeRouteUpdater.Reason.ENABLED)
                         postFreshRule(ruleId)
-                        onMainDispatcher {
-                            needReload()
-                        }
                     }
                 }
                 editButton.setOnClickListener {

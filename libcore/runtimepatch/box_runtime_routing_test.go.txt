@@ -1,0 +1,80 @@
+package box_test
+
+import (
+ "context"
+ "fmt"
+ "net"
+ "net/netip"
+ "sync"
+ "sync/atomic"
+ "testing"
+
+ box "github.com/sagernet/sing-box"
+ "github.com/sagernet/sing-box/adapter"
+ "github.com/sagernet/sing-box/adapter/endpoint"
+ "github.com/sagernet/sing-box/adapter/inbound"
+ "github.com/sagernet/sing-box/adapter/outbound"
+ boxservice "github.com/sagernet/sing-box/adapter/service"
+ "github.com/sagernet/sing-box/dns"
+ "github.com/sagernet/sing-box/log"
+ "github.com/sagernet/sing-box/option"
+ "github.com/sagernet/sing-box/protocol/direct"
+ "github.com/sagernet/sing/service"
+ mdns "github.com/miekg/dns"
+)
+
+type mockRuntimeDNS struct {tag string; addr string}
+func(m *mockRuntimeDNS)Tag()string{return m.tag}
+func(m *mockRuntimeDNS)Type()string{return "test-runtime"}
+func(m *mockRuntimeDNS)Dependencies()[]string{return nil}
+func(m *mockRuntimeDNS)Start(adapter.StartStage)error{return nil}
+func(m *mockRuntimeDNS)Close()error{return nil}
+func(m *mockRuntimeDNS)Exchange(ctx context.Context,q *mdns.Msg)(*mdns.Msg,error){
+ reply:=new(mdns.Msg);reply.SetReply(q)
+ if q.Question[0].Qtype==mdns.TypeA {
+ reply.Answer=[]mdns.RR{&mdns.A{Hdr:mdns.RR_Header{Name:q.Question[0].Name,Rrtype:mdns.TypeA,Class:mdns.ClassINET,Ttl:60},A:net.ParseIP(m.addr).To4()}}
+ }
+ return reply,nil
+}
+func newRuntimeBox(t *testing.T)(*box.Box,context.Context,string){
+ t.Helper()
+ ir,or:=inbound.NewRegistry(),outbound.NewRegistry()
+ direct.RegisterOutbound(or)
+ dr:=dns.NewTransportRegistry()
+ dns.RegisterTransport[struct{}](dr,"test-runtime",func(ctx context.Context,l log.ContextLogger,tag string,o struct{})(adapter.DNSTransport,error){
+  ip:="192.0.2.1";if tag=="dns-b"{ip="192.0.2.2"};return &mockRuntimeDNS{tag,ip},nil
+ })
+ ctx:=box.Context(context.Background(),ir,or,endpoint.NewRegistry(),dr,boxservice.NewRegistry())
+ ctx=service.ContextWithDefaultRegistry(ctx)
+ config:=`{"log":{"disabled":true},"outbounds":[{"type":"direct","tag":"a"},{"type":"direct","tag":"b"}],"route":{"final":"a"},"dns":{"servers":[{"type":"test-runtime","tag":"dns-a"},{"type":"test-runtime","tag":"dns-b"}],"final":"dns-a"}}`
+ var opts option.Options
+ if e:=opts.UnmarshalJSONContext(ctx,[]byte(config));e!=nil{t.Fatal(e)}
+ b,e:=box.New(box.Options{Context:ctx,Options:opts});if e!=nil{t.Fatal(e)}
+ if e=b.Start();e!=nil{t.Fatal(e)}
+ t.Cleanup(func(){_ = b.Close()})
+ return b,ctx,`"servers":[{"type":"test-runtime","tag":"dns-a"},{"type":"test-runtime","tag":"dns-b"}]`
+}
+func TestRuntimeRoutingActualDNSAndFailedCommit(t *testing.T){
+ b,ctx,servers:=newRuntimeBox(t)
+ api:=b.Router().(interface{UpdateRouting(string,string)(uint64,error)})
+ lookup:=service.FromContext[adapter.DNSRouter](ctx)
+ query:=func(want string){t.Helper();got,e:=lookup.Lookup(ctx,"sentinel.invalid",adapter.DNSQueryOptions{});if e!=nil||len(got)!=1||got[0]!=netip.MustParseAddr(want){t.Fatal(got,e,want)}}
+ query("192.0.2.1")
+ if g,e:=api.UpdateRouting(`{"final":"b"}`,`{`+servers+`,"final":"dns-b"}`);e!=nil||g<2{t.Fatal(g,e)}
+ query("192.0.2.2") // same qname tests that old DNS cache was not reused
+ if _,e:=api.UpdateRouting(`{"final":"not-preloaded"}`,`{`+servers+`,"final":"dns-a"}`);e==nil{t.Fatal("missing outbound acknowledged")}
+ query("192.0.2.2") // failed route must not apply the new DNS half
+ if _,e:=api.UpdateRouting(`{"final":"a","rules":[{"domain_regex":["["],"outbound":"a"}]}`,`{`+servers+`,"final":"dns-a"}`);e==nil{t.Fatal("bad regex acknowledged")}
+ query("192.0.2.2")
+ if _,e:=api.UpdateRouting(`{"final":"a","rules":[{"domain":["sentinel.invalid"],"outbound":"a"}]}`,`{`+servers+`,"final":"dns-a"}`);e!=nil{t.Fatal(e)}
+ query("192.0.2.1")
+}
+func TestRuntimeRoutingActualBoxConcurrentQueries(t *testing.T){
+ b,ctx,servers:=newRuntimeBox(t)
+ api:=b.Router().(interface{UpdateRouting(string,string)(uint64,error)})
+ lookup:=service.FromContext[adapter.DNSRouter](ctx)
+ var wg sync.WaitGroup;var failed atomic.Bool
+ for n:=0;n<4;n++{wg.Add(1);go func(){defer wg.Done();for i:=0;i<80;i++{got,e:=lookup.Lookup(ctx,fmt.Sprintf("q%d.invalid",i),adapter.DNSQueryOptions{});if e!=nil||len(got)!=1{failed.Store(true)}}}()}
+ for i:=0;i<80;i++{tag:="dns-a";if i%2==1{tag="dns-b"};if _,e:=api.UpdateRouting(`{"final":"a"}`,`{`+servers+`,"final":"`+tag+`"}`);e!=nil{t.Fatal(e)}}
+ wg.Wait();if failed.Load(){t.Fatal("query failed during hot update")}
+}

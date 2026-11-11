@@ -9,8 +9,19 @@ import java.security.MessageDigest
  */
 internal object SelectorFingerprint {
     /** Hash every generated policy field, excluding only selector's initial choice. */
-    fun policy(config: Map<String, Any?>): String {
-        val normalized = config.mapValues { (key, value) ->
+    fun policy(config: Map<String, Any?>, runtimePorts: Map<Int, String> = emptyMap()): String {
+        // Only ports allocated by THIS build may be normalized. Persisted listener,
+        // remote server and user-route ports remain reload boundaries.
+        fun normalize(value: Any?, key: String = ""): Any? = when (value) {
+            is Map<*, *> -> value.entries.associate { it.key to normalize(it.value, it.key.toString()) }
+            is List<*> -> value.map { normalize(it, key) }
+            is Number -> if (key == "server_port" || key == "listen_port")
+                runtimePorts[value.toInt()]?.let { "runtime-port:$it" } ?: value else value
+            else -> value
+        }
+        @Suppress("UNCHECKED_CAST")
+        val normalizedPorts = normalize(config) as Map<String, Any?>
+        val normalized = normalizedPorts.mapValues { (key, value) ->
             if (key == "outbounds" && value is List<*>) value.map { outbound ->
                 if (outbound is Map<*, *> && outbound["type"] == "selector" && outbound["tag"] == "proxy")
                     outbound.filterKeys { it != "default" }

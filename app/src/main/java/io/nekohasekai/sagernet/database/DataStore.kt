@@ -372,7 +372,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
         set(value) = configurationStore.putString("webdavPath", value)
 
     var globalMode by configurationStore.boolean(Key.GLOBAL_MODE)
-    /** Legacy key retained for migration only; selector runtime is per group. */
+    /** Legacy migration key only; runtime membership is all ProxyGroup.isSelector groups. */
     var globalSelector by configurationStore.boolean(Key.GLOBAL_SELECTOR)
 
     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {

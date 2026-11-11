@@ -18,9 +18,41 @@ object GroupDnsStore {
 
     fun prepare(group: ProxyGroup, db: SagerDatabase = SagerDatabase.instance): SubscriptionBean {
         val settings = (group.subscription ?: SubscriptionBean()).applyDefaultValues()
-        if (group.type == GroupType.BASIC && settings.importedDnsConfig.isNullOrBlank() && group.id > 0) {
-            // Upgrade older local-file groups which only kept DNS snapshots on their nodes.
-            val snapshots = db.proxyDao().getByGroup(group.id).map { it.requireBean().subscriptionDns.orEmpty() }.filter { it.isNotBlank() }.distinct()
+        val nodes = if (group.id > 0) db.proxyDao().getByGroup(group.id) else emptyList()
+        val origins = nodes.map { node ->
+            val bean = node.requireBean()
+            val original = bean.mappedOriginalAddress.orEmpty()
+            if (original.isNotBlank() && (bean.serverAddress == original || bean.serverAddress == bean.mappedTargetAddress)) {
+                original
+            } else bean.serverAddress
+        }.distinct()
+        val cleaned = hashMapOf<String, String>()
+        fun automatic(text: String): String = cleaned.getOrPut(text) {
+            SubscriptionDns.fromImportedSnapshot(text, origins).snapshot()
+        }
+        // Remove old automatic defaults and unrelated hosts from both group and node
+        // BLOBs. Manual resolver/policy/hosts fields are never touched by migration.
+        if (nodes.isNotEmpty()) {
+            settings.importedDnsConfig = automatic(settings.importedDnsConfig.orEmpty())
+            val changed = nodes.filter { node ->
+                val bean = node.requireBean()
+                val snapshot = automatic(bean.subscriptionDns.orEmpty())
+                if (snapshot == bean.subscriptionDns.orEmpty()) false else {
+                    bean.subscriptionDns = snapshot
+                    node.putBean(bean)
+                    true
+                }
+            }
+            // Existing import/save callers already hold a Room transaction; nesting
+            // is supported. Settings-page preparation must not leave half a migration.
+            if (changed.isNotEmpty()) db.runInTransaction {
+                changed.chunked(256).forEach { db.proxyDao().updateProxy(it) }
+            }
+        } else {
+            settings.importedDnsConfig = SubscriptionDns.fromImportedSnapshot(settings.importedDnsConfig.orEmpty()).snapshot()
+        }
+        if (group.type == GroupType.BASIC && settings.importedDnsConfig.isNullOrBlank()) {
+            val snapshots = nodes.map { it.requireBean().subscriptionDns.orEmpty() }.filter { it.isNotBlank() }.distinct()
             if (snapshots.isNotEmpty()) {
                 settings.importedDnsConfig = mergeSnapshots(snapshots)
                 settings.importedDnsSource = "file"
@@ -33,7 +65,8 @@ object GroupDnsStore {
 
     fun importedForNode(bean: AbstractBean, settings: SubscriptionBean?): String = when {
         settings == null -> bean.subscriptionDns.orEmpty()
-        source(settings) == "file" && (bean.subscriptionDnsSource == "file" || !bean.subscriptionDns.isNullOrBlank()) -> bean.subscriptionDns.orEmpty()
+        source(settings) == "file" && (bean.subscriptionDnsSource == "file" ||
+            (bean.subscriptionDnsSource.isNullOrBlank() && !bean.subscriptionDns.isNullOrBlank())) -> bean.subscriptionDns.orEmpty()
         else -> settings.importedDnsConfig.orEmpty()
     }
 
@@ -44,12 +77,10 @@ object GroupDnsStore {
     fun mergeSnapshots(snapshots: List<String>): String {
         val merged = SubscriptionDns.Config()
         snapshots.filter { it.isNotBlank() }.distinct().forEach { text ->
-            val current = SubscriptionDns.fromDocument(SubscriptionDns.loadDocument(text))
+            val current = SubscriptionDns.fromImportedSnapshot(text)
             merged.hosts.putAll(current.hosts)
             merged.policy.putAll(current.policy)
             merged.serverPolicy.putAll(current.serverPolicy)
-            if (current.serverDns.isNotEmpty()) { merged.serverDns.clear(); merged.serverDns.addAll(current.serverDns) }
-            if (current.directDns.isNotEmpty()) { merged.directDns.clear(); merged.directDns.addAll(current.directDns) }
             if (current.bootstrap.isNotEmpty()) { merged.bootstrap.clear(); merged.bootstrap.addAll(current.bootstrap) }
         }
         // Validate aggregate aliases rather than writing a cyclic merged hosts table.

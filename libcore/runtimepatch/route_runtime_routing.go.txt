@@ -1,0 +1,100 @@
+package route
+
+import (
+ "context"
+ "errors"
+ "reflect"
+ "sync"
+
+ "github.com/sagernet/sing-box/adapter"
+ C "github.com/sagernet/sing-box/constant"
+ "github.com/sagernet/sing-box/option"
+ R "github.com/sagernet/sing-box/route/rule"
+ "github.com/sagernet/sing/common/json"
+ "github.com/sagernet/sing/service"
+)
+
+// These structs are used only behind runtimeUpdateMu / RuntimeRoutingState.
+type runtimeRuleSetRouter struct { adapter.Router; sets map[string]adapter.RuleSet }
+func (r *runtimeRuleSetRouter) RuleSet(tag string) (adapter.RuleSet, bool) { v, ok := r.sets[tag]; return v, ok }
+type runtimeRegistry struct { local, parent service.Registry }
+func (r runtimeRegistry) Get(k any) any { if v:=r.local.Get(k); v!=nil{return v};return r.parent.Get(k) }
+func (r runtimeRegistry) Register(k,v any) any {return r.local.Register(k,v)}
+
+// RuntimeRoutingVersion advertises the real, atomic API. Unpatched cores do not
+// implement this optional interface and the libcore wrapper fails closed.
+func (r *Router) RuntimeRoutingVersion() int { return 1 }
+func (r *Router) UpdateRouting(routeJSON, dnsJSON string) (uint64, error) {
+ r.runtimeUpdateMu.Lock()
+ defer r.runtimeUpdateMu.Unlock()
+ if !r.started || r.runtimeClosed { return 0, errors.New("ROUTING_NOT_RUNNING") }
+ var ro option.RouteOptions
+ var d option.DNSOptions
+ if err:=json.UnmarshalContext(r.ctx, []byte(routeJSON), &ro); err!=nil{return 0,errors.New("INVALID_ROUTE_JSON")}
+ if err:=json.UnmarshalContext(r.ctx, []byte(dnsJSON), &d); err!=nil{return 0,errors.New("INVALID_DNS_JSON")}
+ // TUN/network/DNS transport changes are never falsely acknowledged as hot.
+ oldR,newR:=r.runtimeRouteOptions,ro
+ oldR.Rules=nil;oldR.RuleSet=nil;oldR.Final=""
+ newR.Rules=nil;newR.RuleSet=nil;newR.Final=""
+ oldD,newD:=r.runtimeDNSOptions,d
+ oldD.Rules=nil;oldD.Final="";oldD.Strategy=0
+ newD.Rules=nil;newD.Final="";newD.Strategy=0
+ if !reflect.DeepEqual(oldR,newR)||!reflect.DeepEqual(oldD,newD){return 0,errors.New("ROUTING_REBUILD_REQUIRED")}
+ if (hasRule(ro.Rules,isProcessRule)||hasDNSRule(d.Rules,isProcessDNSRule)) && !r.needFindProcess {return 0,errors.New("ROUTING_PROCESS_CAPABILITY_MISSING")}
+ if (hasRule(ro.Rules,isWIFIRule)||hasDNSRule(d.Rules,isWIFIDNSRule)) && !r.needWIFIState {return 0,errors.New("ROUTING_WIFI_CAPABILITY_MISSING")}
+ final:=r.outbound.Default()
+ if ro.Final!="" {var ok bool;final,ok=r.outbound.Outbound(ro.Final);if !ok{return 0,errors.New("ROUTING_OUTBOUND_NOT_LOADED")}}
+ dnsFinal:=r.dnsTransport.Default()
+ if d.Final!="" {var ok bool;dnsFinal,ok=r.dnsTransport.Transport(d.Final);if !ok{return 0,errors.New("ROUTING_DNS_NOT_LOADED")}}
+ builder,ok:=r.dns.(interface{NewRuntimeDNSClient(option.DNSOptions) adapter.DNSClient})
+ if !ok{return 0,errors.New("ROUTING_DNS_API_MISSING")}
+ p:=&adapter.RuntimeRoutingSnapshot{Final:final,DNSFinal:dnsFinal,DNSStrategy:C.DomainStrategy(d.Strategy),DNSClient:builder.NewRuntimeDNSClient(d)}
+ sets:=make(map[string]adapter.RuleSet)
+ var ownedSets []adapter.RuleSet
+ var cleanupOnce sync.Once
+ cleanup:=func(){cleanupOnce.Do(func(){for _,it:=range p.Rules{_ = it.Close()};for _,it:=range p.DNSRules{_ = it.Close()};for _,it:=range ownedSets{_ = it.Close()}})}
+ p.ReleaseResources=cleanup
+ committed:=false
+ defer func(){if !committed{cleanup()}}()
+ // A layered registry prevents NewRule from replacing the live adapter.Router.
+ ctx:=service.ContextWithRegistry(r.ctx,runtimeRegistry{service.NewRegistry(),service.RegistryFromContext(r.ctx)})
+ service.MustRegister[adapter.Router](ctx,&runtimeRuleSetRouter{r,sets})
+ startCtx:=adapter.NewHTTPStartContext(ctx)
+ defer startCtx.Close()
+ for _,opts:=range ro.RuleSet {
+  if _,exists:=sets[opts.Tag];exists{return 0,errors.New("DUPLICATE_RUNTIME_RULE_SET")}
+  it,err:=R.NewRuleSet(ctx,r.logger,opts);if err!=nil{return 0,errors.New("INVALID_RUNTIME_RULE_SET")}
+  sets[opts.Tag]=it;ownedSets=append(ownedSets,it)
+  if err=it.StartContext(ctx,startCtx);err!=nil{return 0,errors.New("RUNTIME_RULE_SET_START_FAILED")}
+  if m:=it.Metadata();(m.ContainsProcessRule&&!r.needFindProcess)||(m.ContainsWIFIRule&&!r.needWIFIState){return 0,errors.New("ROUTING_RULE_SET_CAPABILITY_MISSING")}
+ }
+ for _,opts:=range ro.Rules {
+  it,err:=R.NewRule(ctx,r.logger,opts,false);if err!=nil{return 0,errors.New("INVALID_RUNTIME_RULE")}
+  p.Rules=append(p.Rules,it)
+  if a,ok:=it.Action().(*R.RuleActionRoute);ok&&a.Outbound!="" {if _,ok=r.outbound.Outbound(a.Outbound);!ok{return 0,errors.New("ROUTING_OUTBOUND_NOT_LOADED")}}
+  if err=it.Start();err!=nil{return 0,errors.New("RUNTIME_RULE_START_FAILED")}
+ }
+ for _,opts:=range d.Rules {
+  it,err:=R.NewDNSRule(ctx,r.logger,opts,true);if err!=nil{return 0,errors.New("INVALID_RUNTIME_DNS_RULE")}
+  p.DNSRules=append(p.DNSRules,it)
+  if a,ok:=it.Action().(*R.RuleActionDNSRoute);ok {if _,ok=r.dnsTransport.Transport(a.Server);!ok{return 0,errors.New("ROUTING_DNS_NOT_LOADED")}}
+  if err=it.Start();err!=nil{return 0,errors.New("RUNTIME_DNS_RULE_START_FAILED")}
+ }
+ for _,it:=range ownedSets{if err:=it.PostStart();err!=nil{return 0,errors.New("RUNTIME_RULE_SET_POST_START_FAILED")}}
+ // No Cleanup(): disabled sets must remain reusable while this snapshot lives.
+ generation,err:=r.runtimeRouting.Publish(p)
+ if err!=nil{return 0,err}
+ committed=true
+ return generation,nil
+}
+
+// A tracker may outlive the request and snapshot. Preserve display strings,
+// never retain a RuleSetItem whose resources are reclaimed after the request.
+type runtimeDisplayRule struct{kind,description string;action adapter.RuleAction}
+func(r runtimeDisplayRule)Type()string{return r.kind}
+func(r runtimeDisplayRule)String()string{return r.description}
+func(r runtimeDisplayRule)Action()adapter.RuleAction{return r.action}
+func(r runtimeDisplayRule)Match(*adapter.InboundContext)bool{return false}
+func(r runtimeDisplayRule)Start()error{return nil}
+func(r runtimeDisplayRule)Close()error{return nil}
+func runtimeTrackerRule(ctx context.Context,r adapter.Rule)adapter.Rule{if r!=nil&&adapter.RuntimeRoutingFromContext(ctx)!=nil{return runtimeDisplayRule{r.Type(),r.String(),r.Action()}};return r}
