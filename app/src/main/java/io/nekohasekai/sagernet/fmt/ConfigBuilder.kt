@@ -205,8 +205,11 @@ fun buildConfig(
     // buildSelector requires either the per-group switch or the pure global
     // option (DataStore.globalSelectorAllGroups): then every enabled group's
     // members compile into the runtime selector on the next connection.
+    // forTest/forExport stay outside the option: test/export configs never
+    // compile a runtime selector, regardless of the group switch.
     val globalSelectorAllGroups = !forTest && !forExport && DataStore.globalSelectorAllGroups
-    val buildSelector = !disableSelector && (group?.isSelector == true || globalSelectorAllGroups)
+    val buildSelector = !forTest && !forExport && !disableSelector &&
+        (group?.isSelector == true || globalSelectorAllGroups)
     val selectorMembers = if (buildSelector) {
         // One Room read for the graph, rather than one getByGroup() per enabled
         // group (146 queries on the observed device). It also seeds the entity
