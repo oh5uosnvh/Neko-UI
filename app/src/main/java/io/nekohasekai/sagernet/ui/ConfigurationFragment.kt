@@ -3615,9 +3615,10 @@ class ConfigurationFragment @JvmOverloads constructor(
                     if (proxyEntity.id == DataStore.selectedProxy && !SagerNet.isTv) {
                         return@runOnDefaultDispatcher
                     }
-                    // An enabled-group member uses the global selector ACK path;
-                    // incompatible runtime graphs are automatically reconnected.
-                    if (SagerDatabase.groupDao.getById(proxyEntity.groupId)?.isSelector == true && DataStore.serviceState.started) {
+                    // The hot-swap ACK path applies to any group whose members are
+                    // compiled into a runtime selector: the per-group switch or
+                    // the pure global all-groups option. Same compiled graph.
+                    if ((SagerDatabase.groupDao.getById(proxyEntity.groupId)?.isSelector == true || DataStore.globalSelectorAllGroups) && DataStore.serviceState.started) {
                         profileAccess.withLock {
                             val previous = DataStore.selectedProxy
                             val receipt = try {

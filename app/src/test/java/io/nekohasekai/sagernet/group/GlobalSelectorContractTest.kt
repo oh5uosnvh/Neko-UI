@@ -5,7 +5,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/** Focused source contracts for the cross-group selector safety boundary. */
+/** Source contracts: the global option toggles per-group no-reload selectors;
+ * it never unions all groups' nodes into one compiled selector. */
 class GlobalSelectorContractTest {
     private fun source(path: String): String = sequenceOf(
         File("app/src/main/$path"), File("src/main/$path")
@@ -25,12 +26,15 @@ class GlobalSelectorContractTest {
         assertFalse(settings.contains("findPreference<SwitchPreference>(Key.GLOBAL_SELECTOR)"))
     }
 
-    @Test fun selectorGraphIsCrossGroupAndToolbarTogglesAPurePersistedOption() {
+    @Test fun selectorGraphIsSelectedGroupOnlyAndToolbarTogglesAPurePersistedOption() {
         val builder = source("java/io/nekohasekai/sagernet/fmt/ConfigBuilder.kt")
         val fragment = source("java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt")
         assertTrue(builder.contains("group?.isSelector == true || globalSelectorAllGroups"))
-        assertTrue(builder.contains("SagerDatabase.groupDao.allGroups()"))
-        assertTrue(builder.contains("allGroups.filter { it.isSelector || globalSelectorAllGroups }.sortedBy { it.id }"))
+        // Members are the SELECTED group only: the global option must never
+        // union every group's nodes into one giant selector (slow cold start).
+        assertFalse(builder.contains("allGroups.filter"))
+        assertFalse(builder.contains("flatMap"))
+        assertTrue(builder.contains("SagerDatabase.proxyDao.getByGroup(selectedGroupId)"))
         assertTrue(builder.contains("GLOBAL_SELECTOR_GROUP_ID else -1L"))
         assertFalse(Regex("DataStore\\.globalSelector(?![A-Za-z])").containsMatchIn(builder))
         assertFalse(builder.contains("Global selector does not support"))

@@ -10,7 +10,12 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** Real DB + real builder, not source-text or manufactured fingerprint assertions. */
+/**
+ * Real DB + real builder. The global all-groups option is a pure toggle that
+ * turns on per-group no-reload selectors; the compiled runtime selector ALWAYS
+ * contains only the selected group's own nodes. Startup never pays for the
+ * whole node catalog.
+ */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class)
 @org.robolectric.annotation.SQLiteMode(org.robolectric.annotation.SQLiteMode.Mode.LEGACY)
@@ -34,20 +39,98 @@ class GlobalSelectorBuildTest {
             putBean(bean); id = env.database.proxyDao().addProxy(this)
         }
     }
-    @Test fun selectorMembershipAndPolicyAreIdenticalAcrossEnabledManualGroups() {
-        val a = node("A", "same name")
-        val b = node("B", "same name")
+    private fun dns(node: ProxyEntity, server: String = "", direct: String = "", hosts: String = "") {
+        val group = env.database.groupDao().getById(node.groupId)!!
+        group.subscription = SubscriptionBean().apply {
+            initializeDefaultValues()
+            serverDnsResolver = server
+            directDnsResolver = direct
+            hostsConfig = hosts
+        }
+        env.database.groupDao().updateGroup(group)
+    }
+
+    @Test fun compiledSelectorContainsOnlyTheSelectedGroupsNodes() {
+        val a = node("A", "a-one")
+        val b = node("B", "b-two")
         val ca = buildConfig(a)
-        val cb = buildConfig(b)
         assertTrue(ca.globalSelector)
-        assertEquals(setOf(a.id, b.id), ca.profileTagMap.keys)
+        assertEquals(setOf(a.id), ca.profileTagMap.keys)
+        // Building from the other group compiles only that group's node.
+        val cb = buildConfig(b)
+        assertTrue(cb.globalSelector)
+        assertEquals(setOf(b.id), cb.profileTagMap.keys)
+    }
+
+    @Test fun globalOptionCompilesSelectorEvenForNonSelectorGroups() {
+        val a = node("A", "a-one")
+        val ga = env.database.groupDao().getById(a.groupId)!!
+        ga.isSelector = false; env.database.groupDao().updateGroup(ga)
+        // Option off: a non-selector group has no runtime selector.
+        DataStore.globalSelectorAllGroups = false
+        assertFalse(buildConfig(a).globalSelector)
+        assertEquals(-1L, buildConfig(a).selectorGroupId)
+        // Option on: the same group compiles its own small selector.
+        DataStore.globalSelectorAllGroups = true
+        val ca = buildConfig(a)
+        assertTrue(ca.globalSelector)
+        assertEquals(setOf(a.id), ca.profileTagMap.keys)
+    }
+
+    @Test fun otherGroupsNodesNeverJoinTheCompiledGraph() {
+        val a = node("A", "a-one")
+        val b = node("B", "b-two")
+        val c = node("A", "a-three")
+        val ca = buildConfig(a)
+        assertEquals(setOf(a.id, c.id), ca.profileTagMap.keys)
+        assertFalse(ca.profileTagMap.containsKey(b.id))
+        val json = com.google.gson.JsonParser.parseString(ca.config).asJsonObject
+        val selector = json.getAsJsonArray("outbounds").single {
+            it.asJsonObject["tag"].asString == "proxy"
+        }.asJsonObject
+        val memberTags = selector.getAsJsonArray("outbounds").map { it.asString }
+        assertEquals(ca.profileTagMap.values.toList(), memberTags)
+    }
+
+    @Test fun selectorGraphIsStableAcrossRebuildsOfTheSameGroup() {
+        val a = node("A", "one")
+        val c = node("A", "three")
+        val ca = buildConfig(a)
+        val cb = buildConfig(c)
         assertEquals(ca.profileTagMap, cb.profileTagMap)
-        assertEquals(io.nekohasekai.sagernet.fmt.GLOBAL_SELECTOR_GROUP_ID, ca.selectorGroupId)
         assertEquals(ca.selectorGroupId, cb.selectorGroupId)
         assertEquals(ca.selectorFingerprint, cb.selectorFingerprint)
-        DataStore.remoteDns = "https://9.9.9.9/dns-query"
-        assertNotEquals(ca.selectorFingerprint, buildConfig(a).selectorFingerprint)
     }
+
+    @Test fun unrelatedServerDnsDifferencesStayGroupScoped() {
+        val a = node("A", "same name")
+        val b = node("饿饭sunny", "same name")
+        dns(a, server = "udp://1.1.1.1")
+        dns(b, server = "udp://9.9.9.9")
+        val ca = buildConfig(a)
+        val cb = buildConfig(b)
+        assertEquals(setOf(a.id), ca.profileTagMap.keys)
+        assertEquals(setOf(b.id), cb.profileTagMap.keys)
+        val serversA = com.google.gson.JsonParser.parseString(ca.config).asJsonObject
+            .getAsJsonObject("dns").getAsJsonArray("servers")
+        assertTrue(serversA.any { it.toString().contains("1.1.1.1") })
+        assertFalse(serversA.any { it.toString().contains("9.9.9.9") })
+        assertTrue(ca.config.isNotBlank())
+        assertTrue(cb.config.isNotBlank())
+    }
+
+    @Test fun applicationHostsInjectAsSelectedGroupPolicy() {
+        val a = node("A", "one")
+        dns(a, hosts = "hosts:\n  app.example: 203.0.113.7\n")
+        val ca = buildConfig(a)
+        val servers = com.google.gson.JsonParser.parseString(ca.config).asJsonObject
+            .getAsJsonObject("dns").getAsJsonArray("servers")
+        val dispatch = servers.single { it.asJsonObject["tag"].asString == "dns-selector-general" }.asJsonObject
+        val choices = dispatch.getAsJsonObject("choices")
+        assertEquals("dns-remote", choices[ca.profileTagMap.getValue(a.id)].asString)
+        assertTrue(servers.any { it.toString().contains("203.0.113.7") })
+    }
+
     @Test fun customRemoteRulesReachRealBuilderWhilePendingSourceIsNotCatchAll() {
         val a = node("A", "one")
         DataStore.globalMode = false
@@ -64,108 +147,44 @@ class GlobalSelectorBuildTest {
         assertFalse(rules.any { it.toString() == "{\"action\":\"reject\"}" })
     }
 
-    private fun dns(node: ProxyEntity, server: String = "", direct: String = "", hosts: String = "") {
-        val group = env.database.groupDao().getById(node.groupId)!!
-        group.subscription = SubscriptionBean().apply {
-            initializeDefaultValues()
-            serverDnsResolver = server
-            directDnsResolver = direct
-            hostsConfig = hosts
-        }
-        env.database.groupDao().updateGroup(group)
-    }
-
-    @Test fun unrelatedServerDnsDifferencesDoNotAbortStartupOrBlockCompatibleSwitches() {
-        val a = node("A", "same name")
-        val b = node("饿饭sunny", "same name")
-        dns(a, server = "udp://1.1.1.1")
-        dns(b, server = "udp://9.9.9.9")
-        val ca = buildConfig(a)
-        val cb = buildConfig(b)
-        assertEquals(setOf(a.id, b.id), ca.profileTagMap.keys)
-        assertEquals(ca.selectorApplicationDnsFingerprint, cb.selectorApplicationDnsFingerprint)
-        assertEquals(ca.selectorFingerprint, cb.selectorFingerprint)
-        assertTrue(ca.config.isNotBlank())
-        assertTrue(cb.config.isNotBlank())
-    }
-
-    @Test fun differentDirectDnsStillCompilesOneStableAllGroupsSelector() {
-        val a = node("A", "one")
-        val b = node("B", "two")
-        dns(b, direct = "udp://9.9.9.9")
-        val ca = buildConfig(a)
-        val cb = buildConfig(b)
-        assertEquals(setOf(a.id, b.id), ca.profileTagMap.keys)
-        assertEquals(ca.selectorApplicationDnsFingerprint, cb.selectorApplicationDnsFingerprint)
-        assertEquals(ca.selectorFingerprint, cb.selectorFingerprint)
-        val config = com.google.gson.JsonParser.parseString(cb.config).asJsonObject
-        val servers = config.getAsJsonObject("dns").getAsJsonArray("servers")
-        assertTrue(servers.any { it.toString().contains("9.9.9.9") })
-    }
-
-    @Test fun applicationHostsAreNotInjectedAsOneSelectedGroupPolicy() {
-        val a = node("A", "one")
-        val b = node("B", "two")
-        dns(b, hosts = "hosts:\n  app.example: 203.0.113.7\n")
-        val ca = buildConfig(a)
-        val cb = buildConfig(b)
-        assertEquals(ca.selectorApplicationDnsFingerprint, cb.selectorApplicationDnsFingerprint)
-        assertEquals(ca.selectorFingerprint, cb.selectorFingerprint)
-        val rulesA = com.google.gson.JsonParser.parseString(ca.config).asJsonObject
-            .getAsJsonObject("dns").getAsJsonArray("rules")
-        val rulesB = com.google.gson.JsonParser.parseString(cb.config).asJsonObject
-            .getAsJsonObject("dns").getAsJsonArray("rules")
-        assertEquals(rulesA, rulesB)
-        assertTrue(rulesB.any { it.toString().contains("app") && it.toString().contains("example") && it.toString().contains("dns-selector-general") })
-        val servers = com.google.gson.JsonParser.parseString(ca.config).asJsonObject
-            .getAsJsonObject("dns").getAsJsonArray("servers")
-        val dispatch = servers.single { it.asJsonObject["tag"].asString == "dns-selector-general" }.asJsonObject
-        val choices = dispatch.getAsJsonObject("choices")
-        assertEquals("dns-remote", choices[ca.profileTagMap.getValue(a.id)].asString)
-        val bResolver = choices[ca.profileTagMap.getValue(b.id)].asString
-        assertTrue(servers.single { it.asJsonObject["tag"].asString == bResolver }.toString().contains("203.0.113.7"))
-        assertTrue(rulesB.filter { it.toString().contains("dns-selector-general") }.all { it.asJsonObject["disable_cache"].asBoolean })
-    }
-
     @Test fun disabledGroupDoesNotJoinAndReorderingDoesNotInvalidateGraph() {
-        val a = node("A", "one"); val b = node("B", "two")
+        val a = node("A", "one"); val c = node("A", "three")
         val before = buildConfig(a)
-        val gb = env.database.groupDao().getById(b.groupId)!!
-        gb.userOrder = -10; env.database.groupDao().updateGroup(gb)
-        b.userOrder = -100; env.database.proxyDao().updateProxy(b)
-        assertEquals(before.selectorFingerprint, buildConfig(b).selectorFingerprint)
-        gb.isSelector = false; env.database.groupDao().updateGroup(gb)
-        assertEquals(setOf(a.id), buildConfig(a).profileTagMap.keys)
-        assertNotEquals(before.selectorFingerprint, buildConfig(a).selectorFingerprint)
-        assertFalse(buildConfig(b).globalSelector)
+        val ga = env.database.groupDao().getById(a.groupId)!!
+        c.userOrder = -100; env.database.proxyDao().updateProxy(c)
+        assertEquals(before.profileTagMap.keys, buildConfig(a).profileTagMap.keys)
+        // Per-group switch off and global option off: no runtime selector.
+        ga.isSelector = false; env.database.groupDao().updateGroup(ga)
+        DataStore.globalSelectorAllGroups = false
+        assertFalse(buildConfig(a).globalSelector)
     }
 
     @Test fun frontAndLandingProxyEditsInvalidateButSelectionDoesNot() {
-        val a = node("A", "one"); val b = node("B", "two")
+        val a = node("A", "one"); val c = node("A", "three")
         val front = node("Hop", "front")
         val ga = env.database.groupDao().getById(a.groupId)!!
         ga.frontProxy = front.id; env.database.groupDao().updateGroup(ga)
         val before = buildConfig(a)
-        assertEquals(before.selectorFingerprint, buildConfig(b).selectorFingerprint)
+        assertEquals(before.selectorFingerprint, buildConfig(c).selectorFingerprint)
         assertTrue(before.config.contains("detour"))
         front.socksBean!!.serverPort = 2222; env.database.proxyDao().updateProxy(front)
-        assertNotEquals(before.selectorFingerprint, buildConfig(b).selectorFingerprint)
-        ga.landingProxy = b.id; env.database.groupDao().updateGroup(ga)
-        assertEquals(buildConfig(a).selectorFingerprint, buildConfig(b).selectorFingerprint)
+        assertNotEquals(before.selectorFingerprint, buildConfig(c).selectorFingerprint)
+        ga.landingProxy = c.id; env.database.groupDao().updateGroup(ga)
+        assertEquals(buildConfig(a).selectorFingerprint, buildConfig(c).selectorFingerprint)
     }
 
     @Test fun fixedNodeRoutesDoNotTurnIntoCurrentSelectorWhenThatNodeIsSelected() {
-        val a = node("A", "one"); val b = node("B", "two")
+        val a = node("A", "one"); val c = node("A", "three")
         DataStore.globalMode = false
         env.database.rulesDao().createRule(RuleEntity(name = "Fixed A", domains = "full:fixed.test", enabled = true, outbound = a.id))
-        val ca = buildConfig(a); val cb = buildConfig(b)
-        assertEquals(ca.selectorFingerprint, cb.selectorFingerprint)
+        val ca = buildConfig(a); val cc = buildConfig(c)
+        assertEquals(ca.selectorFingerprint, cc.selectorFingerprint)
         val routes = com.google.gson.JsonParser.parseString(ca.config).asJsonObject.getAsJsonObject("route").getAsJsonArray("rules")
         assertEquals(ca.profileTagMap[a.id], routes.single { it.toString().contains("fixed.test") }.asJsonObject["outbound"].asString)
     }
 
     @Test fun singleNodeFallbackAndExportNeverPretendToBeGlobalSelector() {
-        val a = node("A", "one"); node("B", "two")
+        val a = node("A", "one"); node("A", "three")
         assertFalse(buildConfig(a, disableSelector = true).globalSelector)
         assertEquals(setOf(a.id), buildConfig(a, disableSelector = true).profileTagMap.keys)
         assertEquals(-1L, buildConfig(a, forExport = true).selectorGroupId)
@@ -173,7 +192,6 @@ class GlobalSelectorBuildTest {
 
     @Test fun changedMemberInvalidatesRunningPolicy() {
         val a = node("A", "one")
-        val b = node("B", "two")
         val old = buildConfig(a).selectorFingerprint
         a.socksBean!!.serverPort = 2080
         env.database.proxyDao().updateProxy(a)

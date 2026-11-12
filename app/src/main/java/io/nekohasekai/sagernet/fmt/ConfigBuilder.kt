@@ -203,29 +203,31 @@ fun buildConfig(
         .filterNot { io.nekohasekai.sagernet.database.RemoteRulePolicy.waitingWithoutConditions(it) }
         .map { io.nekohasekai.sagernet.database.RemoteRulePolicy.effective(it) }
     // buildSelector requires either the per-group switch or the pure global
-    // option (DataStore.globalSelectorAllGroups): then every enabled group's
-    // members compile into the runtime selector on the next connection.
+    // option (DataStore.globalSelectorAllGroups): then the members of the
+    // SELECTED group compile into its runtime selector on the next connection.
     // forTest/forExport stay outside the option: test/export configs never
     // compile a runtime selector, regardless of the group switch.
+    // The global option NEVER unions other groups' nodes: startup stays scoped
+    // to one group's nodes so VPN connect does not pay for the whole catalog.
     val globalSelectorAllGroups = !forTest && !forExport && DataStore.globalSelectorAllGroups
     val buildSelector = !forTest && !forExport && !disableSelector &&
         (group?.isSelector == true || globalSelectorAllGroups)
     val selectorMembers = if (buildSelector) {
-        // One Room read for the graph, rather than one getByGroup() per enabled
-        // group (146 queries on the observed device). It also seeds the entity
-        // cache used by chain expansion and prevents repeated getById() calls.
-        val allGroups = SagerDatabase.groupDao.allGroups()
-        allGroups.forEach { groupCache[it.id] = it }
-        val allEntities = SagerDatabase.proxyDao.getAll()
-        allEntities.forEach { entityCache[it.id] = it }
-        val entitiesByGroup = allEntities.groupBy { it.groupId }
-        allGroups.filter { it.isSelector || globalSelectorAllGroups }.sortedBy { it.id }
-            .flatMap { entitiesByGroup[it.id].orEmpty().sortedBy { member -> member.id } }
-            .filter { member ->
-                val bean = member.requireBean()
-                // Whole-core configurations cannot be nested as an outbound. Selecting one reconnects.
-                bean !is ConfigBean || bean.type != 0
-            }
+        // Members come from the selected group only. Cross-group switching is
+        // not compiled into this core: every group keeps its own small selector
+        // graph, so cold start loads one group's nodes, not the full catalog.
+        val selectedGroupId = group?.id ?: 0L
+        val selectedGroup = cachedGroup(selectedGroupId)
+        val members = if (selectedGroup != null) {
+            SagerDatabase.proxyDao.getByGroup(selectedGroupId)
+                .orEmpty()
+                .sortedBy { member -> member.id }
+        } else emptyList()
+        members.filter { member ->
+            val bean = member.requireBean()
+            // Whole-core configurations cannot be nested as an outbound. Selecting one reconnects.
+            bean !is ConfigBean || bean.type != 0
+        }
     } else emptyList()
     val userDNSRuleList = mutableListOf<DNSRule_DefaultOptions>()
     val domainListDNSDirectForce = mutableListOf<String>()
