@@ -59,6 +59,8 @@ jobs:
       - name: Validate subscription DNS parser before building
         run: python3 buildScript/test-subscription-dns.py
       - name: Verify pinned DNS runtime and TLS identity
+        env:
+          SING_BOX_CLONE_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           bash buildScript/lib/core/get_source.sh
           cd libcore
