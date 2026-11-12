@@ -14,7 +14,7 @@ import (
 	"github.com/matsuridayo/libneko/neko_common"
 	"github.com/matsuridayo/libneko/neko_log"
 	"github.com/sagernet/sing-box/nekoutils"
-	"github.com/sagernet/sing-box/option"
+	libbox "github.com/sagernet/sing-box/experimental/libbox"
 	"golang.org/x/sys/unix"
 )
 
@@ -35,7 +35,7 @@ func ForceGc() {
 
 func InitCore(process, cachePath, internalAssets, externalAssets string,
 	maxLogSizeKb int32, logEnable bool,
-	if1 NB4AInterface, if2 BoxPlatformInterface, if3 LocalDNSTransport,
+	if1 NB4AInterface, if2 BoxPlatformInterface, if3 libbox.LocalDNSTransport,
 ) {
 	defer device.DeferPanicToError("InitCore", func(err error) { log.Println(err) })
 	isBgProcess = strings.HasSuffix(process, ":bg")
@@ -44,7 +44,7 @@ func InitCore(process, cachePath, internalAssets, externalAssets string,
 	intfNB4A = if1
 	intfBox = if2
 	useProcfs = intfBox.UseProcFS()
-	gLocalDNSTransport = newPlatformTransport(if3, "", option.LocalDNSServerOptions{})
+	gLocalDNSTransport = if3
 
 	// Working dir
 	tmp := filepath.Join(cachePath, "../no_backup")

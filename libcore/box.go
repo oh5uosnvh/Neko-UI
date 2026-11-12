@@ -15,8 +15,9 @@ import (
 	"github.com/matsuridayo/libneko/protect_server"
 	"github.com/matsuridayo/libneko/speedtest"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/adapter/certificate"
+	libbox "github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/boxapi"
-	"github.com/sagernet/sing-box/experimental/libbox/platform"
 	"github.com/sagernet/sing-box/protocol/group"
 
 	box "github.com/sagernet/sing-box"
@@ -79,17 +80,17 @@ type BoxInstance struct {
 	pauseManager pause.Manager
 }
 
-func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *BoxInstance, err error) {
+func NewSingBoxInstance(config string, localTransport libbox.LocalDNSTransport) (b *BoxInstance, err error) {
 	defer device.DeferPanicToError("NewSingBoxInstance", func(err_ error) { err = err_ })
 
 	// create box context
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = box.Context(ctx,
 		nekoboxAndroidInboundRegistry(), nekoboxAndroidOutboundRegistry(), nekoboxAndroidEndpointRegistry(),
-		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(),
+		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(), certificate.NewRegistry(),
 	)
 	ctx = service.ContextWithDefaultRegistry(ctx)
-	service.MustRegister[platform.Interface](ctx, boxPlatformInterfaceInstance)
+	service.MustRegister[libbox.PlatformInterface](ctx, boxPlatformInterfaceInstance)
 
 	// parse options
 	var options option.Options
@@ -131,11 +132,15 @@ func (b *BoxInstance) Start() (err error) {
 
 	defer device.DeferPanicToError("box.Start", func(err_ error) { err = err_ })
 
-	if b.state == 0 {
-		b.state = 1
-		return b.Box.Start()
+	if b.state != 0 {
+		return errors.New("already started, failed, or closed")
 	}
-	return errors.New("already started")
+	b.state = 3 // failed/starting is never a selectable running Box
+	if err = b.Box.Start(); err != nil {
+		return err
+	}
+	b.state = 1
+	return nil
 }
 
 func (b *BoxInstance) Close() (err error) {
@@ -206,11 +211,40 @@ func (b *BoxInstance) QueryStats(tag, direct string) int64 {
 	return b.v2api.QueryStats(fmt.Sprintf("outbound>>>%s>>>traffic>>>%s", tag, direct))
 }
 
-func (b *BoxInstance) SelectOutbound(tag string) bool {
-	if b.selector != nil {
-		return b.selector.SelectOutbound(tag)
+func (b *BoxInstance) SelectOutbound(tag string) (selected bool) {
+	b.access.Lock()
+	defer b.access.Unlock()
+	if b.state != 1 || b.selector == nil || strings.TrimSpace(tag) == "" {
+		return false
 	}
-	return false
+	// sing-box owns selector membership and synchronously interrupts only the
+	// selector's tracked old generation. No global conntrack reset is needed.
+	return b.selector.SelectOutbound(tag)
+}
+
+// SelectedOutbound is a non-blocking control-plane read used to reject stale
+// asynchronous selector callbacks. It is intentionally not a network probe.
+func (b *BoxInstance) SelectedOutbound() string {
+	b.access.Lock()
+	defer b.access.Unlock()
+	if b.state != 1 || b.selector == nil {
+		return ""
+	}
+	return b.selector.Selected("tcp").Tag()
+}
+
+// SelectorState returns selector generation and actual first-byte-use metrics.
+// An ACK or successful Dial is not reported as data-plane success.
+func (b *BoxInstance) SelectorState() string {
+	b.access.Lock()
+	defer b.access.Unlock()
+	if b.state != 1 || b.selector == nil {
+		return "{}"
+	}
+	if state, ok := interface{}(b.selector).(interface{ SelectorState() string }); ok {
+		return state.SelectorState()
+	}
+	return "{}"
 }
 
 func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err error) {

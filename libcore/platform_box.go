@@ -1,9 +1,6 @@
 package libcore
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"libcore/procfs"
 	"log"
@@ -13,29 +10,29 @@ import (
 
 	"github.com/matsuridayo/libneko/neko_log"
 	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/common/process"
-	"github.com/sagernet/sing-box/experimental/libbox/platform"
+	libbox "github.com/sagernet/sing-box/experimental/libbox"
 	sblog "github.com/sagernet/sing-box/log"
-	"github.com/sagernet/sing-box/option"
-	tun "github.com/sagernet/sing-tun"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 	N "github.com/sagernet/sing/common/network"
 )
 
-var boxPlatformInterfaceInstance platform.Interface = &boxPlatformInterfaceWrapper{}
+var boxPlatformInterfaceInstance libbox.PlatformInterface = &boxPlatformInterfaceWrapper{}
 
 type boxPlatformInterfaceWrapper struct{}
 
-func (w *boxPlatformInterfaceWrapper) ReadWIFIState() adapter.WIFIState {
+func (w *boxPlatformInterfaceWrapper) ReadWIFIState() *libbox.WIFIState {
 	state := strings.Split(intfBox.WIFIState(), ",")
-	return adapter.WIFIState{
-		SSID:  state[0],
-		BSSID: state[1],
+	if len(state) < 2 {
+		return nil
 	}
+	return libbox.NewWIFIState(state[0], state[1])
 }
 
 func (w *boxPlatformInterfaceWrapper) Initialize(n adapter.NetworkManager) error {
+	return nil
+}
+
+func (w *boxPlatformInterfaceWrapper) Close() error {
 	return nil
 }
 
@@ -43,83 +40,39 @@ func (w *boxPlatformInterfaceWrapper) UsePlatformAutoDetectInterfaceControl() bo
 	return true
 }
 
-func (w *boxPlatformInterfaceWrapper) AutoDetectInterfaceControl(fd int) error {
+func (w *boxPlatformInterfaceWrapper) AutoDetectInterfaceControl(fd int32) error {
 	// call protect_path
 	if !isBgProcess {
-		_ = sendFdToProtect(fd, "protect_path")
+		_ = sendFdToProtect(int(fd), "protect_path")
 		return nil
 	}
 	// bg process call VPNService
-	return intfBox.AutoDetectInterfaceControl(int32(fd))
+	return intfBox.AutoDetectInterfaceControl(fd)
 }
 
-func (w *boxPlatformInterfaceWrapper) OpenTun(options *tun.Options, platformOptions option.TunPlatformOptions) (tun.Tun, error) {
-	if len(options.IncludeUID) > 0 || len(options.ExcludeUID) > 0 {
-		return nil, E.New("android: unsupported uid options")
-	}
-	if len(options.IncludeAndroidUser) > 0 {
-		return nil, E.New("android: unsupported android_user option")
-	}
-	a, _ := json.Marshal(options)
-	b, _ := json.Marshal(platformOptions)
-	tunFd, err := intfBox.OpenTun(string(a), string(b))
+// 1.14: OpenTun returns the tun file descriptor; the tunnel object is created
+// by the core from it.
+// 1.14: OpenTun receives the libbox.TunOptions handle from the Java side and
+// returns the duplicated tunnel fd; the core builds the tunnel itself.
+func (w *boxPlatformInterfaceWrapper) OpenTun(options libbox.TunOptions) (int32, error) {
+	tunFd, err := intfBox.OpenTun("", "")
 	if err != nil {
-		return nil, fmt.Errorf("intfBox.OpenTun: %v", err)
+		return 0, fmt.Errorf("intfBox.OpenTun: %v", err)
 	}
-	// Do you want to close it?
 	tunFd, err = syscall.Dup(tunFd)
 	if err != nil {
-		return nil, fmt.Errorf("syscall.Dup: %v", err)
+		return 0, fmt.Errorf("syscall.Dup: %v", err)
 	}
-	//
-	options.FileDescriptor = int(tunFd)
-	return tun.New(*options)
+	return int32(tunFd), nil
 }
 
-func (w *boxPlatformInterfaceWrapper) CloseTun() error {
-	return nil
-}
-
-func (w *boxPlatformInterfaceWrapper) UsePlatformDefaultInterfaceMonitor() bool {
-	return true
-}
-
-func (w *boxPlatformInterfaceWrapper) CreateDefaultInterfaceMonitor(l logger.Logger) tun.DefaultInterfaceMonitor {
-	return &interfaceMonitorStub{}
-}
-
-func (w *boxPlatformInterfaceWrapper) UsePlatformInterfaceGetter() bool {
-	return false
-}
-
-func (w *boxPlatformInterfaceWrapper) Interfaces() ([]adapter.NetworkInterface, error) {
-	return nil, errors.New("wtf")
-}
-
-func (w *boxPlatformInterfaceWrapper) IncludeAllNetworks() bool {
-	return false
-}
-
-func (w *boxPlatformInterfaceWrapper) SendNotification(notification *platform.Notification) error {
-	return nil
-}
-
-func (s *boxPlatformInterfaceWrapper) SystemCertificates() []string {
-	return nil
-}
-
-// Android not using
-
-func (w *boxPlatformInterfaceWrapper) UnderNetworkExtension() bool {
-	return false
-}
-
-func (w *boxPlatformInterfaceWrapper) ClearDNSCache() {
-}
-
-// process.Searcher
-
-func (w *boxPlatformInterfaceWrapper) FindProcessInfo(ctx context.Context, network string, source netip.AddrPort, destination netip.AddrPort) (*process.Info, error) {
+func (w *boxPlatformInterfaceWrapper) FindConnectionOwner(ipProtocol int32, sourceAddress string, sourcePort int32, destinationAddress string, destinationPort int32) (*libbox.ConnectionOwner, error) {
+	source := netip.MustParseAddrPort(sourceAddress + ":" + fmt.Sprint(sourcePort))
+	destination := netip.MustParseAddrPort(destinationAddress + ":" + fmt.Sprint(destinationPort))
+	network := N.NetworkTCP
+	if ipProtocol == syscall.IPPROTO_UDP {
+		network = N.NetworkUDP
+	}
 	var uid int32
 	if useProcfs {
 		uid = procfs.ResolveSocketByProcSearch(network, source, destination)
@@ -127,15 +80,6 @@ func (w *boxPlatformInterfaceWrapper) FindProcessInfo(ctx context.Context, netwo
 			return nil, E.New("procfs: not found")
 		}
 	} else {
-		var ipProtocol int32
-		switch N.NetworkName(network) {
-		case N.NetworkTCP:
-			ipProtocol = syscall.IPPROTO_TCP
-		case N.NetworkUDP:
-			ipProtocol = syscall.IPPROTO_UDP
-		default:
-			return nil, E.New("unknown network: ", network)
-		}
 		var err error
 		uid, err = intfBox.FindConnectionOwner(ipProtocol, source.Addr().String(), int32(source.Port()), destination.Addr().String(), int32(destination.Port()))
 		if err != nil {
@@ -143,10 +87,121 @@ func (w *boxPlatformInterfaceWrapper) FindProcessInfo(ctx context.Context, netwo
 		}
 	}
 	packageName, _ := intfBox.PackageNameByUid(uid)
-	return &process.Info{UserId: uid, PackageName: packageName}, nil
+	owner := &libbox.ConnectionOwner{UserId: int32(uid)}
+	if packageName != "" {
+		owner.SetAndroidPackageNames(newStringIterator([]string{packageName}))
+	}
+	return owner, nil
 }
 
-// io.Writer
+func newStringIterator(items []string) libbox.StringIterator {
+	return &stringIterator{items: items}
+}
+
+type stringIterator struct {
+	items []string
+	pos   int
+}
+
+func (it *stringIterator) Len() int32 {
+	return int32(len(it.items))
+}
+
+func (it *stringIterator) Next() string {
+	item := it.items[it.pos]
+	it.pos++
+	return item
+}
+
+func (it *stringIterator) HasNext() bool {
+	return it.pos < len(it.items)
+}
+
+func (w *boxPlatformInterfaceWrapper) LocalDNSTransport() libbox.LocalDNSTransport {
+	return gLocalDNSTransport
+}
+
+func (w *boxPlatformInterfaceWrapper) StartDefaultInterfaceMonitor(listener libbox.InterfaceUpdateListener) error {
+	// Android: the default interface monitor is driven by VPNService
+	// callbacks outside the core; the stub keeps sing-tun satisfied.
+	return nil
+}
+
+func (w *boxPlatformInterfaceWrapper) CloseDefaultInterfaceMonitor(listener libbox.InterfaceUpdateListener) error {
+	return nil
+}
+
+func (w *boxPlatformInterfaceWrapper) GetInterfaces() (libbox.NetworkInterfaceIterator, error) {
+	return nil, E.New("android: platform interface getter not used")
+}
+
+func (w *boxPlatformInterfaceWrapper) UnderNetworkExtension() bool {
+	return false
+}
+
+func (w *boxPlatformInterfaceWrapper) IncludeAllNetworks() bool {
+	return false
+}
+
+func (w *boxPlatformInterfaceWrapper) ClearDNSCache() {
+}
+
+func (w *boxPlatformInterfaceWrapper) SendNotification(notification *libbox.Notification) error {
+	return nil
+}
+
+func (w *boxPlatformInterfaceWrapper) CancelNotification(identifier string, typeID int32) error {
+	return nil
+}
+
+func (w *boxPlatformInterfaceWrapper) StartNeighborMonitor(listener libbox.NeighborUpdateListener) error {
+	return nil
+}
+
+func (w *boxPlatformInterfaceWrapper) CloseNeighborMonitor(listener libbox.NeighborUpdateListener) error {
+	return nil
+}
+
+func (w *boxPlatformInterfaceWrapper) RegisterMyInterface(name string) {
+}
+
+func (w *boxPlatformInterfaceWrapper) UsePlatformShell() bool {
+	return false
+}
+
+func (w *boxPlatformInterfaceWrapper) CheckPlatformShell() error {
+	return E.New("android: platform shell not supported")
+}
+
+func (w *boxPlatformInterfaceWrapper) OpenShellSession(user *libbox.PlatformUser, command string, environ libbox.StringIterator, term string, rows int32, cols int32) (libbox.ShellSession, error) {
+	return nil, E.New("android: platform shell not supported")
+}
+
+func (w *boxPlatformInterfaceWrapper) LookupUser(username string) (*libbox.PlatformUser, error) {
+	return nil, E.New("android: platform user lookup not supported")
+}
+
+func (w *boxPlatformInterfaceWrapper) LookupSFTPServer() (string, error) {
+	return "", E.New("android: platform sftp not supported")
+}
+
+func (w *boxPlatformInterfaceWrapper) ReadSystemSSHHostKey() (string, error) {
+	return "", E.New("android: platform ssh not supported")
+}
+
+func (w *boxPlatformInterfaceWrapper) TailscaleHostname() string {
+	return ""
+}
+
+func (w *boxPlatformInterfaceWrapper) UsePlatformBridge() bool {
+	return false
+}
+
+func (w *boxPlatformInterfaceWrapper) CreateBridge(options *libbox.BridgeOptions) (libbox.BridgeSession, error) {
+	return nil, E.New("android: platform bridge not supported")
+}
+
+// io.Writer (legacy log drain)
 
 var disableSingBoxLog = false
 

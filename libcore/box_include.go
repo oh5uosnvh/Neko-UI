@@ -1,9 +1,8 @@
 package libcore
 
 import (
-	"context"
 
-	"github.com/sagernet/sing-box/adapter"
+	libbox "github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -12,10 +11,7 @@ import (
 	"github.com/sagernet/sing-box/dns/transport"
 	"github.com/sagernet/sing-box/dns/transport/fakeip"
 	"github.com/sagernet/sing-box/dns/transport/hosts"
-	"github.com/sagernet/sing-box/dns/transport/local"
 	"github.com/sagernet/sing-box/dns/transport/quic"
-	"github.com/sagernet/sing-box/log"
-	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/anytls"
 	"github.com/sagernet/sing-box/protocol/block"
 	"github.com/sagernet/sing-box/protocol/direct"
@@ -100,7 +96,6 @@ func nekoboxAndroidOutboundRegistry() *outbound.Registry {
 	hysteria2.RegisterOutbound(registry)
 	juicity.RegisterOutbound(registry)
 
-	wireguard.RegisterOutbound(registry)
 
 	return registry
 }
@@ -113,7 +108,7 @@ func nekoboxAndroidEndpointRegistry() *endpoint.Registry {
 	return registry
 }
 
-func nekoboxAndroidDNSTransportRegistry(localTransport LocalDNSTransport) *dns.TransportRegistry {
+func nekoboxAndroidDNSTransportRegistry(_ libbox.LocalDNSTransport) *dns.TransportRegistry {
 	registry := dns.NewTransportRegistry()
 
 	transport.RegisterTCP(registry)
@@ -128,13 +123,9 @@ func nekoboxAndroidDNSTransportRegistry(localTransport LocalDNSTransport) *dns.T
 	quic.RegisterTransport(registry)
 	quic.RegisterHTTP3Transport(registry)
 
-	if localTransport == nil {
-		local.RegisterTransport(registry)
-	} else {
-		dns.RegisterTransport(registry, "local", func(ctx context.Context, logger log.ContextLogger, tag string, options option.LocalDNSServerOptions) (adapter.DNSTransport, error) {
-			return newPlatformTransport(localTransport, tag, options), nil
-		})
-	}
+	// neko: 1.14 libbox registers the platform local DNS transport itself via
+	// PlatformInterface.libbox.LocalDNSTransport() in baseContext; localTransport is
+	// plumbed there. No manual registration needed.
 
 	return registry
 }
