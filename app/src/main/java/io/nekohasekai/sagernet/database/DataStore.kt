@@ -382,6 +382,8 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var globalMode by configurationStore.boolean(Key.GLOBAL_MODE)
     /** Legacy migration key only; runtime membership is all ProxyGroup.isSelector groups. */
     var globalSelector by configurationStore.boolean(Key.GLOBAL_SELECTOR)
+    /** Pure option: when true, every enabled group compiles into the runtime selector (next connection). */
+    var globalSelectorAllGroups by configurationStore.boolean(Key.GLOBAL_SELECTOR_ALL_GROUPS)
 
     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
         // Exclude purely visual/account state. Unknown keys are conservatively

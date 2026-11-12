@@ -18,20 +18,41 @@ class GlobalNoReloadMenuTest {
         val item = nodes.item(position + 1) as org.w3c.dom.Element
         assertEquals("true", item.getAttribute("android:checkable"))
     }
-    @Test fun allGroupsSelectorPersistsAndAppliesCompiledMembershipImmediately() {
-        val source = File(app, "src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt").readText()
-        assertTrue(source.contains("allGroups.all { it.isSelector }"))
-        val body = source.substringAfter("R.id.action_global_no_reload ->").substringBefore("R.id.action_global_mode ->")
-        assertTrue(body.contains("group.isSelector = enable"))
-        assertTrue(body.contains("SagerNet.reloadService()"))
-        assertFalse(body.contains("DataStore.globalSelector = enable"))
+    @Test fun toggleIsAPurePersistedOptionWithoutReloadOrGroupWrites() {
+        val fragment = File(app, "src/main/java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt").readText()
+        // Menu check state mirrors the persisted option, not the group flags.
+        assertTrue(fragment.contains("menu.findItem(R.id.action_global_no_reload)?.isChecked = DataStore.globalSelectorAllGroups"))
+        val body = fragment.substringAfter("R.id.action_global_no_reload ->").substringBefore("R.id.action_global_mode ->")
+        // The handler only flips the DataStore flag and shows a snackbar.
+        assertTrue(body.contains("DataStore.globalSelectorAllGroups = !DataStore.globalSelectorAllGroups"))
+        assertTrue(body.contains("R.string.global_no_reload_enabled"))
+        assertTrue(body.contains("R.string.global_no_reload_disabled"))
+        // No batched group writes, no service reload, no route updater in the handler.
+        assertFalse(body.contains("reloadService"))
+        assertFalse(body.contains("updateGroup"))
+        assertFalse(body.contains("postUpdate"))
+        assertFalse(body.contains("RuntimeRouteUpdater"))
+        assertFalse(body.contains("isSelector = enable"))
+        val constants = File(app, "src/main/java/io/nekohasekai/sagernet/Constants.kt").readText()
+        val store = File(app, "src/main/java/io/nekohasekai/sagernet/database/DataStore.kt").readText()
+        assertTrue(constants.contains("GLOBAL_SELECTOR_ALL_GROUPS = \"globalSelectorAllGroups\""))
+        assertTrue(store.contains("var globalSelectorAllGroups by configurationStore.boolean(Key.GLOBAL_SELECTOR_ALL_GROUPS)"))
+    }
+    @Test fun configBuilderCompilesAllGroupsWhenGlobalOptionEnabled() {
         val builder = File(app, "src/main/java/io/nekohasekai/sagernet/fmt/ConfigBuilder.kt").readText()
-        assertTrue(builder.contains("SagerDatabase.groupDao.allGroups()"))
-        assertTrue(builder.contains("val members = selectorMembers"))
-        // Turning flags on/off changes the compiled graph and applies immediately;
-        // selecting already-compiled nodes afterwards takes the native ACK path.
-        assertTrue(source.contains("receipt.optBoolean(\"accepted\")"))
-        assertTrue(source.contains("service.selectSelectorNode(proxyEntity.id)"))
-        assertTrue(File(app, "src/main/res/values-zh-rCN/global_no_reload.xml").readText().contains(">全分组 selector<"))
+        // The option participates in buildSelector: a non-selector group also compiles.
+        assertTrue(builder.contains("group?.isSelector == true || globalSelectorAllGroups"))
+        assertTrue(builder.contains("allGroups.filter { it.isSelector || globalSelectorAllGroups }"))
+        // forTest/forExport short-circuits stay in place.
+        assertTrue(builder.contains("!forTest && !forExport && DataStore.globalSelectorAllGroups"))
+        assertTrue(builder.contains("!disableSelector"))
+        // No member filtering by isSelector alone anymore, and no toolbar batching hint remains.
+        assertFalse(builder.contains("allGroups.filter { it.isSelector }.sortedBy"))
+        val zh = File(app, "src/main/res/values-zh-rCN/global_no_reload.xml").readText()
+        assertTrue(zh.contains(">全分组 selector<"))
+        assertTrue(zh.contains("下次连接时生效"))
+        val en = File(app, "src/main/res/values/global_no_reload.xml").readText()
+        assertTrue(en.contains("Takes effect on next connection."))
+        assertFalse(en.contains("Reconnecting now"))
     }
 }

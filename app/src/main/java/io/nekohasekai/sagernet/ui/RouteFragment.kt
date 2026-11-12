@@ -91,10 +91,12 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                     if (isAdded) snackbar(getString(R.string.route_quick_save_failed)).show()
                     return@launch
                 }
-                RuntimeRouteUpdater.request(RuntimeRouteUpdater.Reason.OUTBOUND)
+                // Pure persistence: no hot apply. The new outbound takes effect
+                // after the connection is reloaded; the snackbar below tells so.
                 // UI labels are published from the latest persisted row so parallel switch updates win correctly.
                 val latest = withContext(Dispatchers.IO) { SagerDatabase.rulesDao.getById(ruleId) } ?: return@launch
                 ProfileManager.ruleIterator { onUpdated(latest) }
+                if (isAdded) snackbar(getString(R.string.route_quick_reload_required)).show()
             } catch (error: Exception) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
                 Logs.w(error)

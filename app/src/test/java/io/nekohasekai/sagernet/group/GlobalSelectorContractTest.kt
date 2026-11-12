@@ -25,17 +25,19 @@ class GlobalSelectorContractTest {
         assertFalse(settings.contains("findPreference<SwitchPreference>(Key.GLOBAL_SELECTOR)"))
     }
 
-    @Test fun selectorGraphIsCrossGroupAndToolbarStillOnlyBatchesGroupFlags() {
+    @Test fun selectorGraphIsCrossGroupAndToolbarTogglesAPurePersistedOption() {
         val builder = source("java/io/nekohasekai/sagernet/fmt/ConfigBuilder.kt")
         val fragment = source("java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt")
-        assertTrue(builder.contains("group?.isSelector == true"))
+        assertTrue(builder.contains("group?.isSelector == true || globalSelectorAllGroups"))
         assertTrue(builder.contains("SagerDatabase.groupDao.allGroups()"))
-        assertTrue(builder.contains(".filter { it.isSelector }.sortedBy { it.id }"))
+        assertTrue(builder.contains("allGroups.filter { it.isSelector || globalSelectorAllGroups }.sortedBy { it.id }"))
         assertTrue(builder.contains("GLOBAL_SELECTOR_GROUP_ID else -1L"))
-        assertFalse(builder.contains("DataStore.globalSelector"))
+        assertFalse(Regex("DataStore\\.globalSelector(?![A-Za-z])").containsMatchIn(builder))
         assertFalse(builder.contains("Global selector does not support"))
-        assertTrue(fragment.contains("group.isSelector = enable"))
-        assertTrue(fragment.contains("全部分组启用 selector"))
+        // The menu action is a pure persisted option: no batched group writes, no reload.
+        assertTrue(fragment.contains("DataStore.globalSelectorAllGroups = !DataStore.globalSelectorAllGroups"))
+        assertFalse(fragment.contains("group.isSelector = enable"))
+        assertFalse(fragment.contains("全部分组启用 selector"))
         assertTrue(builder.contains("selectorFingerprint"))
         assertTrue(builder.contains("interrupt_exist_connections = true"))
     }

@@ -202,9 +202,11 @@ fun buildConfig(
     val extraRules = if (forTest) listOf() else SagerDatabase.rulesDao.enabledRules()
         .filterNot { io.nekohasekai.sagernet.database.RemoteRulePolicy.waitingWithoutConditions(it) }
         .map { io.nekohasekai.sagernet.database.RemoteRulePolicy.effective(it) }
-    // isSelector is the only switch: each enabled group contributes runtime members.
-    // Toolbar batching therefore creates a real cross-group selector, including manual groups.
-    val buildSelector = !forTest && !forExport && !disableSelector && group?.isSelector == true
+    // buildSelector requires either the per-group switch or the pure global
+    // option (DataStore.globalSelectorAllGroups): then every enabled group's
+    // members compile into the runtime selector on the next connection.
+    val globalSelectorAllGroups = !forTest && !forExport && DataStore.globalSelectorAllGroups
+    val buildSelector = !disableSelector && (group?.isSelector == true || globalSelectorAllGroups)
     val selectorMembers = if (buildSelector) {
         // One Room read for the graph, rather than one getByGroup() per enabled
         // group (146 queries on the observed device). It also seeds the entity
@@ -214,7 +216,7 @@ fun buildConfig(
         val allEntities = SagerDatabase.proxyDao.getAll()
         allEntities.forEach { entityCache[it.id] = it }
         val entitiesByGroup = allEntities.groupBy { it.groupId }
-        allGroups.filter { it.isSelector }.sortedBy { it.id }
+        allGroups.filter { it.isSelector || globalSelectorAllGroups }.sortedBy { it.id }
             .flatMap { entitiesByGroup[it.id].orEmpty().sortedBy { member -> member.id } }
             .filter { member ->
                 val bean = member.requireBean()

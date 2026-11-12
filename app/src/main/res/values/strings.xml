@@ -780,4 +780,5 @@
     <string name="group_reorder_handle">Drag to reorder</string>
     <string name="group_reorder_failed">Could not save group order; restored the saved order</string>
     <string name="route_quick_save_failed">Could not save route outbound</string>
+    <string name="route_quick_reload_required">Route outbound saved. Reload the connection to apply.</string>
 </resources>

@@ -214,6 +214,9 @@ object Key {
 
     const val GLOBAL_MODE = "globalMode"
     const val GLOBAL_SELECTOR = "globalSelector"
+    // Pure functional option: compile all groups' members into the runtime
+    // selector, without touching per-group isSelector or triggering reloads.
+    const val GLOBAL_SELECTOR_ALL_GROUPS = "globalSelectorAllGroups"
 }
 
 object TunImplementation {

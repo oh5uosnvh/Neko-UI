@@ -908,9 +908,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         LatencyTestMenuPolicy.apply(menu, DataStore.runningTest || pendingLatencyRequest != null)
         menu.findItem(R.id.action_global_mode)?.isChecked = DataStore.globalMode
         menu.findItem(R.id.action_always_show_address)?.isChecked = DataStore.alwaysShowAddress
-        val allGroups = SagerDatabase.groupDao.allGroups()
-        menu.findItem(R.id.action_global_no_reload)?.isChecked =
-            allGroups.isNotEmpty() && allGroups.all { it.isSelector }
+        menu.findItem(R.id.action_global_no_reload)?.isChecked = DataStore.globalSelectorAllGroups
     }
 
     override fun onPrepareOptionsMenu(menu: Menu) {
@@ -1556,29 +1554,17 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             R.id.action_global_no_reload -> {
-                // Batch the group switches; every enabled group contributes to one
-                // compiled runtime selector. Changing membership applies a rebuild once.
-                val groups = SagerDatabase.groupDao.allGroups()
-                val enable = groups.isNotEmpty() && !groups.all { it.isSelector }
-                runOnDefaultDispatcher {
-                    try {
-                        groups.forEach { group ->
-                            if (group.isSelector != enable) {
-                                group.isSelector = enable
-                                SagerDatabase.groupDao.updateGroup(group)
-                                GroupManager.postUpdate(group)
-                            }
-                        }
-                        if (DataStore.serviceState.started) SagerNet.reloadService()
-                        onMainDispatcher {
-                            if (isAdded) snackbar(if (enable) "已为全部分组启用 selector，正在自动重连" else "已为全部分组关闭 selector，正在自动重连").show()
-                        }
-                    } catch (error: Exception) {
-                        Logs.w(error)
-                        onMainDispatcher { if (isAdded) snackbar(error.readableMessage).show() }
-                    }
-                }
-                item.isChecked = enable
+                // Pure functional option: only flip the persisted flag. Group
+                // isSelector flags and the running service stay untouched; the
+                // wider selector membership is compiled on the next connection.
+                DataStore.globalSelectorAllGroups = !DataStore.globalSelectorAllGroups
+                item.isChecked = DataStore.globalSelectorAllGroups
+                snackbar(
+                    getString(
+                        if (DataStore.globalSelectorAllGroups) R.string.global_no_reload_enabled
+                        else R.string.global_no_reload_disabled,
+                    )
+                ).show()
                 return true
             }
 

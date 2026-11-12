@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="global_no_reload">全分组 selector</string>
-    <string name="global_no_reload_enabled">已启用全分组 selector，正在自动重连并立即生效。</string>
-    <string name="global_no_reload_disabled">已关闭全分组 selector，正在自动重连并恢复分组模式。</string>
+    <string name="global_no_reload_enabled">已开启全部分组免重载 selector，下次连接时生效。</string>
+    <string name="global_no_reload_disabled">已关闭全部分组免重载 selector，下次连接时生效。</string>
 </resources>

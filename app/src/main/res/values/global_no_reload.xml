@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="global_no_reload">All-groups selector</string>
-    <string name="global_no_reload_enabled">All-groups selector enabled. Reconnecting now to apply it.</string>
-    <string name="global_no_reload_disabled">All-groups selector disabled. Reconnecting now to restore group mode.</string>
+    <string name="global_no_reload_enabled">All-groups no-reload selector enabled. Takes effect on next connection.</string>
+    <string name="global_no_reload_disabled">All-groups no-reload selector disabled. Takes effect on next connection.</string>
 </resources>
