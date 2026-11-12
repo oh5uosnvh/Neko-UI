@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: oh5uosnvh/Nekobox-MG
-          ref: 9dfda13644dcd94b5dbb9d59c038f2b06b7817f2
+          ref: 9dfda13c6a51009a1de2ea4a818fb8b174577b35
           path: mg
           token: ${{ secrets.GH_PAT }}
           persist-credentials: false
