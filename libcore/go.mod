@@ -141,7 +141,7 @@ require (
 	github.com/sagernet/cronet-go/lib/windows_arm64 v0.0.0-20260912104006-c10c03c318db // indirect
 	github.com/sagernet/fswatch v0.1.2 // indirect
 	github.com/sagernet/gliderssh v0.3.4-0.20261023092853-e0cad6d28647 // indirect
-	github.com/sagernet/gvisor v0.0.0-20260727.0-sing-box-mod.1 // indirect
+	github.com/sagernet/gvisor v0.0.0-20250325023245-7a9c0f5725fb // indirect
 	github.com/sagernet/netlink v0.0.0-20260814022025-64455d367bbf // indirect
 	github.com/sagernet/nftables v0.3.0-mod.4 // indirect
 	github.com/sagernet/sing-cloudflared v0.1.4-0.20261021152903-2d40d788fcf6 // indirect
@@ -228,3 +228,5 @@ replace github.com/sagernet/sing-vmess => github.com/starifly/sing-vmess v0.2.8-
 // replace berty.tech/go-libtor => github.com/berty/go-libtor v0.0.0-20220627102132-9189eb6e3982
 
 replace github.com/dyhkwong/sing-juicity => github.com/exclavenetwork/sing-juicity v0.3.1
+
+replace github.com/sagernet/gvisor v0.0.0-20250325023245-7a9c0f5725fb => github.com/sagernet/gvisor v0.0.0-20260727.0-sing-box-mod.1
