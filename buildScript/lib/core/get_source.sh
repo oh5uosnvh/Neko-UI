@@ -8,8 +8,12 @@ DEPS="$(dirname "$ROOT")"
 
 checkout_dep() {
   local name="$1" url="$2" commit="$3" dir="$DEPS/$1"
+  local clone_url="$url"
+  if [ -n "${SING_BOX_CLONE_TOKEN:-}" ] && [ "$name" = sing-box ]; then
+    clone_url="https://${SING_BOX_CLONE_TOKEN}@${url#https://}"
+  fi
   if [ ! -e "$dir" ]; then
-    git clone "$url" "$dir"
+    git clone "$clone_url" "$dir"
   fi
   if [ ! -d "$dir/.git" ]; then
     echo "Not a Git checkout: $dir" >&2; exit 1
@@ -22,7 +26,7 @@ checkout_dep() {
       if [ "$manifest_commit" != "$commit" ]; then
         git -C "$dir" checkout -- . || true
         git -C "$dir" clean -fd || true
-        git -C "$dir" cat-file -e "$commit^{commit}" 2>/dev/null || git -C "$dir" fetch origin "$commit"
+        git -C "$dir" cat-file -e "$commit^{commit}" 2>/dev/null || git -C "$dir" fetch "$clone_url" "$commit"
         git -C "$dir" checkout --detach "$commit"
       else
         python3 "$ROOT/libcore/runtimepatch/apply.py" --verify-existing "$dir" "$commit"
@@ -32,7 +36,7 @@ checkout_dep() {
       echo "Refusing to overwrite dirty dependency: $dir" >&2; exit 1
     fi
   fi
-  git -C "$dir" cat-file -e "$commit^{commit}" 2>/dev/null || git -C "$dir" fetch origin "$commit"
+  git -C "$dir" cat-file -e "$commit^{commit}" 2>/dev/null || git -C "$dir" fetch "$clone_url" "$commit"
   git -C "$dir" checkout --detach "$commit"
 }
 checkout_dep sing-box "${SING_BOX_REPO_URL:-https://github.com/starifly/sing-box.git}" "$COMMIT_SING_BOX"
