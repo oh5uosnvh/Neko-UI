@@ -1,4 +1,4 @@
-export COMMIT_SING_BOX="3883cbf309b0cd33cd46663e64d16f1bdbdcaf4b"
+export COMMIT_SING_BOX="ff0a591f8e6b3c74a1261e4c900e41102a5b37be"
 export SING_BOX_REPO_URL="https://github.com/oh5uosnvh/sing-box.git"
 export COMMIT_LIBNEKO="6a85c185d62435a5293ef70ac3b638ae3ee1efa7"
 
