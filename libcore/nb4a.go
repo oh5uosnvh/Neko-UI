@@ -33,9 +33,19 @@ func ForceGc() {
 	go debug.FreeOSMemory()
 }
 
+// LocalDNSTransport mirrors the libbox.LocalDNSTransport interface (Raw,
+// Lookup, Exchange with *libbox.ExchangeContext). gobind skips bindings for
+// signatures that reference types from unbound packages (libbox), so the
+// libcore-side wrapper uses this local interface and Java binds against it.
+type LocalDNSTransport interface {
+	Raw() bool
+	Lookup(ctx *libbox.ExchangeContext, network string, domain string) error
+	Exchange(ctx *libbox.ExchangeContext, message []byte) error
+}
+
 func InitCore(process, cachePath, internalAssets, externalAssets string,
 	maxLogSizeKb int32, logEnable bool,
-	if1 NB4AInterface, if2 BoxPlatformInterface, if3 libbox.LocalDNSTransport,
+	if1 NB4AInterface, if2 BoxPlatformInterface, if3 LocalDNSTransport,
 ) {
 	defer device.DeferPanicToError("InitCore", func(err error) { log.Println(err) })
 	isBgProcess = strings.HasSuffix(process, ":bg")

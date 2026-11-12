@@ -118,7 +118,23 @@ func (it *stringIterator) HasNext() bool {
 }
 
 func (w *boxPlatformInterfaceWrapper) LocalDNSTransport() libbox.LocalDNSTransport {
-	return gLocalDNSTransport
+	return &localTransportWrapper{iif: gLocalDNSTransport}
+}
+
+// localTransportWrapper adapts the gobind-bound LocalDNSTransport to the
+// libbox interface expected by the 1.14 platform DNS transport.
+type localTransportWrapper struct {
+	iif LocalDNSTransport
+}
+
+func (w *localTransportWrapper) Raw() bool { return w.iif.Raw() }
+
+func (w *localTransportWrapper) Lookup(ctx *libbox.ExchangeContext, network string, domain string) error {
+	return w.iif.Lookup(ctx, network, domain)
+}
+
+func (w *localTransportWrapper) Exchange(ctx *libbox.ExchangeContext, message []byte) error {
+	return w.iif.Exchange(ctx, message)
 }
 
 func (w *boxPlatformInterfaceWrapper) StartDefaultInterfaceMonitor(listener libbox.InterfaceUpdateListener) error {
