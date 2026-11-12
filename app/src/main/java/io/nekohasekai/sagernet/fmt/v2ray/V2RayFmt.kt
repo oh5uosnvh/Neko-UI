@@ -893,7 +893,15 @@ fun buildSingBoxOutboundStandardV2RayBean(bean: StandardV2RayBean): Outbound {
                 server_port = bean.serverPort
                 uuid = bean.uuid
                 alter_id = bean.alterId
-                security = bean.encryption.takeIf { it.isNotBlank() } ?: "auto"
+                // Security parity with Clash.Meta clients: "auto" must resolve to
+                // a real AEAD cipher. sing-box rewrites auto→zero when TLS is
+                // present, which old v2ray servers reject (every node shows
+                // unavailable while Clash clients connect fine). Pin the AEAD
+                // cipher explicitly; AutoSecurityType() would pick aes-128-gcm
+                // on arm64 anyway, and non-TLS auto already resolves there.
+                val vmessAuto = bean.encryption.isBlank() || bean.encryption.equals("auto", true)
+                security = if (vmessAuto && bean.isTLS()) "aes-128-gcm"
+                    else bean.encryption.takeIf { it.isNotBlank() } ?: "auto"
                 when (bean.packetEncoding) {
                     0 -> packet_encoding = ""
                     1 -> packet_encoding = "packetaddr"

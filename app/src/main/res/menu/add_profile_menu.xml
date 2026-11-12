@@ -178,11 +178,6 @@
                 android:checkable="true"
                 app:showAsAction="never" />
             <item
-                android:id="@+id/action_global_no_reload"
-                android:title="@string/global_no_reload"
-                android:checkable="true"
-                app:showAsAction="never" />
-            <item
                 android:id="@+id/action_order_layout"
                 android:title="@string/sort_and_layout">
                 <menu>

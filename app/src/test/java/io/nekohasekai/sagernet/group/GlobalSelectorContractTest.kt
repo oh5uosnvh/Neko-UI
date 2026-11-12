@@ -26,20 +26,23 @@ class GlobalSelectorContractTest {
         assertFalse(settings.contains("findPreference<SwitchPreference>(Key.GLOBAL_SELECTOR)"))
     }
 
-    @Test fun selectorGraphIsSelectedGroupOnlyAndToolbarTogglesAPurePersistedOption() {
+    @Test fun selectorGraphIsSelectedGroupOnlyAndNoGlobalToggleExists() {
         val builder = source("java/io/nekohasekai/sagernet/fmt/ConfigBuilder.kt")
         val fragment = source("java/io/nekohasekai/sagernet/ui/ConfigurationFragment.kt")
-        assertTrue(builder.contains("group?.isSelector == true || globalSelectorAllGroups"))
-        // Members are the SELECTED group only: the global option must never
-        // union every group's nodes into one giant selector (slow cold start).
+        // Only the per-group switch compiles a runtime selector.
+        assertTrue(builder.contains("!disableSelector && group?.isSelector == true"))
+        // Members are the SELECTED group only: never union every group's nodes
+        // into one giant selector (slow cold start).
         assertFalse(builder.contains("allGroups.filter"))
         assertFalse(builder.contains("flatMap"))
         assertTrue(builder.contains("SagerDatabase.proxyDao.getByGroup(selectedGroupId)"))
         assertTrue(builder.contains("GLOBAL_SELECTOR_GROUP_ID else -1L"))
         assertFalse(Regex("DataStore\\.globalSelector(?![A-Za-z])").containsMatchIn(builder))
         assertFalse(builder.contains("Global selector does not support"))
-        // The menu action is a pure persisted option: no batched group writes, no reload.
-        assertTrue(fragment.contains("DataStore.globalSelectorAllGroups = !DataStore.globalSelectorAllGroups"))
+        // No global all-groups toggle exists anywhere: per-group switch is the only selector gate.
+        assertFalse(fragment.contains("action_global_no_reload"))
+        assertFalse(fragment.contains("globalSelectorAllGroups"))
+        assertFalse(builder.contains("globalSelectorAllGroups"))
         assertFalse(fragment.contains("group.isSelector = enable"))
         assertFalse(fragment.contains("全部分组启用 selector"))
         assertTrue(builder.contains("selectorFingerprint"))

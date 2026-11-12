@@ -908,7 +908,6 @@ class ConfigurationFragment @JvmOverloads constructor(
         LatencyTestMenuPolicy.apply(menu, DataStore.runningTest || pendingLatencyRequest != null)
         menu.findItem(R.id.action_global_mode)?.isChecked = DataStore.globalMode
         menu.findItem(R.id.action_always_show_address)?.isChecked = DataStore.alwaysShowAddress
-        menu.findItem(R.id.action_global_no_reload)?.isChecked = DataStore.globalSelectorAllGroups
     }
 
     override fun onPrepareOptionsMenu(menu: Menu) {
@@ -1550,21 +1549,6 @@ class ConfigurationFragment @JvmOverloads constructor(
                 DataStore.alwaysShowAddress = !DataStore.alwaysShowAddress
                 item.isChecked = DataStore.alwaysShowAddress
                 refreshAddressDisplayPreferences()
-                return true
-            }
-
-            R.id.action_global_no_reload -> {
-                // Pure functional option: only flip the persisted flag. Group
-                // isSelector flags and the running service stay untouched; the
-                // wider selector membership is compiled on the next connection.
-                DataStore.globalSelectorAllGroups = !DataStore.globalSelectorAllGroups
-                item.isChecked = DataStore.globalSelectorAllGroups
-                snackbar(
-                    getString(
-                        if (DataStore.globalSelectorAllGroups) R.string.global_no_reload_enabled
-                        else R.string.global_no_reload_disabled,
-                    )
-                ).show()
                 return true
             }
 
@@ -3615,10 +3599,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                     if (proxyEntity.id == DataStore.selectedProxy && !SagerNet.isTv) {
                         return@runOnDefaultDispatcher
                     }
-                    // The hot-swap ACK path applies to any group whose members are
-                    // compiled into a runtime selector: the per-group switch or
-                    // the pure global all-groups option. Same compiled graph.
-                    if ((SagerDatabase.groupDao.getById(proxyEntity.groupId)?.isSelector == true || DataStore.globalSelectorAllGroups) && DataStore.serviceState.started) {
+                    // An enabled-group member uses the global selector ACK path;
+                    // incompatible runtime graphs are automatically reconnected.
+                    if (SagerDatabase.groupDao.getById(proxyEntity.groupId)?.isSelector == true && DataStore.serviceState.started) {
                         profileAccess.withLock {
                             val previous = DataStore.selectedProxy
                             val receipt = try {

@@ -202,20 +202,13 @@ fun buildConfig(
     val extraRules = if (forTest) listOf() else SagerDatabase.rulesDao.enabledRules()
         .filterNot { io.nekohasekai.sagernet.database.RemoteRulePolicy.waitingWithoutConditions(it) }
         .map { io.nekohasekai.sagernet.database.RemoteRulePolicy.effective(it) }
-    // buildSelector requires either the per-group switch or the pure global
-    // option (DataStore.globalSelectorAllGroups): then the members of the
-    // SELECTED group compile into its runtime selector on the next connection.
-    // forTest/forExport stay outside the option: test/export configs never
-    // compile a runtime selector, regardless of the group switch.
-    // The global option NEVER unions other groups' nodes: startup stays scoped
-    // to one group's nodes so VPN connect does not pay for the whole catalog.
-    val globalSelectorAllGroups = !forTest && !forExport && DataStore.globalSelectorAllGroups
-    val buildSelector = !forTest && !forExport && !disableSelector &&
-        (group?.isSelector == true || globalSelectorAllGroups)
+    // buildSelector requires the per-group switch; members come from the
+    // selected group only. Cross-group switching is not compiled into this
+    // core: every group keeps its own small selector graph, so cold start
+    // loads one group's nodes, not the full catalog.
+    // forTest/forExport/disableSelector never compile a runtime selector.
+    val buildSelector = !forTest && !forExport && !disableSelector && group?.isSelector == true
     val selectorMembers = if (buildSelector) {
-        // Members come from the selected group only. Cross-group switching is
-        // not compiled into this core: every group keeps its own small selector
-        // graph, so cold start loads one group's nodes, not the full catalog.
         val selectedGroupId = group?.id ?: 0L
         val selectedGroup = cachedGroup(selectedGroupId)
         val members = if (selectedGroup != null) {

@@ -11,10 +11,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Real DB + real builder. The global all-groups option is a pure toggle that
- * turns on per-group no-reload selectors; the compiled runtime selector ALWAYS
- * contains only the selected group's own nodes. Startup never pays for the
- * whole node catalog.
+ * Real DB + real builder. The compiled runtime selector ALWAYS contains only
+ * the selected group's own nodes (per-group switch gates it). Startup never
+ * pays for the whole node catalog.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class)
@@ -70,19 +69,12 @@ class GlobalSelectorBuildTest {
         assertEquals(setOf(b.id), cb.profileTagMap.keys)
     }
 
-    @Test fun globalOptionCompilesSelectorEvenForNonSelectorGroups() {
+    @Test fun nonSelectorGroupNeverCompilesASelector() {
         val a = node("A", "a-one")
         val ga = env.database.groupDao().getById(a.groupId)!!
         ga.isSelector = false; env.database.groupDao().updateGroup(ga)
-        // Option off: a non-selector group has no runtime selector.
-        DataStore.globalSelectorAllGroups = false
         assertFalse(buildConfig(a).globalSelector)
         assertEquals(-1L, buildConfig(a).selectorGroupId)
-        // Option on: the same group compiles its own small selector.
-        DataStore.globalSelectorAllGroups = true
-        val ca = buildConfig(a)
-        assertTrue(ca.globalSelector)
-        assertEquals(setOf(a.id), ca.profileTagMap.keys)
     }
 
     @Test fun otherGroupsNodesNeverJoinTheCompiledGraph() {
@@ -162,9 +154,8 @@ class GlobalSelectorBuildTest {
         val ga = env.database.groupDao().getById(a.groupId)!!
         c.userOrder = -100; env.database.proxyDao().updateProxy(c)
         assertEquals(before.profileTagMap.keys, buildConfig(a).profileTagMap.keys)
-        // Per-group switch off and global option off: no runtime selector.
+        // Per-group switch off: no runtime selector.
         ga.isSelector = false; env.database.groupDao().updateGroup(ga)
-        DataStore.globalSelectorAllGroups = false
         assertFalse(buildConfig(a).globalSelector)
     }
 
