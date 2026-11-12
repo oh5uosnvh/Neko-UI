@@ -49,5 +49,10 @@ for name in sing-anytls-shanlian sing-shadowsocks2-vt fastup-mod oppa-mod; do
   fi
 done
 
+# The pinned Nekobox-MG Oppa module predates the sing-box 1.14 TLS interface.
+# Patch the staged copy after checkout so CI cannot silently restore the old
+# calls and make the gvisor fix appear to be the failing change.
+python3 "$ROOT/buildScript/lib/core/patch_protocol_modules.py" "$DEPS/oppa-mod"
+
 # Extend the pinned router with a tested, atomic route+DNS snapshot API.
 python3 "$ROOT/libcore/runtimepatch/apply.py" "$DEPS/sing-box"
