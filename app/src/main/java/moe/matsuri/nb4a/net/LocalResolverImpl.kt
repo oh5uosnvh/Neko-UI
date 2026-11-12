@@ -25,13 +25,6 @@ object LocalResolverImpl : LocalDNSTransport {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
     }
 
-    override fun networkHandle(): Long {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            return SagerNet.underlyingNetwork?.networkHandle ?: 0
-        }
-        return 0
-    }
-
     @RequiresApi(Build.VERSION_CODES.Q)
     override fun exchange(ctx: ExchangeContext, message: ByteArray) {
         val signal = CancellationSignal()
