@@ -3,13 +3,9 @@
 
 package libcore
 
-import (
-	libbox "github.com/sagernet/sing-box/experimental/libbox"
-)
-
 var rawQueryFunc func(networkHandle int64, request []byte) ([]byte, error)
 
-var gLocalDNSTransport libbox.LocalDNSTransport = nil
+var gLocalDNSTransport LocalDNSTransport = nil
 
 type Func interface {
 	Invoke() error

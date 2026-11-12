@@ -80,7 +80,7 @@ type BoxInstance struct {
 	pauseManager pause.Manager
 }
 
-func NewSingBoxInstance(config string, localTransport libbox.LocalDNSTransport) (b *BoxInstance, err error) {
+func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *BoxInstance, err error) {
 	defer device.DeferPanicToError("NewSingBoxInstance", func(err_ error) { err = err_ })
 
 	// create box context
