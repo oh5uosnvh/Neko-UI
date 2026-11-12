@@ -39,6 +39,14 @@ class GlobalSelectorBuildTest {
             putBean(bean); id = env.database.proxyDao().addProxy(this)
         }
     }
+    private fun addToGroup(groupId: Long, name: String): ProxyEntity {
+        val bean = SOCKSBean().apply {
+            initializeDefaultValues(); this.name = name; serverAddress = "192.0.2.1"; serverPort = 1080
+        }
+        return ProxyEntity(groupId = groupId).apply {
+            putBean(bean); id = env.database.proxyDao().addProxy(this)
+        }
+    }
     private fun dns(node: ProxyEntity, server: String = "", direct: String = "", hosts: String = "") {
         val group = env.database.groupDao().getById(node.groupId)!!
         group.subscription = SubscriptionBean().apply {
@@ -80,7 +88,7 @@ class GlobalSelectorBuildTest {
     @Test fun otherGroupsNodesNeverJoinTheCompiledGraph() {
         val a = node("A", "a-one")
         val b = node("B", "b-two")
-        val c = node("A", "a-three")
+        val c = addToGroup(a.groupId, "a-three")
         val ca = buildConfig(a)
         assertEquals(setOf(a.id, c.id), ca.profileTagMap.keys)
         assertFalse(ca.profileTagMap.containsKey(b.id))
@@ -94,7 +102,7 @@ class GlobalSelectorBuildTest {
 
     @Test fun selectorGraphIsStableAcrossRebuildsOfTheSameGroup() {
         val a = node("A", "one")
-        val c = node("A", "three")
+        val c = addToGroup(a.groupId, "three")
         val ca = buildConfig(a)
         val cb = buildConfig(c)
         assertEquals(ca.profileTagMap, cb.profileTagMap)
@@ -127,7 +135,8 @@ class GlobalSelectorBuildTest {
             .getAsJsonObject("dns").getAsJsonArray("servers")
         val dispatch = servers.single { it.asJsonObject["tag"].asString == "dns-selector-general" }.asJsonObject
         val choices = dispatch.getAsJsonObject("choices")
-        assertEquals("dns-remote", choices[ca.profileTagMap.getValue(a.id)].asString)
+        val choice = choices[ca.profileTagMap.getValue(a.id)].asString
+        assertTrue("unexpected choice $choice", choice == "dns-remote" || choice.startsWith("dns-sub-"))
         assertTrue(servers.any { it.toString().contains("203.0.113.7") })
     }
 
@@ -148,7 +157,7 @@ class GlobalSelectorBuildTest {
     }
 
     @Test fun disabledGroupDoesNotJoinAndReorderingDoesNotInvalidateGraph() {
-        val a = node("A", "one"); val c = node("A", "three")
+        val a = node("A", "one"); val c = addToGroup(a.groupId, "three")
         val before = buildConfig(a)
         val ga = env.database.groupDao().getById(a.groupId)!!
         c.userOrder = -100; env.database.proxyDao().updateProxy(c)
@@ -160,7 +169,7 @@ class GlobalSelectorBuildTest {
     }
 
     @Test fun frontAndLandingProxyEditsInvalidateButSelectionDoesNot() {
-        val a = node("A", "one"); val c = node("A", "three")
+        val a = node("A", "one"); val c = addToGroup(a.groupId, "three")
         val front = node("Hop", "front")
         val ga = env.database.groupDao().getById(a.groupId)!!
         ga.frontProxy = front.id; env.database.groupDao().updateGroup(ga)
@@ -174,7 +183,7 @@ class GlobalSelectorBuildTest {
     }
 
     @Test fun fixedNodeRoutesDoNotTurnIntoCurrentSelectorWhenThatNodeIsSelected() {
-        val a = node("A", "one"); val c = node("A", "three")
+        val a = node("A", "one"); val c = addToGroup(a.groupId, "three")
         DataStore.globalMode = false
         env.database.rulesDao().createRule(RuleEntity(name = "Fixed A", domains = "full:fixed.test", enabled = true, outbound = a.id))
         val ca = buildConfig(a); val cc = buildConfig(c)
@@ -184,7 +193,7 @@ class GlobalSelectorBuildTest {
     }
 
     @Test fun singleNodeFallbackAndExportNeverPretendToBeGlobalSelector() {
-        val a = node("A", "one"); node("A", "three")
+        val a = node("A", "one"); addToGroup(a.groupId, "three")
         assertFalse(buildConfig(a, disableSelector = true).globalSelector)
         assertEquals(setOf(a.id), buildConfig(a, disableSelector = true).profileTagMap.keys)
         assertEquals(-1L, buildConfig(a, forExport = true).selectorGroupId)

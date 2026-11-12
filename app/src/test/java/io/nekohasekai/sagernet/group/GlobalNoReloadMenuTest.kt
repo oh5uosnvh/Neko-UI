@@ -38,15 +38,17 @@ class GlobalNoReloadMenuTest {
         assertTrue(constants.contains("GLOBAL_SELECTOR_ALL_GROUPS = \"globalSelectorAllGroups\""))
         assertTrue(store.contains("var globalSelectorAllGroups by configurationStore.boolean(Key.GLOBAL_SELECTOR_ALL_GROUPS)"))
     }
-    @Test fun configBuilderCompilesAllGroupsWhenGlobalOptionEnabled() {
+    @Test fun configBuilderCompilesSelectedGroupWhenGlobalOptionEnabled() {
         val builder = File(app, "src/main/java/io/nekohasekai/sagernet/fmt/ConfigBuilder.kt").readText()
         // The option participates in buildSelector: a non-selector group also compiles.
         assertTrue(builder.contains("group?.isSelector == true || globalSelectorAllGroups"))
-        assertTrue(builder.contains("allGroups.filter { it.isSelector || globalSelectorAllGroups }"))
+        // Members come from the selected group only — never a union of all groups.
+        assertTrue(builder.contains("SagerDatabase.proxyDao.getByGroup(selectedGroupId)"))
+        assertFalse(builder.contains("allGroups.filter"))
+        assertFalse(builder.contains("flatMap"))
         // forTest/forExport short-circuits stay in place.
         assertTrue(builder.contains("!forTest && !forExport && DataStore.globalSelectorAllGroups"))
         assertTrue(builder.contains("!disableSelector"))
-        // No member filtering by isSelector alone anymore, and no toolbar batching hint remains.
         assertFalse(builder.contains("allGroups.filter { it.isSelector }.sortedBy"))
         val zh = File(app, "src/main/res/values-zh-rCN/global_no_reload.xml").readText()
         assertTrue(zh.contains(">全分组 selector<"))
