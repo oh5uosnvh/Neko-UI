@@ -35,10 +35,14 @@ func tcpUpstream(t *testing.T, tag string, port uint16) adapter.DNSTransport {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := upstream.Start(adapter.StartStateStart); err != nil {
+	if err := upstream.Start(adapter.StartStateStart, adapter.NewScope(context.Background(), nil)); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = upstream.Close() })
+	t.Cleanup(func() {
+		if c, ok := upstream.(interface{ Close() error }); ok {
+			_ = c.Close()
+		}
+	})
 	return upstream
 }
 func TestRealTCPPolicyFallbackAndAlias(t *testing.T) {
@@ -152,7 +156,9 @@ func TestTCPReusesConnectionWithoutKeepingCancelledSocket(t *testing.T) {
 	if got := len(transport.(*streamTransport).idle); got != 1 {
 		t.Fatalf("idle connections %d", got)
 	}
-	_ = transport.Close()
+	if closer, ok := transport.(interface{ Close() error }); ok {
+		_ = closer.Close()
+	}
 	if len(transport.(*streamTransport).idle) != 0 {
 		t.Fatal("Close leaked pooled connections")
 	}

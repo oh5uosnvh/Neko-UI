@@ -21,6 +21,7 @@ import (
 
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -106,7 +107,7 @@ func TestMappedTLSNodePreservesCertificateNameAndSNI(t *testing.T) {
 			direct.RegisterOutbound(or)
 			httpproxy.RegisterOutbound(or)
 			ir := inbound.NewRegistry()
-			ctx := box.Context(context.Background(), ir, or, endpoint.NewRegistry(), dr, boxservice.NewRegistry())
+			ctx := box.Context(context.Background(), ir, or, endpoint.NewRegistry(), dr, boxservice.NewRegistry(), certificate.NewRegistry())
 			ctx = service.ContextWithDefaultRegistry(ctx)
 			tlsOpts := map[string]any{"enabled": true, "certificate": []string{certPEM}, "alpn": []string{"http/1.1"}}
 			if explicit || tc.replaced {

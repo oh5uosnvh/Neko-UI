@@ -9,6 +9,7 @@ import (
 	"github.com/miekg/dns"
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -27,7 +28,7 @@ func TestPinnedCoreSelectorDispatchKeepsGroupHostsAndFallbackIsolated(t *testing
 	out := outbound.NewRegistry()
 	direct.RegisterOutbound(out)
 	group.RegisterSelector(out)
-	ctx := box.Context(context.Background(), inbound.NewRegistry(), out, endpoint.NewRegistry(), registry, boxservice.NewRegistry())
+	ctx := box.Context(context.Background(), inbound.NewRegistry(), out, endpoint.NewRegistry(), registry, boxservice.NewRegistry(), certificate.NewRegistry())
 	ctx = service.ContextWithDefaultRegistry(ctx)
 	config := fmt.Sprintf(`{
  "log":{"disabled":true},

@@ -26,11 +26,16 @@ type stubDNSTransport struct {
 
 var _ adapter.DNSTransport = (*stubDNSTransport)(nil)
 
-func (*stubDNSTransport) Start(adapter.StartStage) error { return nil }
-func (*stubDNSTransport) Close() error                   { return nil }
+func (*stubDNSTransport) Start(adapter.StartStage, *adapter.Scope) error { return nil }
+func (*stubDNSTransport) Close() error                                   { return nil }
 func (s *stubDNSTransport) Exchange(ctx context.Context, q *dns.Msg) (*dns.Msg, error) {
 	return s.exchange(ctx, q)
 }
+func (s *stubDNSTransport) ExchangeAsync(ctx context.Context, q *dns.Msg, callback func(*dns.Msg, error)) {
+	resp, err := s.exchange(ctx, q)
+	callback(resp, err)
+}
+func (*stubDNSTransport) Reset() {}
 
 type transportFixture struct {
 	*Transport
