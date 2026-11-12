@@ -84,6 +84,7 @@ class GlobalSelectorContractTest {
         assertTrue(go.contains("return b.selector.SelectOutbound(tag)"))
         assertTrue(bridge.contains("running.config.trafficMap[tag]"))
         assertTrue(bridge.contains("reject selector callback outside current compiled membership"))
-        assertFalse(bridge.contains("DataStore.selectedProxy = id"))
+        assertTrue(bridge.contains("DataStore.selectedProxy = id"))
+        assertTrue(bridge.contains("selectedOutbound()"))
     }
 }

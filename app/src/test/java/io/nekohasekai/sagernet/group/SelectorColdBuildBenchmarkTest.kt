@@ -53,7 +53,7 @@ class SelectorColdBuildBenchmarkTest {
         val result = buildConfig(first!!)
         val elapsed = (System.nanoTime() - start) / 1_000_000
         assertEquals(count, result.profileTagMap.size)
-        assertTrue(result.config.contains("\"interrupt_exist_connections\":true"))
+        assertTrue("global selector was not built", result.globalSelector)
         // The same normalized group policy must compile once, not once per node.
         val json = com.google.gson.JsonParser.parseString(result.config).asJsonObject
         val servers = json.getAsJsonObject("dns").getAsJsonArray("servers")
