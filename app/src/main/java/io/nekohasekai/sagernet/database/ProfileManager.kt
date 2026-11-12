@@ -174,7 +174,7 @@ object ProfileManager {
         SelectorGeneration.invalidate()
         rule.userOrder = SagerDatabase.rulesDao.nextOrder() ?: 1
         rule.id = SagerDatabase.rulesDao.createRule(rule)
-        RuntimeRouteUpdater.request()
+        // Route changes take effect on reload; the UI surfaces a needReload snackbar.
         if (post) {
             ruleIterator { onAdd(rule) }
         }
@@ -184,21 +184,21 @@ object ProfileManager {
     suspend fun updateRule(rule: RuleEntity) {
         SelectorGeneration.invalidate()
         SagerDatabase.rulesDao.updateRule(rule)
-        RuntimeRouteUpdater.request()
+        // Route changes take effect on reload; the UI surfaces a needReload snackbar.
         ruleIterator { onUpdated(rule) }
     }
 
     suspend fun deleteRule(ruleId: Long) {
         SelectorGeneration.invalidate()
         SagerDatabase.rulesDao.deleteById(ruleId)
-        RuntimeRouteUpdater.request()
+        // Route changes take effect on reload; the UI surfaces a needReload snackbar.
         ruleIterator { onRemoved(ruleId) }
     }
 
     suspend fun deleteRules(rules: List<RuleEntity>) {
         if (rules.isNotEmpty()) SelectorGeneration.invalidate()
         SagerDatabase.rulesDao.deleteRules(rules)
-        RuntimeRouteUpdater.request()
+        // Route changes take effect on reload; the UI surfaces a needReload snackbar.
         ruleIterator {
             rules.forEach {
                 onRemoved(it.id)

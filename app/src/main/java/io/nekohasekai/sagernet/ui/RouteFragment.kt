@@ -19,7 +19,6 @@ import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.database.RuntimeRouteUpdater
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.RemoteRouteUpdater
@@ -96,7 +95,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 // UI labels are published from the latest persisted row so parallel switch updates win correctly.
                 val latest = withContext(Dispatchers.IO) { SagerDatabase.rulesDao.getById(ruleId) } ?: return@launch
                 ProfileManager.ruleIterator { onUpdated(latest) }
-                if (isAdded) snackbar(getString(R.string.route_quick_reload_required)).show()
+                if (isAdded) needReload()
             } catch (error: Exception) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
                 Logs.w(error)
@@ -215,8 +214,8 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                         runOnDefaultDispatcher {
                             // Restore only the catalog entries; custom routes and manual rules survive.
                             ProfileManager.ensureDefaultRoutes(reset = true)
-                            RuntimeRouteUpdater.request(RuntimeRouteUpdater.Reason.RESET)
                             ruleAdapter.reload()
+                            onMainDispatcher { if (isAdded) needReload() }
                         }
                     }
                     .setNegativeButton(android.R.string.cancel, null)
@@ -226,10 +225,11 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 lifecycleScope.launch {
                     val failures = withContext(Dispatchers.IO) { RemoteRouteUpdater.updateAll() }
                     ruleAdapter.reload()
-                    RuntimeRouteUpdater.request(RuntimeRouteUpdater.Reason.REMOTE)
                     if (failures.isNotEmpty() && isAdded) {
                         snackbar(getString(R.string.route_update_failed,
                             failures.joinToString("\n") { "${it.first}：${it.second}" })).show()
+                    } else if (isAdded) {
+                        needReload()
                     }
                 }
             }
@@ -320,7 +320,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                         changes.forEach { (id, order) -> SagerDatabase.rulesDao.updateOrder(id, order) }
                     }
                 }
-                RuntimeRouteUpdater.request(RuntimeRouteUpdater.Reason.ORDER)
+                onMainDispatcher { if (isAdded) needReload() }
             }
         }
 
@@ -434,8 +434,8 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                         lifecycleScope.launch {
                             try {
                                 RemoteRouteUpdater.updateRule(rule.id)
-                                RuntimeRouteUpdater.request(RuntimeRouteUpdater.Reason.REMOTE)
                                 ruleAdapter.reload()
+                                if (isAdded) needReload()
                             } catch (_: Exception) {
                                 if (isAdded) snackbar(getString(R.string.route_update_failed, rule.displayName())).show()
                             }
@@ -455,8 +455,12 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                     rule.enabled = isChecked
                     runOnDefaultDispatcher {
                         SagerDatabase.rulesDao.updateEnabled(ruleId, isChecked)
-                        RuntimeRouteUpdater.request(RuntimeRouteUpdater.Reason.ENABLED)
                         postFreshRule(ruleId)
+                        onMainDispatcher {
+                            // Toggling a rule only changes the DB; the running core
+                            // still uses the old routing until a reload.
+                            needReload()
+                        }
                     }
                 }
                 editButton.setOnClickListener {

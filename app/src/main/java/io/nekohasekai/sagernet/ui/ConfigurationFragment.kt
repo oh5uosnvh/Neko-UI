@@ -1555,11 +1555,10 @@ class ConfigurationFragment @JvmOverloads constructor(
             R.id.action_global_mode -> {
                 item.isChecked = !item.isChecked
                 DataStore.globalMode = item.isChecked
-                // Room writes synchronously; the committed value is visible to :bg.
-                // Hot snapshot ACK / explicit reconnect fallback is owned by the service.
-                io.nekohasekai.sagernet.database.RuntimeRouteUpdater.request(
-                    io.nekohasekai.sagernet.database.RuntimeRouteUpdater.Reason.GLOBAL_MODE,
-                )
+                // Persisting globalMode changes the compiled routing graph, but the
+                // running core keeps the old routing until a reload. The snackbar
+                // offers a one-tap apply.
+                needReload()
                 return true
             }
         }

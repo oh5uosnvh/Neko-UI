@@ -33,6 +33,7 @@ import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeLi
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
+import io.nekohasekai.sagernet.ktx.needReload
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.utils.PackageCache
 import io.nekohasekai.sagernet.widget.AppListPreference
@@ -223,6 +224,9 @@ class RouteSettingsActivity(
             setPositiveButton(R.string.yes) { _, _ ->
                 runOnDefaultDispatcher {
                     ProfileManager.deleteRule(arg.ruleId)
+                    onMainDispatcher {
+                        (requireActivity() as? ThemedActivity)?.needReload()
+                    }
                 }
                 requireActivity().finish()
             }
@@ -316,6 +320,7 @@ class RouteSettingsActivity(
             }
             ProfileManager.updateRule(entity.apply { serialize() })
         }
+        needReload()
         finish()
 
     }
