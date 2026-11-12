@@ -17,11 +17,11 @@ require (
 	golang.org/x/sys v0.47.0
 )
 
-require github.com/sagernet/sing-vmess v0.2.9-0.20261019223527-a0c58542bd9d
-
-require github.com/oh5uosnvh/fastup-mod v0.0.0
-
-require github.com/oh5uosnvh/oppa-mod v0.0.0
+require (
+	github.com/oh5uosnvh/fastup-mod v0.0.0-00010101000000-000000000000
+	github.com/oh5uosnvh/oppa-mod v0.0.0-00010101000000-000000000000
+	github.com/sagernet/sing-vmess v0.2.9-0.20261019223527-a0c58542bd9d
+)
 
 require (
 	filippo.io/age v1.3.1 // indirect
