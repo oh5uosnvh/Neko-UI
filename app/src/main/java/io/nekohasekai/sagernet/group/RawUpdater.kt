@@ -652,12 +652,19 @@ object RawUpdater : GroupUpdater() {
                                     }
 
                                     "ws-opts" -> (opt.value as? Map<String, Any?>)?.also {
+                                        // Headers beyond Host must survive the Clash→Bean
+                                        // conversion: some gateways validate User-Agent or
+                                        // custom tokens and reject plain WebSocket handshakes.
+                                        val extraHeaders = linkedMapOf<String, String>()
                                         for (wsOpt in it) {
                                             when (wsOpt.key) {
                                                 "headers" -> (wsOpt.value as? Map<Any, Any?>)?.forEach { (key, value) ->
                                                     when (key.toString().lowercase()) {
                                                         "host" -> {
                                                             bean.host = value?.toString()
+                                                        }
+                                                        else -> value?.toString()?.let { v ->
+                                                            extraHeaders[key.toString()] = v
                                                         }
                                                     }
                                                 }
@@ -682,6 +689,9 @@ object RawUpdater : GroupUpdater() {
                                                     }
                                                 }
                                             }
+                                        }
+                                        if (extraHeaders.isNotEmpty()) {
+                                            bean.wsExtraHeaders = org.json.JSONObject(extraHeaders).toString()
                                         }
                                     }
 

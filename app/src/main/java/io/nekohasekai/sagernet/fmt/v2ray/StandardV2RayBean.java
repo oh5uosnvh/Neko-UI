@@ -54,6 +54,10 @@ public abstract class StandardV2RayBean extends AbstractBean {
     public String xhttpMode;
     public String xhttpExtra;
 
+    // --------------------------------------- ws extra headers (Clash ws-opts.headers beyond Host)
+
+    public String wsExtraHeaders;
+
     // --------------------------------------- kcp
 
     public String mKcpSeed;
@@ -140,6 +144,7 @@ public abstract class StandardV2RayBean extends AbstractBean {
 
         if (JavaUtil.isNullOrBlank(xhttpMode)) xhttpMode = "auto";
         if (JavaUtil.isNullOrBlank(xhttpExtra)) xhttpExtra = "";
+        if (JavaUtil.isNullOrBlank(wsExtraHeaders)) wsExtraHeaders = "";
 
         if (JavaUtil.isNullOrBlank(mKcpSeed)) mKcpSeed = "";
         if (JavaUtil.isNullOrBlank(headerType)) headerType = "none";
@@ -148,7 +153,7 @@ public abstract class StandardV2RayBean extends AbstractBean {
 
     @Override
     public void serialize(ByteBufferOutput output) {
-        output.writeInt(10);
+        output.writeInt(11);
         super.serialize(output);
         output.writeString(uuid);
         output.writeString(encryption);
@@ -168,6 +173,7 @@ public abstract class StandardV2RayBean extends AbstractBean {
                 output.writeString(path);
                 output.writeInt(wsMaxEarlyData);
                 output.writeString(earlyDataHeaderName);
+                output.writeString(wsExtraHeaders);
                 break;
             }
             case "http": {
@@ -255,6 +261,9 @@ public abstract class StandardV2RayBean extends AbstractBean {
                 path = input.readString();
                 wsMaxEarlyData = input.readInt();
                 earlyDataHeaderName = input.readString();
+                if (version >= 11) {
+                    wsExtraHeaders = input.readString();
+                }
                 break;
             }
             case "http": {

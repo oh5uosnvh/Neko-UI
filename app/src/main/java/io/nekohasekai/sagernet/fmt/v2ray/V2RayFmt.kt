@@ -651,6 +651,21 @@ fun buildSingBoxOutboundStreamSettings(bean: StandardV2RayBean): V2RayTransportO
                     headers["Host"] = bean.host
                 }
 
+                // Clash ws-opts.headers entries beyond Host (User-Agent, tokens,
+                // ...) must reach the wire; gateways that validate them reject
+                // otherwise-valid handshakes.
+                if (bean.wsExtraHeaders.isNotBlank()) {
+                    try {
+                        val extra = org.json.JSONObject(bean.wsExtraHeaders)
+                        val keys = extra.keys()
+                        while (keys.hasNext()) {
+                            val key = keys.next()
+                            headers[key] = extra.optString(key)
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
+
                 if (bean.path.contains("?ed=")) {
                     path = bean.path.substringBefore("?ed=")
                     max_early_data = bean.path.substringAfter("?ed=").toIntOrNull() ?: 2048
