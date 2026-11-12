@@ -651,13 +651,26 @@ object RawUpdater : GroupUpdater() {
                                         }
                                     }
 
+                                    "ws-path", "path" -> bean.path =
+                                        opt.value?.toString()
+
+                                    "ws-headers" -> (opt.value as? Map<String, Any?>)?.forEach { (key, value) ->
+                                        when (key.toString().lowercase()) {
+                                            "host" -> bean.host = value?.toString()
+                                        }
+                                    }
+
                                     "ws-opts" -> (opt.value as? Map<String, Any?>)?.also {
                                         // Headers beyond Host must survive the Clash→Bean
                                         // conversion: some gateways validate User-Agent or
                                         // custom tokens and reject plain WebSocket handshakes.
+                                        // Bitznet-style documents use legacy top-level
+                                        // ws-path/ws-headers keys AND capitalised option
+                                        // keys (ws-opts.Path); both must resolve or the
+                                        // compiled node dials "/" and every server rejects.
                                         val extraHeaders = linkedMapOf<String, String>()
                                         for (wsOpt in it) {
-                                            when (wsOpt.key) {
+                                            when (wsOpt.key.toString().lowercase()) {
                                                 "headers" -> (wsOpt.value as? Map<Any, Any?>)?.forEach { (key, value) ->
                                                     when (key.toString().lowercase()) {
                                                         "host" -> {
