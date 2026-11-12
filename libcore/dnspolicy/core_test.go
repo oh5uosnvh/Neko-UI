@@ -12,6 +12,7 @@ import (
 	"github.com/miekg/dns"
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -38,7 +39,7 @@ func TestPinnedCoreConfigResolverAndIndependentCache(t *testing.T) {
 	direct.RegisterOutbound(outRegistry)
 	inRegistry := inbound.NewRegistry()
 	direct.RegisterInbound(inRegistry)
-	ctx := box.Context(context.Background(), inRegistry, outRegistry, endpoint.NewRegistry(), dnsRegistry, boxservice.NewRegistry())
+	ctx := box.Context(context.Background(), inRegistry, outRegistry, endpoint.NewRegistry(), dnsRegistry, boxservice.NewRegistry(), certificate.NewRegistry())
 	ctx = service.ContextWithDefaultRegistry(ctx)
 	config := fmt.Sprintf(`{
       "log":{"disabled":true},
@@ -123,14 +124,14 @@ func TestCustomDirectDNSCanBootstrapLegacyRemoteDNS(t *testing.T) {
 	transport.RegisterHTTPS(dr)
 	or := outbound.NewRegistry()
 	direct.RegisterOutbound(or)
-	ctx := box.Context(context.Background(), inbound.NewRegistry(), or, endpoint.NewRegistry(), dr, boxservice.NewRegistry())
+	ctx := box.Context(context.Background(), inbound.NewRegistry(), or, endpoint.NewRegistry(), dr, boxservice.NewRegistry(), certificate.NewRegistry())
 	ctx = service.ContextWithDefaultRegistry(ctx)
 	config := fmt.Sprintf(`{
       "log":{"disabled":true},
       "dns":{"servers":[
         {"type":"neko-tcp","tag":"direct-up","server":"127.0.0.1","server_port":%d},
         {"type":"neko-policy","tag":"dns-direct","fallback":["direct-up"]},
-        {"tag":"dns-remote","address":"https://resolver.example/dns-query","address_resolver":"dns-direct"}
+        {"type":"https","tag":"dns-remote","server":"resolver.example","domain_resolver":"dns-direct"}
       ],"final":"dns-remote"},
       "outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}
     }`, port)

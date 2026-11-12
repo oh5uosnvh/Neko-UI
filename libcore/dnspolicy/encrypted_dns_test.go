@@ -41,10 +41,9 @@ func TestDoTAndDoHPreserveTLSNameAndCustomPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = dot.Start(adapter.StartStateStart); err != nil {
+	if err = dot.Start(adapter.StartStateStart, adapter.NewScope(context.Background(), nil)); err != nil {
 		t.Fatal(err)
 	}
-	defer dot.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	response, err := dot.Exchange(ctx, testQuery("node.private.test", dns.TypeA))
@@ -91,7 +90,6 @@ func TestDoTAndDoHPreserveTLSNameAndCustomPath(t *testing.T) {
 	}))
 	dohServer.TLS = &tls.Config{Certificates: []tls.Certificate{cert}, NextProtos: []string{"http/1.1"}}
 	dohServer.StartTLS()
-	defer dohServer.Close()
 	doh, err := transport.NewHTTPS(context.Background(), log.NewNOPFactory().NewLogger("test"), "doh", option.RemoteHTTPSDNSServerOptions{
 		RemoteTLSDNSServerOptions: option.RemoteTLSDNSServerOptions{
 			RemoteDNSServerOptions:      option.RemoteDNSServerOptions{DNSServerAddressOptions: option.DNSServerAddressOptions{Server: "127.0.0.1", ServerPort: uint16(dohServer.Listener.Addr().(*net.TCPAddr).Port)}},
@@ -101,8 +99,7 @@ func TestDoTAndDoHPreserveTLSNameAndCustomPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer doh.Close()
-	if err = doh.Start(adapter.StartStateStart); err != nil {
+	if err = doh.Start(adapter.StartStateStart, adapter.NewScope(context.Background(), nil)); err != nil {
 		t.Fatal(err)
 	}
 	failed := &stubDNSTransport{TransportAdapter: boxdns.NewTransportAdapter("mock", "failed", nil), exchange: func(context.Context, *dns.Msg) (*dns.Msg, error) { return nil, fmt.Errorf("offline") }}
