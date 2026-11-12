@@ -87,7 +87,7 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = box.Context(ctx,
 		nekoboxAndroidInboundRegistry(), nekoboxAndroidOutboundRegistry(), nekoboxAndroidEndpointRegistry(),
-		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(), certificate.NewRegistry(),
+		nekoboxAndroidDNSTransportRegistry(&localTransportWrapper{iif: localTransport}), nekoboxAndroidServiceRegistry(), certificate.NewRegistry(),
 	)
 	ctx = service.ContextWithDefaultRegistry(ctx)
 	service.MustRegister[libbox.PlatformInterface](ctx, boxPlatformInterfaceInstance)

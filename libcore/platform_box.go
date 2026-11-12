@@ -129,12 +129,12 @@ type localTransportWrapper struct {
 
 func (w *localTransportWrapper) Raw() bool { return w.iif.Raw() }
 
-func (w *localTransportWrapper) Lookup(ctx *libbox.ExchangeContext, network string, domain string) error {
-	return w.iif.Lookup(ctx, network, domain)
+func (w *localTransportWrapper) Lookup(lctx *libbox.ExchangeContext, network string, domain string) error {
+	return w.iif.Lookup(&ExchangeContext{inner: lctx}, network, domain)
 }
 
-func (w *localTransportWrapper) Exchange(ctx *libbox.ExchangeContext, message []byte) error {
-	return w.iif.Exchange(ctx, message)
+func (w *localTransportWrapper) Exchange(lctx *libbox.ExchangeContext, message []byte) error {
+	return w.iif.Exchange(&ExchangeContext{inner: lctx}, message)
 }
 
 func (w *boxPlatformInterfaceWrapper) StartDefaultInterfaceMonitor(listener libbox.InterfaceUpdateListener) error {
