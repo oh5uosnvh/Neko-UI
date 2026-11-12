@@ -33,14 +33,43 @@ func ForceGc() {
 	go debug.FreeOSMemory()
 }
 
-// LocalDNSTransport mirrors the libbox.LocalDNSTransport interface (Raw,
-// Lookup, Exchange with *libbox.ExchangeContext). gobind skips bindings for
+// ExchangeContext mirrors the libbox.ExchangeContext payload (OnCancel,
+// Success, RawSuccess, ErrorCode, ErrnoCode). gobind skips bindings for
 // signatures that reference types from unbound packages (libbox), so the
-// libcore-side wrapper uses this local interface and Java binds against it.
+// libcore-side wrapper declares its own handle struct and the platform
+// adapter unwraps it back to the libbox type at the boundary.
+type ExchangeContext struct {
+	inner *libbox.ExchangeContext
+}
+
+func (c *ExchangeContext) OnCancel(callback Func) {
+	c.inner.OnCancel(callback)
+}
+
+func (c *ExchangeContext) Success(result string) {
+	c.inner.Success(result)
+}
+
+func (c *ExchangeContext) RawSuccess(result []byte) {
+	c.inner.RawSuccess(result)
+}
+
+func (c *ExchangeContext) ErrorCode(code int32) {
+	c.inner.ErrorCode(code)
+}
+
+func (c *ExchangeContext) ErrnoCode(code int32) {
+	c.inner.ErrnoCode(code)
+}
+
+// LocalDNSTransport mirrors the libbox.LocalDNSTransport interface (Raw,
+// Lookup, Exchange with *ExchangeContext). gobind skips bindings for
+// signatures that reference types from unbound packages (libbox), so the
+// libcore-side wrapper uses these local types and Java binds against them.
 type LocalDNSTransport interface {
 	Raw() bool
-	Lookup(ctx *libbox.ExchangeContext, network string, domain string) error
-	Exchange(ctx *libbox.ExchangeContext, message []byte) error
+	Lookup(ctx *ExchangeContext, network string, domain string) error
+	Exchange(ctx *ExchangeContext, message []byte) error
 }
 
 func InitCore(process, cachePath, internalAssets, externalAssets string,
