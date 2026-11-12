@@ -216,9 +216,34 @@ func (b *BoxInstance) SelectOutbound(tag string) (selected bool) {
 	if b.state != 1 || b.selector == nil || strings.TrimSpace(tag) == "" {
 		return false
 	}
-	// sing-box owns selector membership; do not emulate a successful switch in
-	// the host. The native bool is the acknowledgement consumed by BaseService.
+	// sing-box owns selector membership and synchronously interrupts only the
+	// selector's tracked old generation. No global conntrack reset is needed.
 	return b.selector.SelectOutbound(tag)
+}
+
+// SelectedOutbound is a non-blocking control-plane read used to reject stale
+// asynchronous selector callbacks. It is intentionally not a network probe.
+func (b *BoxInstance) SelectedOutbound() string {
+	b.access.Lock()
+	defer b.access.Unlock()
+	if b.state != 1 || b.selector == nil {
+		return ""
+	}
+	return b.selector.Now()
+}
+
+// SelectorState returns selector generation and actual first-byte-use metrics.
+// An ACK or successful Dial is not reported as data-plane success.
+func (b *BoxInstance) SelectorState() string {
+	b.access.Lock()
+	defer b.access.Unlock()
+	if b.state != 1 || b.selector == nil {
+		return "{}"
+	}
+	if state, ok := interface{}(b.selector).(interface{ SelectorState() string }); ok {
+		return state.SelectorState()
+	}
+	return "{}"
 }
 
 func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err error) {

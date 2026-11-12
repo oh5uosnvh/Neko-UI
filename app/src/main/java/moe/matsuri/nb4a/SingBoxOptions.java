@@ -4441,6 +4441,8 @@ public class SingBoxOptions {
 
         public List<String> outbounds;
 
+        public Boolean interrupt_exist_connections;
+
         @SerializedName("default")
         public String default_;
 

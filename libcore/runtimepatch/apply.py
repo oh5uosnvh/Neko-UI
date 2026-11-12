@@ -24,6 +24,7 @@ if MARK in (root/'route/router.go').read_text():
     for source, target in [('adapter_runtime_routing.go.txt','adapter/runtime_routing.go'),('route_runtime_routing.go.txt','route/runtime_routing.go')]:
         if (root/target).read_text() != (here/source).read_text():
             raise SystemExit('Runtime routing installation mismatch: ' + target)
+    (root/'protocol/group/selector.go').write_text((here/'selector.go.txt').read_text())
     for source, target in [('adapter_runtime_routing_test.go.txt','adapter/runtime_routing_test.go'),('box_runtime_routing_test.go.txt','runtime_routing_test.go')]:
         (root/target).write_text((here/source).read_text())
     print('runtime routing v1 already installed');sys.exit(0)
@@ -89,6 +90,7 @@ func (r *Router) NewRuntimeDNSClient(options option.DNSOptions) adapter.DNSClien
  return client
 }
 '''
+changes['protocol/group/selector.go']=(here/'selector.go.txt').read_text()
 for src,dst in [('adapter_runtime_routing.go.txt','adapter/runtime_routing.go'),('route_runtime_routing.go.txt','route/runtime_routing.go'),('adapter_runtime_routing_test.go.txt','adapter/runtime_routing_test.go'),('box_runtime_routing_test.go.txt','runtime_routing_test.go')]:changes[dst]=(here/src).read_text()
 # Exact-match checks completed before any source is written.
 for name,s in changes.items():(root/name).write_text(s)

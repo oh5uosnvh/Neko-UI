@@ -54,7 +54,9 @@ abstract class BoxInstance(
     }
 
     open suspend fun init() {
+        val started = SystemClock.elapsedRealtime()
         buildConfig()
+        val built = SystemClock.elapsedRealtime()
         for ((chain) in config.externalIndex) {
             chain.entries.forEachIndexed { index, (port, profile) ->
                 when (val bean = profile.requireBean()) {
@@ -87,10 +89,13 @@ abstract class BoxInstance(
                 }
             }
         }
+        val plugins = SystemClock.elapsedRealtime()
         loadConfig()
+        Logs.i("selector_perf phase=prepare build_ms=${built - started} plugins_ms=${plugins - built} native_ms=${SystemClock.elapsedRealtime() - plugins} members=${config.profileTagMap.size} external=${config.externalIndex.size}")
     }
 
     override fun launch() {
+        val started = SystemClock.elapsedRealtime()
         // TODO move, this is not box
         val cacheDir = File(SagerNet.application.cacheDir, "tmpcfg")
         cacheDir.mkdirs()
@@ -200,7 +205,9 @@ abstract class BoxInstance(
             }
         }
 
+        val externalStarted = SystemClock.elapsedRealtime()
         box.start()
+        Logs.i("selector_perf phase=start external_ms=${externalStarted - started} core_ms=${SystemClock.elapsedRealtime() - externalStarted}")
     }
 
     @Suppress("EXPERIMENTAL_API_USAGE")

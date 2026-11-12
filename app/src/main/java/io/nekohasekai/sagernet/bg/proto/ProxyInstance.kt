@@ -52,8 +52,12 @@ class ProxyInstance(profile: ProxyEntity, var service: BaseService.Interface? = 
         Logs.d("selector config build id=${profile.id} generation=${config.selectorGeneration} elapsed=${android.os.SystemClock.elapsedRealtime() - started}ms global=${config.globalSelector}")
         lastSelectorGroupId = config.selectorGroupId
         //
-        if (notTmp) Logs.d(config.config)
-        if (notTmp && BuildConfig.DEBUG) Logs.d(JavaUtil.gson.toJson(config.trafficMap))
+        // A 9k-member graph can be megabytes and contains credentials. Do not
+        // synchronously format/write it into the tiny release log ring at startup.
+        if (notTmp && BuildConfig.DEBUG) {
+            Logs.d(config.config)
+            Logs.d(JavaUtil.gson.toJson(config.trafficMap))
+        }
     }
 
     // only use this in temporary instance
@@ -79,14 +83,16 @@ class ProxyInstance(profile: ProxyEntity, var service: BaseService.Interface? = 
             disableRuntimeSelector = true
             super.init()
         }
-        pluginConfigs.forEach { (_, plugin) ->
+        if (BuildConfig.DEBUG) pluginConfigs.forEach { (_, plugin) ->
             val (_, content) = plugin
             Logs.d(content)
         }
     }
 
     override suspend fun loadConfig() {
+        val started = android.os.SystemClock.elapsedRealtime()
         super.loadConfig()
+        if (notTmp) Logs.i("selector_perf phase=native_create elapsed_ms=${android.os.SystemClock.elapsedRealtime() - started} members=${config.profileTagMap.size} config_chars=${config.config.length}")
     }
 
     override fun launch() {

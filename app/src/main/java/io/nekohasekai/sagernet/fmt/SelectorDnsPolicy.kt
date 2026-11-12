@@ -10,11 +10,13 @@ import moe.matsuri.nb4a.SingBoxOptions.DNSServerOptions
 internal class SelectorDnsPolicy(private val globalDirect: List<String>) {
     val servers = mutableListOf<DNSServerOptions>()
     private val directResolvers = linkedMapOf<List<String>, String>()
+    private val directOverrides = hashMapOf<String, List<String>>()
+    private val generalConfigs = java.util.IdentityHashMap<SubscriptionDns.Config, SubscriptionDns.Config>()
 
     fun directAddresses(config: SubscriptionDns.Config, subscription: SubscriptionBean?): List<String> {
         val override = subscription?.directDnsResolver.orEmpty()
         return when {
-            override.isNotBlank() -> SubscriptionDns.endpointList(override)
+            override.isNotBlank() -> directOverrides.getOrPut(override) { SubscriptionDns.endpointList(override) }
             config.directDns.isNotEmpty() -> config.directDns
             else -> globalDirect.take(1) // Match the app's existing global direct-DNS fallback.
         }
@@ -48,18 +50,27 @@ internal class SelectorDnsPolicy(private val globalDirect: List<String>) {
      * Otherwise server-DNS-only differences also change the general resolver tag.
      * Sort maps so equivalent YAML order/formatting does not force a reload.
      */
-    fun generalSubscription(config: SubscriptionDns.Config): SubscriptionBean {
-        val general = SubscriptionDns.Config().apply {
-            hosts.putAll(config.hosts.toSortedMap())
-            policy.putAll(config.policy.toSortedMap())
-            if (policy.isNotEmpty()) bootstrap.addAll(config.bootstrap)
+    fun generalConfig(config: SubscriptionDns.Config): SubscriptionDns.Config =
+        generalConfigs.getOrPut(config) {
+            SubscriptionDns.Config().apply {
+                hosts.putAll(config.hosts.toSortedMap())
+                policy.putAll(config.policy.toSortedMap())
+                if (policy.isNotEmpty()) bootstrap.addAll(config.bootstrap)
+            }
         }
+
+    /** Compatibility form for callers that persist a DNS editor snapshot. */
+    fun generalSubscription(config: SubscriptionDns.Config): SubscriptionBean {
+        val general = generalConfig(config)
         return SubscriptionBean().apply {
             initializeDefaultValues()
             importedDnsConfig = general.snapshot()
             importedDnsSource = "subscription"
         }
     }
+
+    /** Node policy is already normalized by SubscriptionDns.effective(). */
+    fun nodeConfig(config: SubscriptionDns.Config): SubscriptionDns.Config = config
 
     /** Canonical node-only configuration; YAML insertion order is not runtime identity. */
     fun nodeSubscription(config: SubscriptionDns.Config): SubscriptionBean {

@@ -1,25 +1,17 @@
 package io.nekohasekai.sagernet.fmt
 
 /**
- * Process-local immutable build snapshots. A snapshot is reusable only for the
- * exact selector generation and build mode. Database/preference writers bump
- * SelectorGeneration, so a restart never consumes a stale graph.
+ * Deliberately disabled process cache.
+ *
+ * ConfigBuildResult owns mutable JSON and maps and the selector generation is
+ * process-local. A result retained here can therefore outlive a Room write made
+ * by another process (and can even reuse ports from a previous service). The
+ * runtime path must compile from the current database snapshot instead. Keep
+ * this API as a no-op so callers can be enabled later only with an immutable,
+ * database-revision-keyed schema.
  */
 object ConfigBuildCache {
-    private data class Key(val profileId: Long, val generation: Long, val disableSelector: Boolean)
-    private val lock = Any()
-    private val entries = LinkedHashMap<Key, ConfigBuildResult>(8, 0.75f, true)
-
-    fun get(profileId: Long, generation: Long, disableSelector: Boolean): ConfigBuildResult? =
-        synchronized(lock) { entries[Key(profileId, generation, disableSelector)] }
-
-    fun put(result: ConfigBuildResult, disableSelector: Boolean) {
-        val key = Key(result.mainEntId, result.selectorGeneration, disableSelector)
-        synchronized(lock) {
-            entries[key] = result
-            while (entries.size > 8) entries.entries.iterator().run { next(); remove() }
-        }
-    }
-
-    fun clear() = synchronized(lock) { entries.clear() }
+    fun get(profileId: Long, generation: Long, disableSelector: Boolean): ConfigBuildResult? = null
+    fun put(result: ConfigBuildResult, disableSelector: Boolean) = Unit
+    fun clear() = Unit
 }

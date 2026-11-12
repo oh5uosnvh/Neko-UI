@@ -951,10 +951,9 @@ class MainActivity : ThemedActivity(),
 
     override fun cbSelectorUpdate(id: Long) {
         val old = DataStore.selectedProxy
-        // The callback is emitted by the currently running per-group selector.
-        // Persist the acknowledged node exactly like the legacy group selector.
-        DataStore.selectedProxy = id
-        DataStore.currentProfile = id
+        // Selection is already committed in :bg after checking native Now().
+        // Do not let an old Binder callback overwrite a newer real selection.
+        if (DataStore.currentProfile != id) return
         refreshConfigurationProfileState()
         runOnDefaultDispatcher {
             ProfileManager.postUpdate(old, true)

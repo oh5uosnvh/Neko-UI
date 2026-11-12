@@ -146,23 +146,36 @@ fun buildConfig(
     val readableNames = mutableSetOf(TAG_DIRECT, TAG_BYPASS, TAG_BLOCK, TAG_FRAGMENT, TAG_MIXED, TAG_PROXY)
     val group = SagerDatabase.groupDao.getById(proxy.groupId)
 
+    // All of these caches are deliberately scoped to one buildConfig call. They
+    // never outlive the Room snapshot, so they cannot become the stale mutable
+    // cross-start cache that ConfigBuildCache used to be.
+    val groupCache = HashMap<Long, ProxyGroup?>()
+    val entityCache = HashMap<Long, ProxyEntity>()
+    val resolvedChainCache = HashMap<Long, List<ProxyEntity>>()
+    val internalChainCache = HashMap<Long, List<ProxyEntity>>()
+    val beanJsonCache = HashMap<Long, String>()
+    groupCache[proxy.groupId] = group
+    entityCache[proxy.id] = proxy
+    fun cachedEntity(id: Long): ProxyEntity? = entityCache[id] ?:
+        SagerDatabase.proxyDao.getById(id)?.also { entityCache[id] = it }
+    fun cachedGroup(id: Long): ProxyGroup? = groupCache[id] ?:
+        SagerDatabase.groupDao.getById(id).also { groupCache[id] = it }
+
     val resolvingChains = hashSetOf<Long>()
-    fun ProxyEntity.resolveChainInternal(): MutableList<ProxyEntity> {
+    fun ProxyEntity.resolveChainInternal(): List<ProxyEntity> {
+        internalChainCache[id]?.let { return it }
         val bean = requireBean()
-        if (bean is ChainBean) {
-            require(resolvingChains.add(id)) { "Cyclic proxy chain: $id" }
-            try {
-                val beansMap = SagerDatabase.proxyDao.getEntities(bean.proxies).associateBy { it.id }
-                val beanList = ArrayList<ProxyEntity>()
-                for (proxyId in bean.proxies) {
-                    val item = beansMap[proxyId] ?: error("Missing proxy chain member: $proxyId")
-                    beanList.addAll(item.resolveChainInternal())
-                }
-                require(beanList.isNotEmpty()) { "Empty proxy chain: $id" }
-                return beanList.asReversed()
-            } finally { resolvingChains.remove(id) }
-        }
-        return mutableListOf(this)
+        if (bean !is ChainBean) return listOf(this).also { internalChainCache[id] = it }
+        require(resolvingChains.add(id)) { "Cyclic proxy chain: $id" }
+        try {
+            val beanList = ArrayList<ProxyEntity>()
+            for (proxyId in bean.proxies) {
+                val item = cachedEntity(proxyId) ?: error("Missing proxy chain member: $proxyId")
+                beanList.addAll(item.resolveChainInternal())
+            }
+            require(beanList.isNotEmpty()) { "Empty proxy chain: $id" }
+            return beanList.asReversed().also { internalChainCache[id] = it }
+        } finally { resolvingChains.remove(id) }
     }
 
     fun readableTag(name_: String): String {
@@ -175,18 +188,15 @@ fun buildConfig(
         return name
     }
 
-    fun ProxyEntity.resolveChain(): MutableList<ProxyEntity> {
-        val thisGroup = SagerDatabase.groupDao.getById(groupId)
-        val frontProxy = thisGroup?.frontProxy?.let { SagerDatabase.proxyDao.getById(it) }
-        val landingProxy = thisGroup?.landingProxy?.let { SagerDatabase.proxyDao.getById(it) }
-        val list = resolveChainInternal()
-        if (frontProxy != null) {
-            list.add(frontProxy)
-        }
-        if (landingProxy != null) {
-            list.add(0, landingProxy)
-        }
-        return list
+    fun ProxyEntity.resolveChain(): List<ProxyEntity> {
+        resolvedChainCache[id]?.let { return it }
+        val thisGroup = cachedGroup(groupId)
+        val frontProxy = thisGroup?.frontProxy?.let { cachedEntity(it) }
+        val landingProxy = thisGroup?.landingProxy?.let { cachedEntity(it) }
+        val list = ArrayList(resolveChainInternal())
+        if (frontProxy != null) list.add(frontProxy)
+        if (landingProxy != null) list.add(0, landingProxy)
+        return list.also { resolvedChainCache[id] = it }
     }
 
     val extraRules = if (forTest) listOf() else SagerDatabase.rulesDao.enabledRules()
@@ -195,19 +205,27 @@ fun buildConfig(
     // isSelector is the only switch: each enabled group contributes runtime members.
     // Toolbar batching therefore creates a real cross-group selector, including manual groups.
     val buildSelector = !forTest && !forExport && !disableSelector && group?.isSelector == true
-    val selectorMembers = if (buildSelector) SagerDatabase.groupDao.allGroups()
-        .filter { it.isSelector }.sortedBy { it.id }
-        .flatMap { SagerDatabase.proxyDao.getByGroup(it.id).sortedBy { member -> member.id } }
-        .filter { member ->
-            val bean = member.requireBean()
-            // Whole-core configurations cannot be nested as an outbound. Selecting one reconnects.
-            bean !is ConfigBean || bean.type != 0
-        } else emptyList()
+    val selectorMembers = if (buildSelector) {
+        // One Room read for the graph, rather than one getByGroup() per enabled
+        // group (146 queries on the observed device). It also seeds the entity
+        // cache used by chain expansion and prevents repeated getById() calls.
+        val allGroups = SagerDatabase.groupDao.allGroups()
+        allGroups.forEach { groupCache[it.id] = it }
+        val allEntities = SagerDatabase.proxyDao.getAll()
+        allEntities.forEach { entityCache[it.id] = it }
+        val entitiesByGroup = allEntities.groupBy { it.groupId }
+        allGroups.filter { it.isSelector }.sortedBy { it.id }
+            .flatMap { entitiesByGroup[it.id].orEmpty().sortedBy { member -> member.id } }
+            .filter { member ->
+                val bean = member.requireBean()
+                // Whole-core configurations cannot be nested as an outbound. Selecting one reconnects.
+                bean !is ConfigBean || bean.type != 0
+            }
+    } else emptyList()
     val userDNSRuleList = mutableListOf<DNSRule_DefaultOptions>()
     val domainListDNSDirectForce = mutableListOf<String>()
     val bypassDNSBeans = hashSetOf<AbstractBean>()
     val subscriptionDns = SubscriptionDnsBuilder()
-    val groupCache = HashMap<Long, ProxyGroup?>()
     val activeSubscription = group?.subscription
     val activeDns = subscriptionDns.config(proxy.requireBean(), activeSubscription)
     val directOverride = activeSubscription?.directDnsResolver.orEmpty()
@@ -395,7 +413,9 @@ fun buildConfig(
                 val nodeDnsConfig = subscriptionDns.config(bean, nodeSubscription)
                 NodeHostMapping.apply(bean, nodeDnsConfig.hosts, nodeSubscription?.applyHosts != false)
                 val fallbackResolver = if (buildSelector) selectorDns.nodeFallback(nodeDnsConfig, nodeSubscription) else "dns-direct"
-                val nodeResolver = subscriptionDns.node(bean, selectorDns.nodeSubscription(nodeDnsConfig), fallbackResolver)
+                // nodeDnsConfig is already normalized and cached for this build;
+                // do not serialize it to YAML only to parse it back again.
+                val nodeResolver = subscriptionDns.node(nodeDnsConfig, fallbackResolver)
                     ?: if (buildSelector) fallbackResolver else null
                 val preserveMultiAddress = nodeSubscription?.applyHosts != false && NodeHostMapping.hasMultipleAddresses(bean, nodeDnsConfig.hosts)
                 // Keep all IP candidates in the resolver instead of freezing a multi-IP hosts entry.
@@ -651,19 +671,22 @@ fun buildConfig(
                     append(chain.joinToString(",") { member -> member.id.toString() }).append(':')
                     // Include every chain hop's persisted config, not only the
                     // selected node. Front/landing edits must invalidate a live switch.
-                    append(chain.joinToString("|") { member -> gson.toJson(member.requireBean()) })
+                    append(chain.joinToString("|") { member ->
+                        beanJsonCache.getOrPut(member.id) { gson.toJson(member.requireBean()) }
+                    })
                     val bean = it.requireBean()
                     append(':').append(bean.javaClass.name).append(':')
                     // Include the selected node config, not only its ID/type;
                     // edits to a compiled member must invalidate live switching.
-                    append(gson.toJson(bean))
+                    append(beanJsonCache.getOrPut(it.id) { gson.toJson(bean) })
                 }
                 tagMap[it.id] = buildChain(it.id, it)
-                val memberGroup = groupCache.getOrPut(it.groupId) { SagerDatabase.groupDao.getById(it.groupId) }
+                val memberGroup = cachedGroup(it.groupId)
                 val memberDns = subscriptionDns.config(it.requireBean(), memberGroup?.subscription)
                 val memberTag = tagMap.getValue(it.id)
                 selectorDirectChoices[memberTag] = selectorDns.nodeFallback(memberDns, memberGroup?.subscription)
-                val rules = subscriptionDns.general(it.requireBean(), selectorDns.generalSubscription(memberDns), "dns-remote")
+                val generalConfig = selectorDns.generalConfig(memberDns)
+                val rules = subscriptionDns.general(generalConfig, "dns-remote")
                 // A common dispatch rule table, not a union of group hosts. If the selected
                 // group has no matching entry, only that group's resolver falls back to remote.
                 selectorGeneralChoices[memberTag] = rules.firstOrNull()?.server ?: "dns-remote"
@@ -678,6 +701,11 @@ fun buildConfig(
                 tag = TAG_PROXY
                 default_ = tagMap[proxy.id]
                 outbounds = memberTags
+                // A selector change must retire every existing inbound flow
+                // synchronously inside sing-box. Android must not emulate this
+                // with a delayed global conntrack.Close(), which can kill the
+                // first connection of the newly selected node.
+                interrupt_exist_connections = true
             })
         } else {
             val mainTag = buildChain(0, proxy)

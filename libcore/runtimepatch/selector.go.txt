@@ -1,0 +1,325 @@
+package group
+
+import (
+	"context"
+	"encoding/json"
+	"net"
+	"sync"
+	"time"
+
+	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/adapter/outbound"
+	"github.com/sagernet/sing-box/common/interrupt"
+	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/log"
+	"github.com/sagernet/sing-box/nekoutils"
+	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common"
+	E "github.com/sagernet/sing/common/exceptions"
+	"github.com/sagernet/sing/common/logger"
+	M "github.com/sagernet/sing/common/metadata"
+	N "github.com/sagernet/sing/common/network"
+	"github.com/sagernet/sing/service"
+)
+
+func RegisterSelector(registry *outbound.Registry) {
+	outbound.Register[option.SelectorOutboundOptions](registry, C.TypeSelector, NewSelector)
+}
+
+var (
+	_ adapter.OutboundGroup             = (*Selector)(nil)
+	_ adapter.ConnectionHandlerEx       = (*Selector)(nil)
+	_ adapter.PacketConnectionHandlerEx = (*Selector)(nil)
+)
+
+type Selector struct {
+	outbound.Adapter
+	ctx                          context.Context
+	outbound                     adapter.OutboundManager
+	connection                   adapter.ConnectionManager
+	logger                       logger.ContextLogger
+	tags                         []string
+	defaultTag                   string
+	outbounds                    map[string]adapter.Outbound
+	selected                     common.TypedValue[adapter.Outbound]
+	interruptGroup               *interrupt.Group
+	interruptExternalConnections bool
+
+	// switchMu serializes selection with Dial/ListenPacket. This closes the
+	// old-Dial race: a dial that starts before a switch can never be admitted
+	// after the switch has committed to the new generation.
+	switchMu         sync.RWMutex
+	generation       uint64
+	generationCtx    context.Context
+	generationCancel context.CancelFunc
+	metricMu         sync.Mutex
+	firstTCPUse      time.Time
+	firstUDPUse      time.Time
+}
+
+func NewSelector(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.SelectorOutboundOptions) (adapter.Outbound, error) {
+	outbound := &Selector{
+		Adapter:                      outbound.NewAdapter(C.TypeSelector, tag, nil, options.Outbounds),
+		ctx:                          ctx,
+		outbound:                     service.FromContext[adapter.OutboundManager](ctx),
+		connection:                   service.FromContext[adapter.ConnectionManager](ctx),
+		logger:                       logger,
+		tags:                         options.Outbounds,
+		defaultTag:                   options.Default,
+		outbounds:                    make(map[string]adapter.Outbound),
+		interruptGroup:               interrupt.NewGroup(),
+		interruptExternalConnections: options.InterruptExistConnections,
+	}
+	outbound.generation = 1
+	outbound.generationCtx, outbound.generationCancel = context.WithCancel(ctx)
+	if len(outbound.tags) == 0 {
+		return nil, E.New("missing tags")
+	}
+	return outbound, nil
+}
+
+func (s *Selector) Network() []string {
+	selected := s.selected.Load()
+	if selected == nil {
+		return []string{N.NetworkTCP, N.NetworkUDP}
+	}
+	return selected.Network()
+}
+
+func (s *Selector) Start() error {
+	for i, tag := range s.tags {
+		detour, loaded := s.outbound.Outbound(tag)
+		if !loaded {
+			return E.New("outbound ", i, " not found: ", tag)
+		}
+		s.outbounds[tag] = detour
+	}
+
+	if s.Tag() != "" {
+		cacheFile := service.FromContext[adapter.CacheFile](s.ctx)
+		if cacheFile != nil {
+			selected := cacheFile.LoadSelected(s.Tag())
+			if selected != "" {
+				detour, loaded := s.outbounds[selected]
+				if loaded {
+					s.selected.Store(detour)
+					return nil
+				}
+			}
+		}
+	}
+
+	if s.defaultTag != "" {
+		detour, loaded := s.outbounds[s.defaultTag]
+		if !loaded {
+			return E.New("default outbound not found: ", s.defaultTag)
+		}
+		s.selected.Store(detour)
+		return nil
+	}
+
+	s.selected.Store(s.outbounds[s.tags[0]])
+	return nil
+}
+
+func (s *Selector) Now() string {
+	selected := s.selected.Load()
+	if selected == nil {
+		return s.tags[0]
+	}
+	return selected.Tag()
+}
+
+func (s *Selector) All() []string {
+	return s.tags
+}
+
+func (s *Selector) SelectOutbound(tag string) bool {
+	detour, loaded := s.outbounds[tag]
+	if !loaded {
+		return false
+	}
+
+	s.switchMu.Lock()
+	if s.selected.Load() == detour {
+		s.switchMu.Unlock()
+		return true
+	}
+	s.selected.Store(detour)
+	if s.generationCancel != nil {
+		s.generationCancel()
+	}
+	s.generation++
+	s.generationCtx, s.generationCancel = context.WithCancel(s.ctx)
+	// Close only selector-owned traffic. The option is deliberately explicit:
+	// callers that need existing HEV/SOCKS flows switched must set
+	// interrupt_exist_connections=true. This is not a global conntrack reset.
+	s.interruptGroup.Interrupt(s.interruptExternalConnections)
+	s.switchMu.Unlock()
+	if s.Tag() != "" {
+		cacheFile := service.FromContext[adapter.CacheFile](s.ctx)
+		if cacheFile != nil {
+			err := cacheFile.StoreSelected(s.Tag(), tag)
+			if err != nil {
+				s.logger.Error("store selected: ", err)
+			}
+		}
+	}
+	if nekoutils.Selector_OnProxySelected != nil {
+		nekoutils.Selector_OnProxySelected(s.Tag(), tag)
+	}
+	return true
+}
+
+func (s *Selector) generationContext(ctx context.Context) (context.Context, adapter.Outbound, uint64, context.CancelFunc) {
+	s.switchMu.RLock()
+	selected := s.selected.Load()
+	generation := s.generation
+	generationCtx := s.generationCtx
+	switchCtx, cancel := context.WithCancel(ctx)
+	s.switchMu.RUnlock()
+	go func() {
+		select {
+		case <-generationCtx.Done():
+			cancel()
+		case <-switchCtx.Done():
+		}
+	}()
+	return switchCtx, selected, generation, cancel
+}
+
+func (s *Selector) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+	ctx, selected, generation, cancel := s.generationContext(ctx)
+	defer cancel()
+	conn, err := selected.DialContext(ctx, network, destination)
+	if err != nil {
+		return nil, err
+	}
+	// Do not admit a dial which completed after a selector commit. The remote
+	// socket is closed before it can become a live old-generation flow.
+	s.switchMu.RLock()
+	current := s.generation
+	s.switchMu.RUnlock()
+	if current != generation || ctx.Err() != nil {
+		conn.Close()
+		return nil, context.Canceled
+	}
+	wrapped := s.interruptGroup.NewConn(conn, interrupt.IsExternalConnectionFromContext(ctx))
+	return &selectorConn{Conn: wrapped, mark: func() { s.markUse(network) }}, nil
+}
+
+func (s *Selector) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
+	ctx, selected, generation, cancel := s.generationContext(ctx)
+	defer cancel()
+	conn, err := selected.ListenPacket(ctx, destination)
+	if err != nil {
+		return nil, err
+	}
+	s.switchMu.RLock()
+	current := s.generation
+	s.switchMu.RUnlock()
+	if current != generation || ctx.Err() != nil {
+		conn.Close()
+		return nil, context.Canceled
+	}
+	wrapped := s.interruptGroup.NewPacketConn(conn, interrupt.IsExternalConnectionFromContext(ctx))
+	return &selectorPacketConn{PacketConn: wrapped, mark: func() { s.markUse(N.NetworkUDP) }}, nil
+}
+
+func (s *Selector) NewConnectionEx(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+	ctx, selected, _, cancel := s.generationContext(ctx)
+	ctx = interrupt.ContextWithIsExternalConnection(ctx)
+	s.switchMu.Lock()
+	// Register the inbound leg while switchMu is held. A concurrent switch
+	// therefore either interrupts it, or observes it only in the new epoch.
+	tracked := s.interruptGroup.NewConn(conn, true)
+	s.switchMu.Unlock()
+	onClose = N.AppendClose(onClose, func(error) { cancel() })
+	if outboundHandler, isHandler := selected.(adapter.ConnectionHandlerEx); isHandler {
+		outboundHandler.NewConnectionEx(ctx, tracked, metadata, onClose)
+	} else {
+		s.connection.NewConnection(ctx, selected, tracked, metadata, onClose)
+	}
+}
+
+func (s *Selector) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+	ctx, selected, _, cancel := s.generationContext(ctx)
+	ctx = interrupt.ContextWithIsExternalConnection(ctx)
+	// sing's PacketConn is not net.PacketConn. Keep the core packet
+	// lifecycle intact and cancel the generation when the inbound closes.
+	onClose = N.AppendClose(onClose, func(error) { cancel() })
+	if outboundHandler, isHandler := selected.(adapter.PacketConnectionHandlerEx); isHandler {
+		outboundHandler.NewPacketConnectionEx(ctx, conn, metadata, onClose)
+	} else {
+		s.connection.NewPacketConnection(ctx, selected, conn, metadata, onClose)
+	}
+}
+
+type selectorConn struct {
+	net.Conn
+	mark func()
+	once sync.Once
+}
+
+func (c *selectorConn) Read(p []byte) (int, error)  { c.once.Do(c.mark); return c.Conn.Read(p) }
+func (c *selectorConn) Write(p []byte) (int, error) { c.once.Do(c.mark); return c.Conn.Write(p) }
+
+type selectorPacketConn struct {
+	net.PacketConn
+	mark func()
+	once sync.Once
+}
+
+func (c *selectorPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
+	c.once.Do(c.mark)
+	return c.PacketConn.ReadFrom(p)
+}
+func (c *selectorPacketConn) WriteTo(p []byte, a net.Addr) (int, error) {
+	c.once.Do(c.mark)
+	return c.PacketConn.WriteTo(p, a)
+}
+
+func (s *Selector) markUse(network string) {
+	s.metricMu.Lock()
+	defer s.metricMu.Unlock()
+	now := time.Now()
+	if network == N.NetworkUDP {
+		if s.firstUDPUse.IsZero() {
+			s.firstUDPUse = now
+		}
+	} else if s.firstTCPUse.IsZero() {
+		s.firstTCPUse = now
+	}
+}
+
+// SelectorState is a non-blocking control/data-plane diagnostic snapshot. The
+// first-use timestamps are zero until bytes actually pass through a selected
+// connection; selector ACK or Dial return is not reported as data-plane use.
+func (s *Selector) SelectorState() string {
+	s.switchMu.RLock()
+	generation, selected := s.generation, s.Now()
+	s.switchMu.RUnlock()
+	s.metricMu.Lock()
+	state := struct {
+		Generation  uint64 `json:"generation"`
+		Selected    string `json:"selected"`
+		FirstTCPUse string `json:"tcp_first_success_use,omitempty"`
+		FirstUDPUse string `json:"udp_first_success_use,omitempty"`
+	}{Generation: generation, Selected: selected}
+	if !s.firstTCPUse.IsZero() {
+		state.FirstTCPUse = s.firstTCPUse.UTC().Format(time.RFC3339Nano)
+	}
+	if !s.firstUDPUse.IsZero() {
+		state.FirstUDPUse = s.firstUDPUse.UTC().Format(time.RFC3339Nano)
+	}
+	s.metricMu.Unlock()
+	value, _ := json.Marshal(state)
+	return string(value)
+}
+
+func RealTag(detour adapter.Outbound) string {
+	if group, isGroup := detour.(adapter.OutboundGroup); isGroup {
+		return group.Now()
+	}
+	return detour.Tag()
+}

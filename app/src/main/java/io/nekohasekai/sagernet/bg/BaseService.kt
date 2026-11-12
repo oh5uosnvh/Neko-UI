@@ -155,7 +155,8 @@ class BaseService {
                 if (tag.isNullOrBlank()) {
                     return reconnectSelector(current, profileId, "RUNTIME_CHANGED")
                 }
-                val accepted = try { running.box.selectOutbound(tag) } catch (e: Exception) {
+                val selectStarted = SystemClock.elapsedRealtime()
+                val accepted = try { running.box.selectOutbound(tag) && running.box.selectedOutbound() == tag } catch (e: Exception) {
                     Logs.w("native selector failed: ${e.message}"); false
                 }
                 if (!accepted) return reconnectSelector(current, profileId, "CORE_REJECTED")
@@ -171,7 +172,7 @@ class BaseService {
                 DataStore.currentProfile = profileId
                 launch(Dispatchers.Default) {
                     SagerDatabase.proxyDao.getById(profileId)?.let { ent ->
-                        if (current.proxy === running && current.state == State.Connected) {
+                        if (current.proxy === running && current.state == State.Connected && running.box.selectedOutbound() == tag) {
                             running.displayProfileName = ServiceNotification.genTitle(ent)
                             current.notification?.postNotificationTitle(running.displayProfileName)
                         }
@@ -179,7 +180,10 @@ class BaseService {
                 }
                 return JSONObject().put("ok", true).put("ack", true).put("mode", "hot")
                     .put("reloading", false).put("profileId", profileId).put("actualId", profileId)
-                    .put("tag", tag).toString()
+                    // Selection/old-flow retirement is not proof of a remote TLS
+                    // handshake or successful application payload on the new node.
+                    .put("controlElapsedMs", SystemClock.elapsedRealtime() - selectStarted)
+                    .put("dataPlaneVerified", false).put("tag", tag).toString()
             }
         }
 
@@ -543,9 +547,17 @@ class BaseService {
                 try {
                     data.notification = createNotification(ServiceNotification.genTitle(profile))
 
-                    Executable.killAll()    // clean up old processes
+                    val startupStarted = SystemClock.elapsedRealtime()
+                    withContext(Dispatchers.IO) { Executable.killAll() }
+                    val cleaned = SystemClock.elapsedRealtime()
                     preInit()
-                    proxy.init()
+                    val networkReady = SystemClock.elapsedRealtime()
+                    // Global graph expansion and core construction must not occupy
+                    // the service main thread and delay Stop / binder callbacks.
+                    withContext(Dispatchers.Default) { proxy.init() }
+                    ensureActive()
+                    if (data.proxy !== proxy || !ServiceStartPolicy.fence.permitsAutomatic()) return@runOnMainDispatcher
+                    Logs.i("selector_perf phase=startup_prepare cleanup_ms=${cleaned - startupStarted} network_ms=${networkReady - cleaned} init_ms=${SystemClock.elapsedRealtime() - networkReady}")
                     DataStore.currentProfile = profile.id
 
                     proxy.processes = GuardedProcessPool {

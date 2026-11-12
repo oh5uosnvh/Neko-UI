@@ -37,6 +37,7 @@ class GlobalSelectorContractTest {
         assertTrue(fragment.contains("group.isSelector = enable"))
         assertTrue(fragment.contains("全部分组启用 selector"))
         assertTrue(builder.contains("selectorFingerprint"))
+        assertTrue(builder.contains("interrupt_exist_connections = true"))
     }
 
     @Test fun liveSwitchAcknowledgesCoreAndAutomaticallyReconnectsIncompatibleGraphs() {

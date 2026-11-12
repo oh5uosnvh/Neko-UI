@@ -11,7 +11,9 @@ class SubscriptionDnsBuilder {
     val servers = mutableListOf<DNSServerOptions>()
     private val built = linkedMapOf<String, String>()
     private val parsed = hashMapOf<List<String>, SubscriptionDns.Config>()
-    private val snapshots = java.util.IdentityHashMap<SubscriptionDns.Config, String>()
+    // Canonical keys are generated from normalized fields, not YAML. Keeping
+    // this per build avoids the old Config -> SnakeYaml dump on every member.
+    private val canonical = java.util.IdentityHashMap<SubscriptionDns.Config, String>()
 
     fun config(bean: AbstractBean, subscription: SubscriptionBean?): SubscriptionDns.Config {
         val values = listOf(
@@ -57,15 +59,24 @@ class SubscriptionDnsBuilder {
         return policyServer("dns-direct", upstreams)
     }
 
-    fun node(bean: AbstractBean, subscription: SubscriptionBean?, fallback: String = "dns-direct"): String? {
-        val config = config(bean, subscription)
+    fun node(bean: AbstractBean, subscription: SubscriptionBean?, fallback: String = "dns-direct"): String? =
+        node(config(bean, subscription), fallback)
+
+    /** Build directly from the already normalized per-build config.
+     * Avoids the old Config -> YAML snapshot -> SnakeYaml parse round trip for
+     * every selector member. The Config is owned by this build and immutable by
+     * convention after effective() returns.
+     */
+    fun node(config: SubscriptionDns.Config, fallback: String = "dns-direct"): String? {
         // applyHosts only chooses the stored server address (A or B). The A->B DNS rule is always kept.
         if (!config.hasNodeConfig()) return null
         return build(config, true, fallback)
     }
 
     private fun build(config: SubscriptionDns.Config, node: Boolean, fallback: String): String {
-        val identity = snapshots.getOrPut(config) { config.snapshot() } + "\n$node\n$fallback"
+        val identity = canonical.getOrPut(config) {
+            io.nekohasekai.sagernet.fmt.SelectorFingerprint.policy(config.asDocument())
+        } + "\n$node\n$fallback"
         built[identity]?.let { return it }
         val hash = MessageDigest.getInstance("SHA-256").digest(identity.toByteArray())
             .take(12).joinToString("") { "%02x".format(it) }
@@ -91,8 +102,11 @@ class SubscriptionDnsBuilder {
     }
 
     /** Only the selected group's ordinary policy/hosts affect application DNS. */
-    fun general(bean: AbstractBean, subscription: SubscriptionBean?, fallback: String): List<DNSRule_DefaultOptions> {
-        val config = config(bean, subscription)
+    fun general(bean: AbstractBean, subscription: SubscriptionBean?, fallback: String): List<DNSRule_DefaultOptions> =
+        general(config(bean, subscription), fallback)
+
+    /** Build from the normalized config already held by this build. */
+    fun general(config: SubscriptionDns.Config, fallback: String): List<DNSRule_DefaultOptions> {
         if (!config.hasGeneralConfig()) return emptyList()
         val resolver = build(config, false, fallback)
         val keys = (config.hosts.keys + config.policy.keys).distinct()

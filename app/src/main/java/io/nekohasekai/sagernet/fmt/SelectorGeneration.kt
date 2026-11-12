@@ -2,18 +2,44 @@ package io.nekohasekai.sagernet.fmt
 
 import java.util.concurrent.atomic.AtomicLong
 
-/**
- * Monotonic identity for the database-backed selector graph.
- *
- * It is deliberately cheap to read on the Binder selector hot path. Database
- * writers invalidate it after their transaction; the next normal reload/build
- * captures the new value in ConfigBuildResult. A click never rebuilds a config
- * merely to discover that it is stale.
- */
+/** Process-local revision for writes made through this process. */
 object SelectorGeneration {
     private val value = AtomicLong(1L)
 
     fun current(): Long = value.get()
-
     fun invalidate(): Long = value.incrementAndGet()
+}
+
+/**
+ * Small synchronized latest-wins gate. It deliberately contains no coroutine or
+ * Android code, making the coalescing/serialization contract unit-testable.
+ */
+internal class SelectorApplyCoalescer<E> {
+    private var pending: E? = null
+    private var running = false
+
+    /** Returns true exactly for the caller which must start the worker. */
+    @Synchronized fun submit(value: E): Boolean {
+        pending = value
+        if (running) return false
+        running = true
+        return true
+    }
+
+    @Synchronized fun take(): E? {
+        val result = pending
+        pending = null
+        return result
+    }
+
+    /** Returns true when a newer request arrived while work was running. */
+    @Synchronized fun finish(): Boolean {
+        if (pending != null) return true
+        running = false
+        return false
+    }
+
+    @Synchronized fun isRunning(): Boolean = running
+
+    @Synchronized fun hasPending(): Boolean = pending != null
 }

@@ -101,16 +101,29 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
                     return@runOnDefaultDispatcher
                 }
                 if (data.proxy !== running || !data.state.connected) return@runOnDefaultDispatcher
-                // Per-group selector changes reset existing flows after the native
-                // selector acknowledgement, preserving the established behavior.
-                Libcore.resetAllConnections(true)
+                // Callbacks may arrive out of order after rapid A -> B -> C taps.
+                // The core performs the old-generation connection retirement;
+                // a delayed Android global reset would kill brand-new C flows.
+                if (running.box.selectedOutbound() != tag) return@runOnDefaultDispatcher
+                // Service-side state is authoritative for both Binder and Clash
+                // selections; a delayed UI callback must never write it back.
+                val committed = synchronized(data.selectorMutationLock) {
+                    if (data.proxy !== running || running.box.selectedOutbound() != tag) false else {
+                        DataStore.selectedProxy = id
+                        DataStore.currentProfile = id
+                        true
+                    }
+                }
+                if (!committed) return@runOnDefaultDispatcher
                 // traffic & title
                 running.apply {
                     looper?.selectMain(id)
                     displayProfileName = ServiceNotification.genTitle(ent)
                     data.notification?.postNotificationTitle(displayProfileName)
                 }
-                // post binder
+                // Traffic accounting can suspend. Recheck the native selection
+                // before publishing, so a stale callback cannot repaint the UI.
+                if (data.proxy !== running || running.box.selectedOutbound() != tag) return@runOnDefaultDispatcher
                 data.binder.broadcast { b ->
                     b.cbSelectorUpdate(id)
                 }
