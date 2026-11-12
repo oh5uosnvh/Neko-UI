@@ -10,6 +10,7 @@ import (
  "testing"
 
  box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/adapter/certificate"
  "github.com/sagernet/sing-box/adapter"
  "github.com/sagernet/sing-box/adapter/endpoint"
  "github.com/sagernet/sing-box/adapter/inbound"
@@ -27,15 +28,20 @@ type mockRuntimeDNS struct {tag string; addr string}
 func(m *mockRuntimeDNS)Tag()string{return m.tag}
 func(m *mockRuntimeDNS)Type()string{return "test-runtime"}
 func(m *mockRuntimeDNS)Dependencies()[]string{return nil}
-func(m *mockRuntimeDNS)Start(adapter.StartStage)error{return nil}
+func(m *mockRuntimeDNS)Start(stage adapter.StartStage, scope *adapter.Scope)error{return nil}
 func(m *mockRuntimeDNS)Close()error{return nil}
 func(m *mockRuntimeDNS)Exchange(ctx context.Context,q *mdns.Msg)(*mdns.Msg,error){
  reply:=new(mdns.Msg);reply.SetReply(q)
  if q.Question[0].Qtype==mdns.TypeA {
- reply.Answer=[]mdns.RR{&mdns.A{Hdr:mdns.RR_Header{Name:q.Question[0].Name,Rrtype:mdns.TypeA,Class:mdns.ClassINET,Ttl:60},A:net.ParseIP(m.addr).To4()}}
+  reply.Answer=[]mdns.RR{&mdns.A{Hdr:mdns.RR_Header{Name:q.Question[0].Name,Rrtype:mdns.TypeA,Class:mdns.ClassINET,Ttl:60},A:net.ParseIP(m.addr).To4()}}
  }
  return reply,nil
 }
+func(m *mockRuntimeDNS)ExchangeAsync(ctx context.Context,q *mdns.Msg,callback func(*mdns.Msg,error)){
+ r,e:=m.Exchange(ctx,q)
+ callback(r,e)
+}
+func(m *mockRuntimeDNS)Reset(){}
 func newRuntimeBox(t *testing.T)(*box.Box,context.Context,string){
  t.Helper()
  ir,or:=inbound.NewRegistry(),outbound.NewRegistry()
@@ -44,7 +50,7 @@ func newRuntimeBox(t *testing.T)(*box.Box,context.Context,string){
  dns.RegisterTransport[struct{}](dr,"test-runtime",func(ctx context.Context,l log.ContextLogger,tag string,o struct{})(adapter.DNSTransport,error){
   ip:="192.0.2.1";if tag=="dns-b"{ip="192.0.2.2"};return &mockRuntimeDNS{tag,ip},nil
  })
- ctx:=box.Context(context.Background(),ir,or,endpoint.NewRegistry(),dr,boxservice.NewRegistry())
+ ctx:=box.Context(context.Background(),ir,or,endpoint.NewRegistry(),dr,boxservice.NewRegistry(),certificate.NewRegistry())
  ctx=service.ContextWithDefaultRegistry(ctx)
  config:=`{"log":{"disabled":true},"outbounds":[{"type":"direct","tag":"a"},{"type":"direct","tag":"b"}],"route":{"final":"a"},"dns":{"servers":[{"type":"test-runtime","tag":"dns-a"},{"type":"test-runtime","tag":"dns-b"}],"final":"dns-a"}}`
  var opts option.Options

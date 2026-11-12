@@ -169,7 +169,7 @@ func New(ctx context.Context, _ log.ContextLogger, tag string, options Options) 
 		preferred: make(map[string]int), slots: make(chan struct{}, 64),
 	}, nil
 }
-func (t *Transport) Start(stage adapter.StartStage) error {
+func (t *Transport) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
@@ -267,6 +267,15 @@ func bestRule(rules []Rule, name string) []string {
 		return nil
 	}
 	return rules[index].Servers
+}
+
+// ExchangeAsync adapts the synchronous exchange to the 1.14 interface.
+func (t *Transport) ExchangeAsync(ctx context.Context, message *dns.Msg, callback func(*dns.Msg, error)) {
+	resp, err := t.Exchange(ctx, message)
+	callback(resp, err)
+}
+
+func (t *Transport) Reset() {
 }
 
 func (t *Transport) Exchange(ctx context.Context, message *dns.Msg) (*dns.Msg, error) {

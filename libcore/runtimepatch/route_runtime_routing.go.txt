@@ -20,6 +20,7 @@ func (r *runtimeRuleSetRouter) RuleSet(tag string) (adapter.RuleSet, bool) { v, 
 type runtimeRegistry struct { local, parent service.Registry }
 func (r runtimeRegistry) Get(k any) any { if v:=r.local.Get(k); v!=nil{return v};return r.parent.Get(k) }
 func (r runtimeRegistry) Register(k,v any) any {return r.local.Register(k,v)}
+func (r runtimeRegistry) Clone() service.Registry { return runtimeRegistry{r.local.Clone(), r.parent} }
 
 // RuntimeRoutingVersion advertises the real, atomic API. Unpatched cores do not
 // implement this optional interface and the libcore wrapper fails closed.
@@ -27,7 +28,7 @@ func (r *Router) RuntimeRoutingVersion() int { return 1 }
 func (r *Router) UpdateRouting(routeJSON, dnsJSON string) (uint64, error) {
  r.runtimeUpdateMu.Lock()
  defer r.runtimeUpdateMu.Unlock()
- if !r.started || r.runtimeClosed { return 0, errors.New("ROUTING_NOT_RUNNING") }
+ if r.runtimeClosed { return 0, errors.New("ROUTING_NOT_RUNNING") }
  var ro option.RouteOptions
  var d option.DNSOptions
  if err:=json.UnmarshalContext(r.ctx, []byte(routeJSON), &ro); err!=nil{return 0,errors.New("INVALID_ROUTE_JSON")}
@@ -41,8 +42,7 @@ func (r *Router) UpdateRouting(routeJSON, dnsJSON string) (uint64, error) {
  newD.Rules=nil;newD.Final="";newD.Strategy=0
  if !reflect.DeepEqual(oldR,newR)||!reflect.DeepEqual(oldD,newD){return 0,errors.New("ROUTING_REBUILD_REQUIRED")}
  if (hasRule(ro.Rules,isProcessRule)||hasDNSRule(d.Rules,isProcessDNSRule)) && !r.needFindProcess {return 0,errors.New("ROUTING_PROCESS_CAPABILITY_MISSING")}
- if (hasRule(ro.Rules,isWIFIRule)||hasDNSRule(d.Rules,isWIFIDNSRule)) && !r.needWIFIState {return 0,errors.New("ROUTING_WIFI_CAPABILITY_MISSING")}
- final:=r.outbound.Default()
+  final:=r.outbound.Default()
  if ro.Final!="" {var ok bool;final,ok=r.outbound.Outbound(ro.Final);if !ok{return 0,errors.New("ROUTING_OUTBOUND_NOT_LOADED")}}
  dnsFinal:=r.dnsTransport.Default()
  if d.Final!="" {var ok bool;dnsFinal,ok=r.dnsTransport.Transport(d.Final);if !ok{return 0,errors.New("ROUTING_DNS_NOT_LOADED")}}
@@ -59,14 +59,16 @@ func (r *Router) UpdateRouting(routeJSON, dnsJSON string) (uint64, error) {
  // A layered registry prevents NewRule from replacing the live adapter.Router.
  ctx:=service.ContextWithRegistry(r.ctx,runtimeRegistry{service.NewRegistry(),service.RegistryFromContext(r.ctx)})
  service.MustRegister[adapter.Router](ctx,&runtimeRuleSetRouter{r,sets})
- startCtx:=adapter.NewHTTPStartContext(ctx)
+ startCtx:=adapter.NewHTTPStartContext()
  defer startCtx.Close()
  for _,opts:=range ro.RuleSet {
-  if _,exists:=sets[opts.Tag];exists{return 0,errors.New("DUPLICATE_RUNTIME_RULE_SET")}
-  it,err:=R.NewRuleSet(ctx,r.logger,opts);if err!=nil{return 0,errors.New("INVALID_RUNTIME_RULE_SET")}
-  sets[opts.Tag]=it;ownedSets=append(ownedSets,it)
+  tag := ""
+  if len(opts.Tag)>0 {tag = opts.Tag[0]}
+  if _,exists:=sets[tag];exists{return 0,errors.New("DUPLICATE_RUNTIME_RULE_SET")}
+  it,err:=R.NewRuleSet(r.ctx,r.logger,tag,opts);if err!=nil{return 0,errors.New("INVALID_RUNTIME_RULE_SET")}
+  sets[tag]=it;ownedSets=append(ownedSets,it)
   if err=it.StartContext(ctx,startCtx);err!=nil{return 0,errors.New("RUNTIME_RULE_SET_START_FAILED")}
-  if m:=it.Metadata();(m.ContainsProcessRule&&!r.needFindProcess)||(m.ContainsWIFIRule&&!r.needWIFIState){return 0,errors.New("ROUTING_RULE_SET_CAPABILITY_MISSING")}
+  if m:=it.Metadata();m.ContainsProcessRule&&!r.needFindProcess{return 0,errors.New("ROUTING_RULE_SET_CAPABILITY_MISSING")}
  }
  for _,opts:=range ro.Rules {
   it,err:=R.NewRule(ctx,r.logger,opts,false);if err!=nil{return 0,errors.New("INVALID_RUNTIME_RULE")}
@@ -75,12 +77,12 @@ func (r *Router) UpdateRouting(routeJSON, dnsJSON string) (uint64, error) {
   if err=it.Start();err!=nil{return 0,errors.New("RUNTIME_RULE_START_FAILED")}
  }
  for _,opts:=range d.Rules {
-  it,err:=R.NewDNSRule(ctx,r.logger,opts,true);if err!=nil{return 0,errors.New("INVALID_RUNTIME_DNS_RULE")}
+  it,err:=R.NewDNSRule(ctx,r.logger,opts,true,false);if err!=nil{return 0,errors.New("INVALID_RUNTIME_DNS_RULE")}
   p.DNSRules=append(p.DNSRules,it)
   if a,ok:=it.Action().(*R.RuleActionDNSRoute);ok {if _,ok=r.dnsTransport.Transport(a.Server);!ok{return 0,errors.New("ROUTING_DNS_NOT_LOADED")}}
   if err=it.Start();err!=nil{return 0,errors.New("RUNTIME_DNS_RULE_START_FAILED")}
  }
- for _,it:=range ownedSets{if err:=it.PostStart();err!=nil{return 0,errors.New("RUNTIME_RULE_SET_POST_START_FAILED")}}
+ // neko: 1.14 RuleSet lifecycle is StartContext-managed; no separate PostStart.
  // No Cleanup(): disabled sets must remain reusable while this snapshot lives.
  generation,err:=r.runtimeRouting.Publish(p)
  if err!=nil{return 0,err}

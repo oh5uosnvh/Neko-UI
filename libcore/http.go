@@ -255,7 +255,7 @@ func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
 						if host, _, _ := net.SplitHostPort(addr); host != "" {
 							domain = host
 						}
-						echTls := ech.NewECHClientConfig(domain, &r.tls, gLocalDNSTransport)
+						echTls := ech.NewECHClientConfig(domain, &r.tls, newBootstrapDNSTransport(domain))
 						return echTls.Client(ctx, c)
 					},
 					DisableKeepAlives: true,

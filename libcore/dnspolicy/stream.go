@@ -9,6 +9,7 @@ import (
 
 	"github.com/miekg/dns"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing/common/logger"
 	"github.com/sagernet/sing-box/common/dialer"
 	"github.com/sagernet/sing-box/common/tls"
 	boxdns "github.com/sagernet/sing-box/dns"
@@ -61,7 +62,7 @@ func newTLS(ctx context.Context, _ log.ContextLogger, tag string, options option
 	}
 	tlsOptions := common.PtrValueOrDefault(options.TLS)
 	tlsOptions.Enabled = true
-	config, err := tls.NewClient(ctx, options.Server, tlsOptions)
+	config, err := tls.NewClient(ctx, logger.NOP(), options.Server, tlsOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +75,7 @@ func newTLS(ctx context.Context, _ log.ContextLogger, tag string, options option
 		dialer:           d, address: address, tlsConfig: config,
 	}, nil
 }
-func (s *streamTransport) Start(stage adapter.StartStage) error {
+func (s *streamTransport) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	if stage == adapter.StartStateStart {
 		return dialer.InitializeDetour(s.dialer)
 	}
@@ -114,6 +115,15 @@ func (s *streamTransport) keepIdle(conn net.Conn) {
 	}
 	_ = conn.SetDeadline(time.Time{})
 	s.idle = append(s.idle, idleStream{conn, time.Now()})
+}
+
+// ExchangeAsync adapts the synchronous exchange to the 1.14 interface.
+func (s *streamTransport) ExchangeAsync(ctx context.Context, message *dns.Msg, callback func(*dns.Msg, error)) {
+	resp, err := s.Exchange(ctx, message)
+	callback(resp, err)
+}
+
+func (s *streamTransport) Reset() {
 }
 
 func (s *streamTransport) Exchange(ctx context.Context, message *dns.Msg) (*dns.Msg, error) {

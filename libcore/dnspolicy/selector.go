@@ -25,7 +25,7 @@ type SelectorTransport struct {
 	boxdns.TransportAdapter
 	manager     adapter.DNSTransportManager
 	outbounds   adapter.OutboundManager
-	selector    interface{ Now() string }
+	selector    adapter.OutboundGroup
 	choices     map[string]string
 	upstreams   map[string]adapter.DNSTransport
 	selectorTag string
@@ -56,7 +56,7 @@ func newSelector(ctx context.Context, _ log.ContextLogger, tag string, options S
 	}, nil
 }
 
-func (t *SelectorTransport) Start(stage adapter.StartStage) error {
+func (t *SelectorTransport) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
@@ -84,10 +84,19 @@ func (t *SelectorTransport) Start(stage adapter.StartStage) error {
 		}
 		upstreams[tag] = server
 	}
-	t.selector, t.upstreams = selector, upstreams
+	t.selector, t.upstreams = selector.(adapter.OutboundGroup), upstreams
 	return nil
 }
 func (t *SelectorTransport) Close() error { return nil }
+
+// ExchangeAsync adapts the synchronous exchange to the 1.14 interface.
+func (t *SelectorTransport) ExchangeAsync(ctx context.Context, message *dns.Msg, callback func(*dns.Msg, error)) {
+	resp, err := t.Exchange(ctx, message)
+	callback(resp, err)
+}
+
+func (t *SelectorTransport) Reset() {
+}
 
 func (t *SelectorTransport) Exchange(ctx context.Context, message *dns.Msg) (*dns.Msg, error) {
 	if err := ctx.Err(); err != nil {
@@ -98,7 +107,7 @@ func (t *SelectorTransport) Exchange(ctx context.Context, message *dns.Msg) (*dn
 	}
 	// Read native selector once. In-flight queries keep that exact group's resolver;
 	// the next query observes a new selection, including Clash API selections.
-	server := t.upstreams[t.choices[t.selector.Now()]]
+	server := t.upstreams[t.choices[t.selector.Selected("udp").Tag()]]
 	if server == nil {
 		return nil, errors.New("selected outbound has no DNS resolver")
 	}

@@ -1,0 +1,20 @@
+package dns
+
+import (
+	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/option"
+)
+
+func (r *Router) RuntimeDNSInitial() *adapter.RuntimeRoutingSnapshot {
+	return &adapter.RuntimeRoutingSnapshot{DNSRules: r.rules, DNSFinal: r.transport.Default(), DNSClient: r.client, DNSStrategy: r.defaultDomainStrategy}
+}
+
+func (r *Router) NewRuntimeDNSClient(options option.DNSOptions) adapter.DNSClient {
+	opts := r.runtimeClientOptions
+	// A new cache per generation prevents old in-flight replies repopulating the
+	// new generation after publication. RDRC persisted rejects are policy-specific.
+	opts.RDRC = nil
+	client := NewClient(opts)
+	client.Start()
+	return client
+}
