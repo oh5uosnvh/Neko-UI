@@ -34,6 +34,8 @@ import org.json.JSONObject
 import org.json.JSONTokener
 import org.yaml.snakeyaml.error.YAMLException
 import java.io.StringReader
+import java.util.Collections
+import java.util.IdentityHashMap
 import androidx.core.net.toUri
 import io.nekohasekai.sagernet.widget.UserAgentPreference
 
@@ -174,8 +176,12 @@ object RawUpdater : GroupUpdater() {
         }
         proxies = proxiesMap.values.toList()
 
-        // Empty on non-Clash updates deliberately removes stale imported rules.
-        val importedDnsConfig = proxies.firstOrNull()?.subscriptionDns ?: ""
+        // A subscription may carry DNS/hosts snapshots on any node. Taking only
+        // the first node made the result depend on provider ordering and silently
+        // discarded later snapshots (especially when the first node had none).
+        // Merge all snapshots before persisting the group-level configuration.
+        val dnsSnapshots = proxies.mapNotNull { it.subscriptionDns?.takeIf(String::isNotBlank) }.distinct()
+        val importedDnsConfig = if (dnsSnapshots.isEmpty()) "" else GroupDnsStore.mergeSnapshots(dnsSnapshots)
         val resolution = SubscriptionDns.effective(
             importedDnsConfig, subscription.privateDnsConfig, subscription.hostsConfig,
             subscription.serverDnsResolver,
@@ -233,81 +239,57 @@ object RawUpdater : GroupUpdater() {
 
         Logs.d("New profiles: ${proxies.size}")
 
-        val nameMap = proxies.associateBy { bean ->
-            bean.displayName()
-        }
-
-        Logs.d("Unique profiles: ${nameMap.size}")
-
-        val toDelete = ArrayList<ProxyEntity>()
-        val toReplace = exists.mapNotNull { entity ->
-            val name = entity.displayName()
-            if (nameMap.contains(name)) name to entity else let {
-                toDelete.add(entity)
-                null
-            }
-        }.toMap()
-
-        Logs.d("toDelete profiles: ${toDelete.size}")
-        Logs.d("toReplace profiles: ${toReplace.size}")
-
+        // A provider is allowed to change display names (traffic, expiry, emoji)
+        // between updates. Reconcile by the endpoint identity first, never by name.
+        val available = proxies.flatMap { bean ->
+            bean.subscriptionKeys().map { it to bean }
+        }.groupBy({ it.first }, { it.second })
+            .mapValues { it.value.toMutableList() }
+            .toMutableMap()
+        val consumed = Collections.newSetFromMap(IdentityHashMap<AbstractBean, Boolean>())
         val toUpdate = ArrayList<ProxyEntity>()
         val added = mutableListOf<String>()
         val updated = mutableMapOf<String, String>()
-        val deleted = toDelete.map { it.displayName() }
-
+        val deleted = mutableListOf<String>()
         var userOrder = 1L
-        var changed = toDelete.size
-        for ((name, bean) in nameMap.entries) {
-            if (toReplace.contains(name)) {
-                val entity = toReplace[name]!!
-                val existsBean = entity.requireBean()
-                // 更新订阅，保留自定义覆写设置
-                bean.customOutboundJson = existsBean.customOutboundJson
-                bean.customConfigJson = existsBean.customConfigJson
-                when {
-                    existsBean != bean -> {
-                        changed++
-                        entity.putBean(bean)
-                        toUpdate.add(entity)
-                        updated[entity.displayName()] = name
+        var changed = 0
 
-                        Logs.d("Updated profile: $name")
-                    }
-
-                    entity.userOrder != userOrder -> {
-                        entity.putBean(bean)
-                        toUpdate.add(entity)
-                        entity.userOrder = userOrder
-
-                        Logs.d("Reordered profile: $name")
-                    }
-
-                    else -> {
-                        Logs.d("Ignored profile: $name")
-                    }
-                }
-            } else {
-                changed++
-                SagerDatabase.proxyDao.addProxy(
-                    ProxyEntity(
-                        groupId = proxyGroup.id, userOrder = userOrder
-                    ).apply {
-                        putBean(bean)
-                    })
-                added.add(name)
-                Logs.d("Inserted profile: $name")
+        SagerDatabase.instance.runInTransaction {
+            for (entity in exists) {
+            val oldBean = entity.requireBean()
+            val bean = oldBean.subscriptionKeys().asSequence()
+                .flatMap { available[it].orEmpty().asSequence() }
+                .firstOrNull { it !in consumed }
+            if (bean == null) {
+                // A temporary provider omission must not delete a profile or make
+                // a tag/group reference point at a new entity.
+                entity.userOrder = userOrder++
+                toUpdate.add(entity)
+                Logs.w("Keeping unmatched subscription profile: ${entity.displayName()}")
+                continue
             }
-            userOrder++
+            consumed += bean
+            val oldName = entity.displayName()
+            bean.customOutboundJson = oldBean.customOutboundJson
+            bean.customConfigJson = oldBean.customConfigJson
+            entity.putBean(bean)
+            entity.userOrder = userOrder++
+            toUpdate.add(entity)
+            if (oldName != bean.displayName() || oldBean != bean) {
+                changed++
+                updated[oldName] = bean.displayName()
+            }
         }
 
-        SagerDatabase.proxyDao.updateProxy(toUpdate).also {
-            Logs.d("Updated profiles: $it")
+        for (bean in proxies) {
+            if (bean in consumed) continue
+            changed++
+            SagerDatabase.proxyDao.addProxy(
+                ProxyEntity(groupId = proxyGroup.id, userOrder = userOrder++).apply { putBean(bean) }
+            )
+            added.add(bean.displayName())
         }
-
-        SagerDatabase.proxyDao.deleteProxy(toDelete).also {
-            Logs.d("Deleted profiles: $it")
-        }
+        SagerDatabase.proxyDao.updateProxy(toUpdate).also { Logs.d("Updated profiles: $it") }
 
         val existCount = SagerDatabase.proxyDao.countByGroup(proxyGroup.id).toInt()
 
@@ -319,10 +301,40 @@ object RawUpdater : GroupUpdater() {
         subscription.importedDnsSource = if (link.startsWith("content://")) "file" else "subscription"
         subscription.lastUpdated = (System.currentTimeMillis() / 1000).toInt()
         SagerDatabase.groupDao.updateGroup(proxyGroup)
+        }
         finishUpdate(proxyGroup)
 
         userInterface?.onUpdateSuccess(
             proxyGroup, changed, added, updated, deleted, duplicate, byUser
+        )
+    }
+
+    /** Stable endpoint identities. Display names are mutable subscription metadata. */
+    private fun AbstractBean.subscriptionKeys(): List<String> {
+        val standard = this as? StandardV2RayBean
+        val base = listOf(
+            javaClass.name,
+            serverAddress.trim().lowercase(),
+            serverPort ?: 0,
+        )
+        val credential = when (this) {
+            is TrojanBean -> password
+            else -> standard?.uuid.orEmpty()
+        }
+        val full = base + listOf(
+            credential,
+            standard?.type.orEmpty(),
+            standard?.path.orEmpty(),
+            standard?.host.orEmpty(),
+            standard?.sni.orEmpty(),
+            standard?.realityPubKey.orEmpty(),
+            standard?.realityShortId.orEmpty()
+        )
+        // The full key preserves transport distinctions; the endpoint key is a
+        // safe fallback for providers that only rename or rewrite transport data.
+        return listOf(
+            full.joinToString("\\u001f"),
+            base.plus(credential).joinToString("\\u001f")
         )
     }
 

@@ -537,19 +537,40 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
         setting: Boolean
     ): ByteArray {
         val out = JSONObject().apply {
-            put("version", 1)
+            // Version 2 includes tag groups and memberships. Root groups and
+            // profiles keep their original IDs so classification survives restore.
+            put("version", 2)
             if (profile) {
-                put("profiles", JSONArray().apply {
-                    SagerDatabase.proxyDao.getAll().forEach {
-                        put(it.toBase64Str())
-                    }
-                })
-
-                put("groups", JSONArray().apply {
-                    SagerDatabase.groupDao.allGroups().forEach {
-                        put(it.toBase64Str())
-                    }
-                })
+                // Read all profile/group/tag tables from one Room snapshot. This
+                // prevents an update racing the backup from producing dangling IDs.
+                SagerDatabase.instance.runInTransaction {
+                    put("profiles", JSONArray().apply {
+                        SagerDatabase.proxyDao.getAll().forEach { put(it.toBase64Str()) }
+                    })
+                    put("groups", JSONArray().apply {
+                        SagerDatabase.groupDao.allGroups().forEach { put(it.toBase64Str()) }
+                    })
+                    val tags = SagerDatabase.instance.tagGroupDao().all()
+                    put("tag_groups", JSONArray().apply {
+                        tags.forEach { tag ->
+                            put(JSONObject().apply {
+                                put("id", tag.id)
+                                put("name", tag.name)
+                                put("userOrder", tag.userOrder)
+                            })
+                        }
+                    })
+                    put("tag_memberships", JSONArray().apply {
+                        tags.forEach { tag ->
+                            SagerDatabase.instance.tagMembershipDao().members(tag.id).forEach { groupId ->
+                                put(JSONObject().apply {
+                                    put("tagId", tag.id)
+                                    put("groupId", groupId)
+                                })
+                            }
+                        }
+                    })
+                }
             }
             if (rule) {
                 put("rules", JSONArray().apply {
@@ -703,9 +724,6 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                 profiles.add(ProxyEntity.CREATOR.createFromParcel(parcel))
                 parcel.recycle()
             }
-            SagerDatabase.proxyDao.reset()
-            SagerDatabase.proxyDao.insert(profiles)
-
             val groups = mutableListOf<ProxyGroup>()
             val jsonGroups = content.getJSONArray("groups")
             for (i in 0 until jsonGroups.length()) {
@@ -716,8 +734,50 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                 groups.add(ProxyGroup.CREATOR.createFromParcel(parcel))
                 parcel.recycle()
             }
-            SagerDatabase.groupDao.reset()
-            SagerDatabase.groupDao.insert(groups)
+            val tags = mutableListOf<TagGroup>()
+            if (content.has("tag_groups")) {
+                val jsonTags = content.getJSONArray("tag_groups")
+                for (i in 0 until jsonTags.length()) {
+                    val item = jsonTags.getJSONObject(i)
+                    tags += TagGroup(item.getLong("id"), item.getString("name"), item.optLong("userOrder", i + 1L))
+                }
+            }
+            val memberships = mutableListOf<TagMembership>()
+            val restoreExistingTagLinks = !content.has("tag_groups") && !content.has("tag_memberships")
+            val existingTagLinks = if (restoreExistingTagLinks) {
+                SagerDatabase.instance.tagGroupDao().all().flatMap { tag ->
+                    SagerDatabase.instance.tagMembershipDao().members(tag.id).map { groupId ->
+                        TagMembership(tag.id, groupId)
+                    }
+                }
+            } else emptyList()
+            if (content.has("tag_memberships")) {
+                val jsonMemberships = content.getJSONArray("tag_memberships")
+                for (i in 0 until jsonMemberships.length()) {
+                    val item = jsonMemberships.getJSONObject(i)
+                    memberships += TagMembership(item.getLong("tagId"), item.getLong("groupId"))
+                }
+            }
+            SagerDatabase.instance.runInTransaction {
+                SagerDatabase.proxyDao.reset()
+                SagerDatabase.groupDao.reset()
+                SagerDatabase.groupDao.insert(groups)
+                SagerDatabase.proxyDao.insert(profiles)
+                // v1 backups have no tag data; preserve current tags when
+                // restoring an old backup. v2 with an empty tag list clears them.
+                if (content.has("tag_groups") || content.has("tag_memberships")) {
+                    SagerDatabase.instance.tagMembershipDao().reset()
+                    SagerDatabase.instance.tagGroupDao().reset()
+                    if (tags.isNotEmpty()) SagerDatabase.instance.tagGroupDao().insertAll(tags)
+                    if (memberships.isNotEmpty()) SagerDatabase.instance.tagMembershipDao().insertAll(memberships)
+                } else if (existingTagLinks.isNotEmpty()) {
+                    // v1 backup: root groups/profiles are restored, tags remain
+                    // independent metadata and their valid links are restored.
+                    val validGroups = groups.map { it.id }.toSet()
+                    val validLinks = existingTagLinks.filter { it.groupId in validGroups }
+                    if (validLinks.isNotEmpty()) SagerDatabase.instance.tagMembershipDao().insertAll(validLinks)
+                }
+            }
         }
         if (rule && content.has("rules")) {
             val rules = mutableListOf<RuleEntity>()

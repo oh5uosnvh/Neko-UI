@@ -33,8 +33,14 @@ data class TagGroup(
         @Query("SELECT MAX(userOrder) FROM tag_groups")
         fun maxOrder(): Long?
 
+        @Query("DELETE FROM tag_groups")
+        fun reset()
+
         @Insert(onConflict = OnConflictStrategy.ABORT)
         fun insert(tag: TagGroup): Long
+
+        @Insert(onConflict = OnConflictStrategy.ABORT)
+        fun insertAll(tags: List<TagGroup>)
 
         @Query("UPDATE tag_groups SET name = :name WHERE id = :id")
         fun rename(id: Long, name: String): Int
@@ -78,5 +84,11 @@ data class TagMembership(val tagId: Long, val groupId: Long) {
 
         @Query("DELETE FROM tag_memberships WHERE tagId = :tagId AND groupId = :groupId")
         fun delete(tagId: Long, groupId: Long): Int
+
+        @Query("DELETE FROM tag_memberships")
+        fun reset()
+
+        @Insert(onConflict = OnConflictStrategy.ABORT)
+        fun insertAll(memberships: List<TagMembership>)
     }
 }
