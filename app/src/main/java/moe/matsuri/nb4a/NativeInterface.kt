@@ -75,6 +75,25 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
         return "${connectionInfo.ssid},${connectionInfo.bssid}"
     }
 
+    override fun defaultNetworkInterface(): String {
+        val network = SagerNet.underlyingNetwork ?: SagerNet.connectivity.activeNetwork ?: return ""
+        return SagerNet.connectivity.getLinkProperties(network)?.interfaceName.orEmpty()
+    }
+
+    override fun defaultNetworkDNSServers(): String {
+        val network = SagerNet.underlyingNetwork ?: SagerNet.connectivity.activeNetwork ?: return ""
+        return SagerNet.connectivity.getLinkProperties(network)?.dnsServers
+            ?.mapNotNull { it.hostAddress }
+            ?.joinToString("\n")
+            .orEmpty()
+    }
+
+    override fun defaultNetworkGateways(): String {
+        val network = SagerNet.underlyingNetwork ?: SagerNet.connectivity.activeNetwork ?: return ""
+        val link = SagerNet.connectivity.getLinkProperties(network) ?: return ""
+        return link.routes.mapNotNull { it.gateway?.hostAddress }.distinct().joinToString("\n")
+    }
+
     // nb4a interface
 
     override fun useOfficialAssets(): Boolean {
