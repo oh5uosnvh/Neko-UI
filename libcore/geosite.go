@@ -24,7 +24,10 @@ func (g *geosite) Close() error {
 	if g.geositeReader == nil {
 		return nil
 	}
-	err := g.geositeReader.Close()
+	var err error
+	if closer, ok := g.geositeReader.Upstream().(interface{ Close() error }); ok {
+		err = closer.Close()
+	}
 	g.geositeReader = nil
 	return err
 }
