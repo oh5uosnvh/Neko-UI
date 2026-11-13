@@ -128,7 +128,8 @@ class LayeredThemeResourceTest {
                     assertFalse(foreground.hasAttributeNS(ns,"layout_weight"))
                     assertEquals("match_parent", child.getAttributeNS(ns,"layout_height"))
                     assertFalse(child.hasAttributeNS(ns,"layout_weight"))
-                    val tabs = all(root).single { it.getAttributeNS(ns,"id") == "@+id/group_tab" }
+                    val appbar = xml("layout/layout_appbar_group.xml")
+                    val tabs = all(appbar).single { it.getAttributeNS(ns,"id") == "@+id/group_tab" }
                     assertEquals("com.google.android.material.appbar.AppBarLayout", (tabs.parentNode as Element).tagName)
                     assertEquals("@android:color/transparent", tabs.getAttributeNS(ns,"background"))
                     assertEquals("group_pager", child.getAttributeNS(ns,"id").substringAfter('/'))
