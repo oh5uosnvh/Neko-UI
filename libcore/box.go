@@ -16,8 +16,8 @@ import (
 	"github.com/matsuridayo/libneko/speedtest"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/certificate"
-	libbox "github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/boxapi"
+	libbox "github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/protocol/group"
 
 	box "github.com/sagernet/sing-box"
@@ -83,19 +83,22 @@ type BoxInstance struct {
 func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *BoxInstance, err error) {
 	defer device.DeferPanicToError("NewSingBoxInstance", func(err_ error) { err = err_ })
 
+	platformInterface := &boxPlatformInterfaceWrapper{localDNS: localTransport}
 	// create box context
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = box.Context(ctx,
 		nekoboxAndroidInboundRegistry(), nekoboxAndroidOutboundRegistry(), nekoboxAndroidEndpointRegistry(),
-		nekoboxAndroidDNSTransportRegistry(&localTransportWrapper{iif: localTransport}), nekoboxAndroidServiceRegistry(), certificate.NewRegistry(),
+		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(), certificate.NewRegistry(),
 	)
 	ctx = service.ContextWithDefaultRegistry(ctx)
-	service.MustRegister[libbox.PlatformInterface](ctx, boxPlatformInterfaceInstance)
+	service.MustRegister[libbox.PlatformInterface](ctx, platformInterface)
+	service.MustRegister[adapter.PlatformInterface](ctx, libbox.NewAdapterPlatformInterface(platformInterface))
 
 	// parse options
 	var options option.Options
 	err = options.UnmarshalJSONContext(ctx, []byte(config))
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("decode config: %v", err)
 	}
 
