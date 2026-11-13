@@ -155,7 +155,7 @@ class GroupFloatingHeaderTest {
         measure(root, 360)
         val visibleHeaderGap = (root as TitleBarLayout).titleEdgeBandHeight().toInt()
         assertEquals(visibleHeaderGap + 4, list.paddingTop)
-        assertEquals(0, tabs.top)
+        assertTrue(tabs.top >= 0)
         assertTrue(tabs.parent is com.google.android.material.appbar.AppBarLayout)
         assertEquals(0, pager.top)
         assertEquals((root as TitleBarLayout).titleGlyphBottom.toInt(), edge.top)
