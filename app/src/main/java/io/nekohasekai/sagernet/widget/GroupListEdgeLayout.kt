@@ -82,8 +82,9 @@ class GroupListEdgeLayout @JvmOverloads constructor(
 
     private fun syncTop(list: RecyclerView) {
         val original = baseTop[list] ?: return
-        val tabs = findViewById<View>(R.id.group_tab)
-        val tabInset = if (tabs?.visibility == View.VISIBLE) tabs.height else 0
+        // group_tab is part of the AppBar header now. TitleBarLayout already
+        // measures the complete header (toolbar + tabs), so adding its height
+        // here would double-pad every profile list.
         var ancestor: View? = parent as? View
         var titleInset = 0
         while (ancestor != null) {
@@ -93,7 +94,7 @@ class GroupListEdgeLayout @JvmOverloads constructor(
             }
             ancestor = ancestor.parent as? View
         }
-        val top = original + titleInset + tabInset
+        val top = original + titleInset
         if (list.paddingTop != top) {
             list.setPadding(list.paddingLeft, top, list.paddingRight, list.paddingBottom)
         }

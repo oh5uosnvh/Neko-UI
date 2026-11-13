@@ -2362,7 +2362,12 @@ class ConfigurationFragment @JvmOverloads constructor(
                                     isRestoringGroup = false
                                     schedulePageRequest()
                                 }
-                                val hideTab = groupList.size < 2
+                                // Keep the current group-name control visible even
+                                // when only one configuration group exists. Hiding
+                                // the tab strip for a single group removed the only
+                                // visible group name from the top bar (and made the
+                                // page look like an unscoped global list).
+                                val hideTab = groupList.isEmpty()
                                 tabLayout.isGone = hideTab
                                 toolbar.elevation = if (hideTab) 0F else dp2px(4).toFloat()
                                 groupPager.registerOnPageChangeCallback(updateSelectedCallback)

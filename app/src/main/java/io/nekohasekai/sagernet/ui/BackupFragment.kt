@@ -460,6 +460,7 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                     val import = LayoutImportBinding.inflate(layoutInflater)
                     if (!json.has("profiles")) {
                         import.backupConfigurations.isVisible = false
+                        import.appendBackupConfigurations.isVisible = false
                     }
                     if (!json.has("rules")) {
                         import.backupRules.isVisible = false
@@ -490,7 +491,8 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                                         json,
                                         import.backupConfigurations.isChecked,
                                         import.backupRules.isChecked,
-                                        import.backupSettings.isChecked
+                                        import.backupSettings.isChecked,
+                                        import.appendBackupConfigurations.isChecked
                                     )
                                     ProcessPhoenix.triggerRebirth(
                                         activity, Intent(activity, MainActivity::class.java)
@@ -663,6 +665,7 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                 val import = LayoutImportBinding.inflate(layoutInflater)
                 if (!json.has("profiles")) {
                     import.backupConfigurations.isVisible = false
+                    import.appendBackupConfigurations.isVisible = false
                 }
                 if (!json.has("rules")) {
                     import.backupRules.isVisible = false
@@ -687,7 +690,8 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                                     json,
                                     import.backupConfigurations.isChecked,
                                     import.backupRules.isChecked,
-                                    import.backupSettings.isChecked
+                                    import.backupSettings.isChecked,
+                                    import.appendBackupConfigurations.isChecked
                                 )
                                 triggerFullRestart(requireContext())
                             }.onFailure {
@@ -710,39 +714,82 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
         }
     }
 
+    /**
+     * Restores only entries that can be decoded and validated. One malformed
+     * custom/unknown bean must not abort the entire backup. When append is true,
+     * backup groups are added without resetting existing groups; old IDs are
+     * remapped so profiles and tag memberships remain valid.
+     */
     fun finishImport(
-        content: JSONObject, profile: Boolean, rule: Boolean, setting: Boolean
+        content: JSONObject, profile: Boolean, rule: Boolean, setting: Boolean,
+        appendConfigurations: Boolean = false,
     ) {
+        var skipped = 0
         if (profile && content.has("profiles")) {
             val profiles = mutableListOf<ProxyEntity>()
             val jsonProfiles = content.getJSONArray("profiles")
             for (i in 0 until jsonProfiles.length()) {
-                val data = Util.b64Decode(jsonProfiles[i] as String)
-                val parcel = Parcel.obtain()
-                parcel.unmarshall(data, 0, data.size)
-                parcel.setDataPosition(0)
-                profiles.add(ProxyEntity.CREATOR.createFromParcel(parcel))
-                parcel.recycle()
+                try {
+                    val data = Util.b64Decode(jsonProfiles.getString(i))
+                    val parcel = Parcel.obtain()
+                    try {
+                        parcel.unmarshall(data, 0, data.size)
+                        parcel.setDataPosition(0)
+                        profiles += ProxyEntity.CREATOR.createFromParcel(parcel)
+                    } finally { parcel.recycle() }
+                } catch (error: Throwable) {
+                    skipped++
+                    Logs.w("Skipping backup profile $i", error)
+                }
             }
             val groups = mutableListOf<ProxyGroup>()
-            val jsonGroups = content.getJSONArray("groups")
+            val jsonGroups = content.optJSONArray("groups") ?: JSONArray()
             for (i in 0 until jsonGroups.length()) {
-                val data = Util.b64Decode(jsonGroups[i] as String)
-                val parcel = Parcel.obtain()
-                parcel.unmarshall(data, 0, data.size)
-                parcel.setDataPosition(0)
-                groups.add(ProxyGroup.CREATOR.createFromParcel(parcel))
-                parcel.recycle()
+                try {
+                    val data = Util.b64Decode(jsonGroups.getString(i))
+                    val parcel = Parcel.obtain()
+                    try {
+                        parcel.unmarshall(data, 0, data.size)
+                        parcel.setDataPosition(0)
+                        groups += ProxyGroup.CREATOR.createFromParcel(parcel)
+                    } finally { parcel.recycle() }
+                } catch (error: Throwable) {
+                    skipped++
+                    Logs.w("Skipping backup group $i", error)
+                }
             }
+            val groupIds = groups.map { it.id }.toSet()
+            val validGroups = groups.distinctBy { it.id }
+            val acceptedGroups = validGroups.associateBy { it.id }
+            val acceptedProfiles = profiles.filter { it.groupId == 0L || it.groupId in groupIds }
             val tags = mutableListOf<TagGroup>()
             if (content.has("tag_groups")) {
                 val jsonTags = content.getJSONArray("tag_groups")
                 for (i in 0 until jsonTags.length()) {
-                    val item = jsonTags.getJSONObject(i)
-                    tags += TagGroup(item.getLong("id"), item.getString("name"), item.optLong("userOrder", i + 1L))
+                    try {
+                        val item = jsonTags.getJSONObject(i)
+                        val name = item.getString("name").trim()
+                        if (name.isEmpty()) throw IllegalArgumentException("empty tag name")
+                        tags += TagGroup(item.getLong("id"), name, item.optLong("userOrder", i + 1L))
+                    } catch (error: Throwable) {
+                        skipped++
+                        Logs.w("Skipping backup tag $i", error)
+                    }
                 }
             }
             val memberships = mutableListOf<TagMembership>()
+            if (content.has("tag_memberships")) {
+                val jsonMemberships = content.getJSONArray("tag_memberships")
+                for (i in 0 until jsonMemberships.length()) {
+                    try {
+                        val item = jsonMemberships.getJSONObject(i)
+                        memberships += TagMembership(item.getLong("tagId"), item.getLong("groupId"))
+                    } catch (error: Throwable) {
+                        skipped++
+                        Logs.w("Skipping backup membership $i", error)
+                    }
+                }
+            }
             val restoreExistingTagLinks = !content.has("tag_groups") && !content.has("tag_memberships")
             val existingTagLinks = if (restoreExistingTagLinks) {
                 SagerDatabase.instance.tagGroupDao().all().flatMap { tag ->
@@ -751,29 +798,59 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                     }
                 }
             } else emptyList()
-            if (content.has("tag_memberships")) {
-                val jsonMemberships = content.getJSONArray("tag_memberships")
-                for (i in 0 until jsonMemberships.length()) {
-                    val item = jsonMemberships.getJSONObject(i)
-                    memberships += TagMembership(item.getLong("tagId"), item.getLong("groupId"))
-                }
-            }
+
             SagerDatabase.instance.runInTransaction {
-                SagerDatabase.proxyDao.reset()
-                SagerDatabase.groupDao.reset()
-                SagerDatabase.groupDao.insert(groups)
-                SagerDatabase.proxyDao.insert(profiles)
-                // v1 backups have no tag data; preserve current tags when
-                // restoring an old backup. v2 with an empty tag list clears them.
+                val groupIdMap = LinkedHashMap<Long, Long>()
+                if (appendConfigurations) {
+                    acceptedGroups.values.forEach { source ->
+                        if (source.id <= 0L) return@forEach
+                        val copy = source.copy(id = 0L)
+                        groupIdMap[source.id] = SagerDatabase.groupDao.createGroup(copy)
+                    }
+                } else {
+                    if (acceptedGroups.isEmpty()) {
+                        Logs.w("Backup contains no decodable configuration groups; preserving current configuration")
+                    } else {
+                        SagerDatabase.instance.tagMembershipDao().reset()
+                        SagerDatabase.proxyDao.reset()
+                        SagerDatabase.groupDao.reset()
+                        SagerDatabase.groupDao.insert(acceptedGroups.values.toList())
+                        acceptedGroups.keys.forEach { groupIdMap[it] = it }
+                    }
+                }
+
+                val importedProfiles = acceptedProfiles.mapNotNull { source ->
+                    val newGroupId = groupIdMap[source.groupId] ?: return@mapNotNull null
+                    source.copy(id = 0L, groupId = newGroupId)
+                }
+                if (groupIdMap.isNotEmpty() && importedProfiles.isNotEmpty()) {
+                    SagerDatabase.proxyDao.insert(importedProfiles)
+                }
+
                 if (content.has("tag_groups") || content.has("tag_memberships")) {
-                    SagerDatabase.instance.tagMembershipDao().reset()
-                    SagerDatabase.instance.tagGroupDao().reset()
-                    if (tags.isNotEmpty()) SagerDatabase.instance.tagGroupDao().insertAll(tags)
-                    if (memberships.isNotEmpty()) SagerDatabase.instance.tagMembershipDao().insertAll(memberships)
-                } else if (existingTagLinks.isNotEmpty()) {
-                    // v1 backup: root groups/profiles are restored, tags remain
-                    // independent metadata and their valid links are restored.
-                    val validGroups = groups.map { it.id }.toSet()
+                    val tagIdMap = LinkedHashMap<Long, Long>()
+                    if (!appendConfigurations) SagerDatabase.instance.tagGroupDao().reset()
+                    val existingNames = SagerDatabase.instance.tagGroupDao().all().map { it.name }.toMutableSet()
+                    tags.forEach { source ->
+                        var name = source.name
+                        var suffix = 2
+                        while (!existingNames.add(name)) {
+                            name = "${source.name} ($suffix)"
+                            suffix++
+                        }
+                        val newId = SagerDatabase.instance.tagGroupDao().insert(
+                            source.copy(id = 0L, name = name)
+                        )
+                        tagIdMap[source.id] = newId
+                    }
+                    val links = memberships.mapNotNull { link ->
+                        val tagId = tagIdMap[link.tagId] ?: return@mapNotNull null
+                        val groupId = groupIdMap[link.groupId] ?: return@mapNotNull null
+                        TagMembership(tagId, groupId)
+                    }
+                    if (links.isNotEmpty()) SagerDatabase.instance.tagMembershipDao().insertAll(links)
+                } else if (!appendConfigurations && existingTagLinks.isNotEmpty()) {
+                    val validGroups = groupIdMap.values.toSet()
                     val validLinks = existingTagLinks.filter { it.groupId in validGroups }
                     if (validLinks.isNotEmpty()) SagerDatabase.instance.tagMembershipDao().insertAll(validLinks)
                 }
@@ -783,29 +860,49 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
             val rules = mutableListOf<RuleEntity>()
             val jsonRules = content.getJSONArray("rules")
             for (i in 0 until jsonRules.length()) {
-                val data = Util.b64Decode(jsonRules[i] as String)
-                val parcel = Parcel.obtain()
-                parcel.unmarshall(data, 0, data.size)
-                parcel.setDataPosition(0)
-                rules.add(ParcelizeBridge.createRule(parcel))
-                parcel.recycle()
+                try {
+                    val data = Util.b64Decode(jsonRules.getString(i))
+                    val parcel = Parcel.obtain()
+                    try {
+                        parcel.unmarshall(data, 0, data.size)
+                        parcel.setDataPosition(0)
+                        rules += ParcelizeBridge.createRule(parcel)
+                    } finally { parcel.recycle() }
+                } catch (error: Throwable) {
+                    skipped++
+                    Logs.w("Skipping backup rule $i", error)
+                }
             }
-            SagerDatabase.rulesDao.reset()
-            SagerDatabase.rulesDao.insert(rules)
+            // If every entry is unknown/corrupt, keep the current rules instead
+            // of turning a partial import into a destructive clear.
+            if (rules.isNotEmpty()) {
+                SagerDatabase.rulesDao.reset()
+                SagerDatabase.rulesDao.insert(rules)
+            }
         }
         if (setting && content.has("settings")) {
             val settings = mutableListOf<KeyValuePair>()
             val jsonSettings = content.getJSONArray("settings")
             for (i in 0 until jsonSettings.length()) {
-                val data = Util.b64Decode(jsonSettings[i] as String)
-                val parcel = Parcel.obtain()
-                parcel.unmarshall(data, 0, data.size)
-                parcel.setDataPosition(0)
-                settings.add(KeyValuePair.CREATOR.createFromParcel(parcel))
-                parcel.recycle()
+                try {
+                    val data = Util.b64Decode(jsonSettings.getString(i))
+                    val parcel = Parcel.obtain()
+                    try {
+                        parcel.unmarshall(data, 0, data.size)
+                        parcel.setDataPosition(0)
+                        settings += KeyValuePair.CREATOR.createFromParcel(parcel)
+                    } finally { parcel.recycle() }
+                } catch (error: Throwable) {
+                    skipped++
+                    Logs.w("Skipping backup setting $i", error)
+                }
             }
-            PublicDatabase.kvPairDao.reset()
-            PublicDatabase.kvPairDao.insert(settings)
+            // Preserve current settings when the backup contains no decodable
+            // entries; unsupported custom keys must not wipe the database.
+            if (settings.isNotEmpty()) {
+                PublicDatabase.kvPairDao.reset()
+                PublicDatabase.kvPairDao.insert(settings)
+            }
         }
     }
 

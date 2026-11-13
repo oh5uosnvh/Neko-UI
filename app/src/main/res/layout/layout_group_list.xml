@@ -23,28 +23,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
-        <io.nekohasekai.sagernet.widget.GroupPillTabLayout
-            android:id="@+id/group_tab"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_gravity="top"
-            android:background="@android:color/transparent"
-            android:elevation="0dp"
-            android:visibility="gone"
-            app:tabBackground="@android:color/transparent"
-            app:tabIndicatorColor="@android:color/transparent"
-            app:tabIndicatorHeight="0dp"
-            app:tabIndicatorFullWidth="false"
-            app:tabMinWidth="0dp"
-            app:tabMode="scrollable"
-            app:tabPaddingStart="4dp"
-            app:tabPaddingEnd="4dp"
-            app:tabPaddingTop="7dp"
-            app:tabPaddingBottom="7dp"
-            app:tabRippleColor="@android:color/transparent"
-            app:tabSelectedTextColor="?android:attr/textColorPrimary"
-            app:tabTextColor="?android:attr/textColorPrimary"
-            app:tabUnboundedRipple="false" />
+
     </io.nekohasekai.sagernet.widget.GroupListEdgeLayout>
 
     <include

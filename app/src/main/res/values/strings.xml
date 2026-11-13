@@ -599,6 +599,8 @@
 
     <string name="backup">Backup</string>
     <string name="backup_groups_and_configurations">Groups and configurations</string>
+    <string name="backup_append_configurations">Append backup configuration groups only</string>
+    <string name="backup_partial_import_skipped">Skipped %1$d unsupported or damaged entries; the remaining entries were imported.</string>
     <string name="backup_rules">Routing rules</string>
     <string name="backup_settings">Settings</string>
     <string name="backup_summary">If the routing settings are not backed up with configurations,

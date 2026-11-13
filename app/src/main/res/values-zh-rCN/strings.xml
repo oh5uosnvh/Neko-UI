@@ -498,6 +498,8 @@
     <string name="tools_network">网络</string>
     <string name="backup">备份</string>
     <string name="backup_groups_and_configurations">分组和配置</string>
+    <string name="backup_append_configurations">仅追加导入备份文件中的配置分组</string>
+    <string name="backup_partial_import_skipped">已跳过 %1$d 个不支持或损坏的项目，其余项目已导入。</string>
     <string name="backup_import">导入</string>
     <string name="backup_summary">如果路由规则不与配置一起备份，则自定义出站将丢失。</string>
     <string name="backup_settings">设置</string>

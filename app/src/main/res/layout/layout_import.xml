@@ -14,6 +14,14 @@
         android:textAppearance="?attr/textAppearanceSubtitle2" />
 
     <CheckBox
+        android:id="@+id/append_backup_configurations"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:checked="false"
+        android:text="@string/backup_append_configurations"
+        android:textAppearance="?attr/textAppearanceSubtitle2" />
+
+    <CheckBox
         android:id="@+id/backup_rules"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
