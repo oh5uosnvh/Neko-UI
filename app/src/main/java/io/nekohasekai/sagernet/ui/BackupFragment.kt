@@ -761,7 +761,13 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
             val groupIds = groups.map { it.id }.toSet()
             val validGroups = groups.distinctBy { it.id }
             val acceptedGroups = validGroups.associateBy { it.id }
-            val acceptedProfiles = profiles.filter { it.groupId == 0L || it.groupId in groupIds }
+            val acceptedProfiles = profiles.filter { profile ->
+                if (profile.groupId != 0L && profile.groupId !in groupIds) return@filter false
+                runCatching { profile.requireBean(); profile.displayName() }.onFailure {
+                    skipped++
+                    Logs.w("Skipping unsupported backup profile", it)
+                }.isSuccess
+            }
             val tags = mutableListOf<TagGroup>()
             if (content.has("tag_groups")) {
                 val jsonTags = content.getJSONArray("tag_groups")

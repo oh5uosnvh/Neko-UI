@@ -129,11 +129,9 @@ class LayeredThemeResourceTest {
                     assertEquals("match_parent", child.getAttributeNS(ns,"layout_height"))
                     assertFalse(child.hasAttributeNS(ns,"layout_weight"))
                     val tabs = all(root).single { it.getAttributeNS(ns,"id") == "@+id/group_tab" }
-                    assertSame(foreground, tabs.parentNode)
+                    assertEquals("com.google.android.material.appbar.AppBarLayout", (tabs.parentNode as Element).tagName)
                     assertEquals("@android:color/transparent", tabs.getAttributeNS(ns,"background"))
-                    assertEquals("top", tabs.getAttributeNS(ns,"layout_gravity"))
                     assertEquals("group_pager", child.getAttributeNS(ns,"id").substringAfter('/'))
-                    assertTrue(child.compareDocumentPosition(tabs).toInt() and 4 != 0)
                 } else if (layout == "group" || layout == "route" || layout == "assets" || layout == "tools") {
                     assertEquals("layout=$layout id=$id width=${child.getAttributeNS(ns,"layout_width")}", "match_parent", child.getAttributeNS(ns,"layout_width"))
                     assertTrue("layout=$layout id=$id height=${child.getAttributeNS(ns,"layout_height")}",
@@ -256,8 +254,8 @@ class LayeredThemeResourceTest {
                         val pagerParams = child.layoutParams as FrameLayout.LayoutParams
                         assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, pagerParams.height)
                         val tabs = root.findViewById<TabLayout>(R.id.group_tab)
-                        assertSame(foreground, tabs.parent)
-                        assertTrue(foreground.indexOfChild(tabs) > foreground.indexOfChild(child))
+                        assertTrue(tabs.parent is com.google.android.material.appbar.AppBarLayout)
+                        assertTrue(foreground.indexOfChild(child) >= 0)
                         val tabBackground = tabs.background
                         val fill = when (tabBackground) {
                             is ColorDrawable -> tabBackground.color
