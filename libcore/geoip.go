@@ -22,6 +22,15 @@ func (g *geoip) Open(path string) error {
 	return err
 }
 
+func (g *geoip) Close() error {
+	if g.geoipReader == nil {
+		return nil
+	}
+	err := g.geoipReader.Close()
+	g.geoipReader = nil
+	return err
+}
+
 func (g *geoip) Rules(countryCode string) ([]option.HeadlessRule, error) {
 	networks := g.geoipReader.Networks(maxminddb.SkipAliasedNetworks)
 	countryMap := make(map[string][]*net.IPNet)
@@ -64,7 +73,7 @@ func init() {
 		if err := g.Open(filepath.Join(externalAssetsPath, "geoip.db")); err != nil {
 			return nil, err
 		}
-		defer g.geoipReader.Close()
+		defer g.Close()
 		return g.Rules(name)
 	}
 }

@@ -63,8 +63,6 @@ jobs:
         env:
           SING_BOX_CLONE_TOKEN: ${{ secrets.GH_PAT }}
         run: |
-          env:
-            SING_BOX_CLONE_TOKEN: ${{ secrets.GH_PAT }}
           bash buildScript/lib/core/get_source.sh
           cd libcore
           # TestRealTCPCancellationClosesBlockedConnection 依赖真实 DNS TCP 出网，
@@ -72,6 +70,13 @@ jobs:
           go test -race -count=1 -skip 'TestRealTCPCancellationClosesBlockedConnection' ./dnspolicy
           go test -count=1 geo_validate.go geo_validate_test.go
           go test -tags with_utls -count=1 vmess_probe_contract_test.go
+      - name: Verify atomic routing snapshot and failure rollback
+        run: |
+          cd ../sing-box
+          go test -race -count=1 ./adapter -run RuntimeRouting
+          go test -race -count=1 . -run RuntimeRouting
+          go test -race -count=1 ./route/rule -run 'TestLocalRuleSet(Geo|Ordinary)'
+          go test -race -count=1 . -run TestBoxNewStartsAndClosesGeoAliasRuleSets
       - name: Build libcore
         run: ./run lib core
       - uses: actions/upload-artifact@v4

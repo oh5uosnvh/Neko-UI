@@ -20,6 +20,15 @@ func (g *geosite) Open(path string) error {
 	return err
 }
 
+func (g *geosite) Close() error {
+	if g.geositeReader == nil {
+		return nil
+	}
+	err := g.geositeReader.Close()
+	g.geositeReader = nil
+	return err
+}
+
 func (g *geosite) Rules(code string) ([]option.HeadlessRule, error) {
 	sourceSet, err := g.geositeReader.Read(code)
 	if err != nil {
@@ -49,6 +58,7 @@ func init() {
 		if err := g.Open(filepath.Join(externalAssetsPath, "geosite.db")); err != nil {
 			return nil, err
 		}
+		defer g.Close()
 		return g.Rules(name)
 	}
 }
