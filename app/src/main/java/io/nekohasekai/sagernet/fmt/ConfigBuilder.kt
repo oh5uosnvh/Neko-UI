@@ -242,7 +242,6 @@ fun buildConfig(
     val enableDnsRouting = DataStore.enableDnsRouting
     val useFakeDns = DataStore.enableFakeDns && !forTest
     val needSniff = DataStore.trafficSniffing > 0
-    val needSniffOverride = DataStore.trafficSniffing == 2
     val externalIndexMap = ArrayList<IndexEntity>()
     val selectorFingerprintParts = mutableListOf<String>()
     val selectorDirectChoices = linkedMapOf<String, String>()
@@ -323,25 +322,23 @@ fun buildConfig(
                     TunImplementation.SYSTEM -> "system"
                     else -> "mixed"
                 }
-                endpoint_independent_nat = true
                 mtu = DataStore.mtu
-                domain_strategy = genDomainStrategy(DataStore.resolveDestination)
                 auto_route = true
                 strict_route = DataStore.strictRoute
-                sniff = needSniff
-                sniff_override_destination = needSniffOverride
                 when (ipv6Mode) {
                     IPv6Mode.DISABLE -> {
-                        inet4_address = listOf(VpnService.PRIVATE_VLAN4_CLIENT + "/28")
+                        _hack_config_map["address"] = listOf(VpnService.PRIVATE_VLAN4_CLIENT + "/28")
                     }
 
                     IPv6Mode.ONLY -> {
-                        inet6_address = listOf(VpnService.PRIVATE_VLAN6_CLIENT + "/126")
+                        _hack_config_map["address"] = listOf(VpnService.PRIVATE_VLAN6_CLIENT + "/126")
                     }
 
                     else -> {
-                        inet4_address = listOf(VpnService.PRIVATE_VLAN4_CLIENT + "/28")
-                        inet6_address = listOf(VpnService.PRIVATE_VLAN6_CLIENT + "/126")
+                        _hack_config_map["address"] = listOf(
+                            VpnService.PRIVATE_VLAN4_CLIENT + "/28",
+                            VpnService.PRIVATE_VLAN6_CLIENT + "/126"
+                        )
                     }
                 }
             })
@@ -350,9 +347,6 @@ fun buildConfig(
                 tag = TAG_MIXED
                 listen = bind
                 listen_port = DataStore.mixedPort
-                domain_strategy = genDomainStrategy(DataStore.resolveDestination)
-                sniff = needSniff
-                sniff_override_destination = needSniffOverride
                 if (DataStore.mixedInboundHasAuth) {
                     users = listOf(User().also { u ->
                         u.username = DataStore.mixedUsername
@@ -381,6 +375,18 @@ fun buildConfig(
 
             // 添加并发拨号设置
              concurrent_dial = DataStore.concurrentDial
+        }
+
+        // Preserve inbound processing before outbound routing without removed
+        // 1.12 inbound fields. Applies to test configs as well as VPN configs.
+        if (needSniff) {
+            route.rules.add(Rule_DefaultOptions().apply { action = "sniff" })
+        }
+        if (DataStore.resolveDestination) {
+            route.rules.add(Rule_DefaultOptions().apply {
+                action = "resolve"
+                _hack_config_map["strategy"] = genDomainStrategy(true)
+            })
         }
 
         // returns outbound tag

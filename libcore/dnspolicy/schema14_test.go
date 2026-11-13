@@ -21,7 +21,11 @@ import (
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/direct"
 	"github.com/sagernet/sing-box/protocol/group"
+	httpInbound "github.com/sagernet/sing-box/protocol/http"
+	mixed "github.com/sagernet/sing-box/protocol/mixed"
+	redirect "github.com/sagernet/sing-box/protocol/redirect"
 	"github.com/sagernet/sing-box/protocol/socks"
+	tunInbound "github.com/sagernet/sing-box/protocol/tun"
 	"github.com/sagernet/sing/service"
 )
 
@@ -39,7 +43,15 @@ func schema14Context() context.Context {
 	direct.RegisterOutbound(or)
 	group.RegisterSelector(or)
 	socks.RegisterOutbound(or)
-	return service.ContextWithDefaultRegistry(box.Context(context.Background(), inbound.NewRegistry(), or,
+	ir := inbound.NewRegistry()
+	mixed.RegisterInbound(ir)
+	tunInbound.RegisterInbound(ir)
+	socks.RegisterInbound(ir)
+	httpInbound.RegisterInbound(ir)
+	direct.RegisterInbound(ir)
+	redirect.RegisterRedirect(ir)
+	redirect.RegisterTProxy(ir)
+	return service.ContextWithDefaultRegistry(box.Context(context.Background(), ir, or,
 		endpoint.NewRegistry(), dr, boxservice.NewRegistry(), certificate.NewRegistry()))
 }
 
@@ -139,6 +151,12 @@ func TestConfigBuilderDNS14Fixtures(t *testing.T) {
 			}
 			if len(app["dns"]) == 0 || len(app["outbounds"]) == 0 {
 				t.Fatal("missing App DNS/outbound graph")
+			}
+			// Validate the entire App document before the DNS startup projection.
+			// Excluding inbounds here previously hid removed sniff/domain fields.
+			var fullOptions option.Options
+			if err := fullOptions.UnmarshalJSONContext(schema14Context(), content); err != nil {
+				t.Fatal("FULL App config 1.14 decode:", err)
 			}
 			var dns map[string]json.RawMessage
 			if err = json.Unmarshal(app["dns"], &dns); err != nil {
