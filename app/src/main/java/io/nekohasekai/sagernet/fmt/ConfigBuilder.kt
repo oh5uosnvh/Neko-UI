@@ -1049,7 +1049,8 @@ fun buildConfig(
             val endpoint = SubscriptionDns.endpoint(it ?: throw Exception("No direct DNS, check your settings!"))
             dns.servers.add(DNSServerOptions().apply {
                 _hack_config_map.putAll(endpoint.serverOptions("dns-direct", "dns-local"))
-                detour = TAG_DIRECT
+                // Typed DNS transports dial directly by default. An explicit
+                // detour to the empty direct outbound is rejected by core 1.14.
                 if (endpoint.scheme != "local") {
                     domain_resolver = mapOf("server" to "dns-local", "strategy" to
                         autoDnsDomainStrategy(SingBoxOptionsUtil.domainStrategy("dns-direct")))
