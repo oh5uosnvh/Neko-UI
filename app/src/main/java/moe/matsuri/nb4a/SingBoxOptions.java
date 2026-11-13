@@ -312,8 +312,6 @@ public class SingBoxOptions {
 
         public Boolean reverse_mapping;
 
-        public DNSFakeIPOptions fakeip;
-
         // Generate note: nested type DNSClientOptions
         public String strategy;
 
@@ -321,27 +319,36 @@ public class SingBoxOptions {
 
         public Boolean disable_expire;
 
-        public Boolean independent_cache;
-
         // End of public DNSClientOptions ;
 
     }
 
     public static class DNSServerOptions extends SingBoxOption {
 
+        public String type;
+
         public String tag;
 
-        public String address;
+        public String server;
 
-        public String address_resolver;
+        public Integer server_port;
 
-        public String address_strategy;
+        // sing-box accepts a resolver tag or {server, strategy, ...}.
+        public Object domain_resolver;
 
-        public Long address_fallback_delay;
+        public String domain_strategy;
 
-        public String strategy;
+        public String path;
 
         public String detour;
+
+        public OutboundTLSOptions tls;
+
+        public String inet4_range;
+
+        public String inet6_range;
+
+        public Map<String, List<String>> predefined;
 
     }
 
@@ -352,18 +359,6 @@ public class SingBoxOptions {
         public Boolean disable_cache;
 
         public Boolean disable_expire;
-
-        public Boolean independent_cache;
-
-    }
-
-    public static class DNSFakeIPOptions extends SingBoxOption {
-
-        public Boolean enabled;
-
-        public String inet4_range;
-
-        public String inet6_range;
 
     }
 
@@ -1068,6 +1063,8 @@ public class SingBoxOptions {
         public List<Rule> rules;
 
         public List<RuleSet> rule_set;
+
+        public Map<String, Object> default_domain_resolver;
 
         @SerializedName("final")
         public String final_;
@@ -4608,6 +4605,13 @@ public class SingBoxOptions {
         public Boolean invert;
 
         public String server;
+
+        public String action;
+
+        public String rcode;
+
+        // 1.14 rule actions carry DNS strategy; legacy server strategy is not emitted.
+        public String strategy;
 
         public Boolean disable_cache;
 

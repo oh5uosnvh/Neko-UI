@@ -562,7 +562,9 @@ public final class SubscriptionDns {
         public int port;
         public Map<String, Object> serverOptions(String tag, String bootstrapTag) {
             Map<String, Object> result = new LinkedHashMap<>();
-            result.put("type", scheme.equals("tcp") || scheme.equals("tls") ? "neko-" + scheme : scheme);
+            // sing-box 1.14 removed the legacy address-based DNS server form.
+            // Retain our deadline/cancellation-aware TCP and DoT implementations.
+            result.put("type", scheme.equals("tcp") ? "neko-tcp" : scheme.equals("tls") ? "neko-tls" : scheme);
             result.put("tag", tag);
             if (!scheme.equals("local")) {
                 result.put("server", host); result.put("server_port", port);

@@ -24,6 +24,12 @@ android {
     }
     testOptions {
         unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            // Gradle -D properties do not automatically reach test JVMs.
+            System.getProperty("neko.dns.fixtureDir")?.let { directory ->
+                it.systemProperty("neko.dns.fixtureDir", directory)
+            }
+        }
     }
     buildFeatures {
         buildConfig = true

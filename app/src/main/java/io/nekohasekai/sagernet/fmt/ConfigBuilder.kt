@@ -296,7 +296,6 @@ fun buildConfig(
         dns = DNSOptions().apply {
             servers = mutableListOf()
             rules = mutableListOf()
-            independent_cache = true
         }
 
         fun autoDnsDomainStrategy(s: String): String? {
@@ -371,6 +370,14 @@ fun buildConfig(
             override_android_vpn = true
             rules = mutableListOf()
             rule_set = mutableListOf()
+
+            // Applies to URL tests too: outbound hostname lookups must never recurse
+            // through dns.final (the application/remote resolver).
+            default_domain_resolver = mapOf(
+                "server" to "dns-direct",
+                "strategy" to genDomainStrategy(true),
+                "disable_cache" to buildSelector,
+            )
 
             // 添加并发拨号设置
              concurrent_dial = DataStore.concurrentDial
@@ -920,8 +927,8 @@ fun buildConfig(
                         -2L -> {
                             if (shouldAddDnsRule) {
                                 userDNSRuleList += makeDnsRuleObj().apply {
-                                    server = "dns-block"
-                                    disable_cache = true
+                                    action = "predefined"
+                                    rcode = "NOERROR"
                                 }
                             }
 
@@ -931,8 +938,8 @@ fun buildConfig(
                                     if (tag.startsWith("ruleset-") && tagInfo != null && !tagInfo.second) {
                                         userDNSRuleList += DNSRule_DefaultOptions().apply {
                                             rule_set = mutableListOf(tag)
-                                            server = "dns-block"
-                                            disable_cache = true
+                                            action = "predefined"
+                                            rcode = "NOERROR"
                                         }
                                     }
                                 }
@@ -1022,53 +1029,57 @@ fun buildConfig(
         }
 
         dns.servers.add(DNSServerOptions().apply {
-            address = "rcode://success"
-            tag = "dns-block"
-        })
-
-        dns.servers.add(DNSServerOptions().apply {
-            address = "local"
+            type = "local"
             tag = "dns-local"
-            detour = TAG_DIRECT
         })
 
         if (buildSelector) {
-            // Every node resolver exists before the dispatcher and before legacy remote
-            // address resolution. No node bootstrap depends on the dynamic dns-direct tag.
+            // Node bootstrap graphs precede the dispatcher. No node bootstrap
+            // depends on the dynamic dns-direct tag.
             dns.servers.addAll(selectorDns.servers)
             dns.servers.addAll(subscriptionDns.servers)
             subscriptionDns.servers.clear()
             dns.servers.add(selectorDns.dispatch("dns-direct", selectorDirectChoices))
         } else if (subscriptionDirectDns.isNotEmpty()) {
             subscriptionDns.direct(subscriptionDirectDns)
-            // Legacy remote DNS resolves its address_resolver during construction, not Start.
-            // Materialize dns-direct before dns-remote so a group override is already available.
+            // Materialize the direct policy before remote domain bootstrap uses it.
             dns.servers.addAll(subscriptionDns.servers)
             subscriptionDns.servers.clear()
         } else directDNS.firstOrNull().let {
+            val endpoint = SubscriptionDns.endpoint(it ?: throw Exception("No direct DNS, check your settings!"))
             dns.servers.add(DNSServerOptions().apply {
-                address = it ?: throw Exception("No direct DNS, check your settings!")
-                tag = "dns-direct"
+                _hack_config_map.putAll(endpoint.serverOptions("dns-direct", "dns-local"))
                 detour = TAG_DIRECT
-                address_resolver = "dns-local"
-                strategy = autoDnsDomainStrategy(SingBoxOptionsUtil.domainStrategy(tag))
+                if (endpoint.scheme != "local") {
+                    domain_resolver = mapOf("server" to "dns-local", "strategy" to
+                        autoDnsDomainStrategy(SingBoxOptionsUtil.domainStrategy("dns-direct")))
+                    _hack_config_map.remove("domain_resolver")
+                }
             })
         }
 
         remoteDns.firstOrNull().let {
             // Always use direct DNS for urlTest
-            if (!forTest) dns.servers.add(DNSServerOptions().apply {
-                address = it ?: throw Exception("No remote DNS, check your settings!")
-                tag = "dns-remote"
-                address_resolver = "dns-direct"
-                strategy = autoDnsDomainStrategy(SingBoxOptionsUtil.domainStrategy(tag))
-            })
+            if (!forTest) {
+                val endpoint = SubscriptionDns.endpoint(it ?: throw Exception("No remote DNS, check your settings!"))
+                dns.servers.add(DNSServerOptions().apply {
+                    _hack_config_map.putAll(endpoint.serverOptions("dns-remote", "dns-direct"))
+                    // Legacy remote DNS used the default proxy outbound. New
+                    // transports otherwise silently change that to a direct dial.
+                    detour = mainProxyTag
+                    if (endpoint.scheme != "local") {
+                        domain_resolver = mapOf("server" to "dns-direct", "strategy" to
+                            autoDnsDomainStrategy(SingBoxOptionsUtil.domainStrategy("dns-remote")))
+                        _hack_config_map.remove("domain_resolver")
+                    }
+                })
+            }
         }
         if (dnsHosts.isNotEmpty()) {
             dns.servers.add(DNSServerOptions().apply {
                 tag = TAG_DNS_HOSTS
-                _hack_config_map["type"] = "hosts"
-                _hack_config_map["predefined"] = dnsHosts
+                type = "hosts"
+                predefined = dnsHosts
             })
         }
 
@@ -1107,15 +1118,11 @@ fun buildConfig(
             })
             // FakeDNS obj
             if (useFakeDns) {
-                dns.fakeip = DNSFakeIPOptions().apply {
-                    enabled = true
+                dns.servers.add(DNSServerOptions().apply {
+                    type = "fakeip"
+                    tag = "dns-fake"
                     inet4_range = "198.18.0.0/15"
                     inet6_range = "fc00::/18"
-                }
-                dns.servers.add(DNSServerOptions().apply {
-                    address = "fakeip"
-                    tag = "dns-fake"
-                    strategy = "ipv4_only"
                 })
                 dns.rules.add(DNSRule_DefaultOptions().apply {
                     inbound = listOf(deviceInboundTag)
@@ -1127,14 +1134,11 @@ fun buildConfig(
             if (dnsHosts.isNotEmpty()) {
                 dns.rules.add(0, DNSRule_DefaultOptions().apply {
                     server = TAG_DNS_HOSTS
-                    _hack_config_map["ip_accept_any"] = true
+                    // Exact known hosts need no legacy response/address filter.
+                    domain = dnsHosts.keys.toList()
                 })
             }
-            // avoid loopback
-            dns.rules.add(0, DNSRule_DefaultOptions().apply {
-                outbound = mutableListOf("any")
-                server = "dns-direct"
-            })
+
             // force bypass (always top DNS rule)
             if (domainListDNSDirectForce.isNotEmpty()) {
                 dns.rules.add(0, DNSRule_DefaultOptions().apply {

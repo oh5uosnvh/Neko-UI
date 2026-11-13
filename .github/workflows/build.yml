@@ -89,6 +89,29 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: oh5uosnvh/Nekobox-MG
+          ref: 9dfda13c6a51009a1de2ea4a818fb8b174577b35
+          path: mg
+          token: ${{ secrets.GH_PAT }}
+          persist-credentials: false
+          sparse-checkout: |
+            Neko-shanlian
+            Neko-viewTurbo
+            Neko-fastup
+            Neko-oppa
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.10'
+      - name: Stage pinned protocol modules at go.mod replacement paths
+        run: |
+          set -euo pipefail
+          cp -a mg/Neko-shanlian ../sing-anytls-shanlian
+          cp -a mg/Neko-viewTurbo ../sing-shadowsocks2-vt
+          cp -a mg/Neko-fastup ../fastup-mod
+          cp -a mg/Neko-oppa ../oppa-mod
+          python3 buildScript/lib/core/patch_protocol_modules.py ../oppa-mod
       - uses: actions/download-artifact@v4
         with:
           name: libcore
@@ -113,6 +136,7 @@ jobs:
           sparse-checkout-cone-mode: false
       - name: Build candidate APKs
         env:
+          SING_BOX_CLONE_TOKEN: ${{ secrets.GH_PAT }}
           APP_VERSION_NAME: ${{ inputs.release_tag }}
           APP_PRE_VERSION_NAME: ${{ inputs.release_tag }}
           APP_VERSION_CODE: ${{ inputs.version_code }}
@@ -166,6 +190,8 @@ jobs:
             -o "$compiler_cache/kotlin-compiler-embeddable-2.0.21.pom"
           echo "bd4656a46ec418252e5bc5e1c20eb2029fb2a8e0e3cc94eeddfac7e87c8cd5b6  $compiler_cache/kotlin-compiler-embeddable-2.0.21.pom" | sha256sum -c -
           ./gradlew --no-daemon app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.group.*' --tests 'io.nekohasekai.sagernet.ui.*' --tests 'io.nekohasekai.sagernet.database.*' --tests 'io.nekohasekai.sagernet.fmt.*'
+          bash buildScript/lib/core/get_source.sh
+          bash buildScript/check-dns14.sh
           ./gradlew --no-daemon app:assemblePreviewRelease
           mkdir -p release
           shopt -s nullglob
