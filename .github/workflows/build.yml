@@ -73,6 +73,8 @@ jobs:
           cd ../sing-box
           go test -race -count=1 ./adapter -run RuntimeRouting
           go test -race -count=1 . -run RuntimeRouting
+          go test -race -count=1 ./route/rule -run 'TestLocalRuleSet(Geo|Ordinary)'
+          go test -race -count=1 . -run TestBoxNewStartsAndClosesGeoAliasRuleSets
       - name: Build libcore
         run: ./run lib core
       - uses: actions/upload-artifact@v4
