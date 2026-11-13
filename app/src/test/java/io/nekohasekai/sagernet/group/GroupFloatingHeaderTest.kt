@@ -153,7 +153,8 @@ class GroupFloatingHeaderTest {
         GroupTabPill.bindTab(tab, "Bitz Net")
         tabs.addTab(tab)
         measure(root, 360)
-        assertEquals(titleGap + 4, list.paddingTop)
+        val visibleHeaderGap = (root as TitleBarLayout).titleEdgeBandHeight().toInt()
+        assertEquals(visibleHeaderGap + 4, list.paddingTop)
         assertEquals(0, tabs.top)
         assertTrue(tabs.parent is com.google.android.material.appbar.AppBarLayout)
         assertEquals(0, pager.top)
@@ -161,7 +162,8 @@ class GroupFloatingHeaderTest {
         assertEquals(131, list.paddingBottom)
         tabs.visibility = View.GONE
         measure(root, 360)
-        assertEquals(titleGap + 4, list.paddingTop)
+        val hiddenHeaderGap = (root as TitleBarLayout).titleEdgeBandHeight().toInt()
+        assertEquals(hiddenHeaderGap + 4, list.paddingTop)
         assertEquals(131, list.paddingBottom)
     }
 }
