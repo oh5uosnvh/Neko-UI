@@ -6,14 +6,16 @@ import (
 	"fmt"
 	"io"
 	"libcore/device"
+	"libcore/probe"
 	"log"
+	"net/http"
 	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/matsuridayo/libneko/protect_server"
-	"github.com/matsuridayo/libneko/speedtest"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/boxapi"
 	"github.com/sagernet/sing-box/experimental/libbox/platform"
@@ -71,6 +73,7 @@ type BoxInstance struct {
 	access sync.Mutex
 
 	*box.Box
+	ctx    context.Context
 	cancel context.CancelFunc
 	state  int
 
@@ -95,6 +98,7 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 	var options option.Options
 	err = options.UnmarshalJSONContext(ctx, []byte(config))
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("decode config: %v", err)
 	}
 
@@ -111,6 +115,7 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 
 	b = &BoxInstance{
 		Box:          instance,
+		ctx:          ctx,
 		cancel:       cancel,
 		pauseManager: service.FromContext[pause.Manager](ctx),
 	}
@@ -248,23 +253,36 @@ func (b *BoxInstance) SelectorState() string {
 
 func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err error) {
 	defer device.DeferPanicToError("box.UrlTest", func(err_ error) { err = err_ })
+	if i == nil {
+		i = mainInstance
+	}
+	ctx := context.Background()
+	var instance *box.Box
 	var connectionTracker adapter.ConnectionTracker
-	// test i
 	if i != nil {
+		i.access.Lock()
+		if i.state != 1 {
+			i.access.Unlock()
+			return 0, errors.New("probe core is not running")
+		}
+		instance = i.Box
+		if i.ctx != nil {
+			ctx = i.ctx
+		}
 		if i.v2api != nil {
 			connectionTracker = i.v2api.StatsService()
 		}
-		return speedtest.UrlTest(boxapi.CreateProxyHttpClient(i.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
+		i.access.Unlock()
 	}
-	// test direct
-	if mainInstance == nil {
-		return speedtest.UrlTest(boxapi.CreateProxyHttpClient(nil, nil), link, timeout, speedtest.UrlTestStandard_RTT)
+	// Keep the proxy's deterministic dial behavior. The owning Box cancellation
+	// now aborts the HTTP request itself, including read/header waits.
+	ctx = context.WithValue(ctx, "nb4a_no_concurrent_dial", true)
+	client := boxapi.CreateProxyHttpClient(instance, connectionTracker)
+	if transport, ok := client.Transport.(*http.Transport); ok {
+		transport.TLSHandshakeTimeout = time.Duration(timeout) * time.Millisecond
+		transport.ResponseHeaderTimeout = 0 // each request owns its budget
 	}
-	// test mainInstance
-	if mainInstance.v2api != nil {
-		connectionTracker = mainInstance.v2api.StatsService()
-	}
-	return speedtest.UrlTest(boxapi.CreateProxyHttpClient(mainInstance.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
+	return probe.RTT(ctx, client, link, time.Duration(timeout)*time.Millisecond)
 }
 
 var protectCloser io.Closer

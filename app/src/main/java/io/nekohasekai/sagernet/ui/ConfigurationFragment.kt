@@ -125,6 +125,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -1751,7 +1752,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                     latencyOverlay()?.running(0, profilesList.size, 0)
                 }
             }
-            repeat(DataStore.connectionTestConcurrent) {
+            repeat(io.nekohasekai.sagernet.bg.LatencyProbePolicy.workers(
+                DataStore.connectionTestConcurrent, profilesList.size)) {
                 testJobs.add(launch(Dispatchers.IO) {
                     while (isActive) {
                         val profile = profiles.poll() ?: break
@@ -1875,10 +1877,12 @@ class ConfigurationFragment @JvmOverloads constructor(
                 runOnMainDispatcher { if (test.ownsSession()) latencyOverlay()?.empty(emptyLatencyMessage(request.scope)) }
                 return@launch
             }
-            testPool = Executors.newFixedThreadPool(DataStore.connectionTestConcurrent.coerceIn(1, 16)).asCoroutineDispatcher()
+            val workers = io.nekohasekai.sagernet.bg.LatencyProbePolicy.workers(
+                DataStore.connectionTestConcurrent, profilesList.size)
+            testPool = Executors.newFixedThreadPool(workers).asCoroutineDispatcher()
+            val initialization = Semaphore(io.nekohasekai.sagernet.bg.LatencyProbePolicy.INITIALIZATION_CONCURRENCY)
             test.proxyN = profilesList.size
             test.targetIds.addAll(profilesList.map { it.id })
-            val profiles = ConcurrentLinkedQueue(profilesList)
             activeLatencyIds.addAll(profilesList.map { it.id }); profilesList.forEach { it.status = 0 }
             cardLatencySession.begin(profilesList.map { it.id }, generation)
             onMainDispatcher {
@@ -1887,20 +1891,35 @@ class ConfigurationFragment @JvmOverloads constructor(
                     latencyOverlay()?.running(0, profilesList.size, 0)
                 }
             }
-            repeat(DataStore.connectionTestConcurrent) {
-                testJobs.add(launch(Dispatchers.IO) {
-                    val urlTest = UrlTest(testPool!!)
-                    while (isActive) {
-                        val profile = profiles.poll() ?: break
-                        if (!isActive) break
-                        try { profile.status = 1; profile.ping = urlTest.doTest(profile) }
-                        catch (e: PluginManager.PluginNotFoundException) { profile.status = 2; profile.error = e.readableMessage }
-                        catch (e: Exception) { profile.status = 3; profile.error = e.readableMessage }
-                        test.update(profile)
+            val urlTest = UrlTest(testPool!!, initialization)
+            io.nekohasekai.sagernet.bg.runLatencyProbeBatch(
+                targets = profilesList,
+                concurrency = workers,
+                probe = { profile ->
+                    val started = SystemClock.elapsedRealtime()
+                    try {
+                        urlTest.doTest(profile).also {
+                            Logs.i("latency_probe node=${profile.id} elapsed_ms=${SystemClock.elapsedRealtime() - started} rtt_ms=$it")
+                        }
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        Logs.i("latency_probe node=${profile.id} elapsed_ms=${SystemClock.elapsedRealtime() - started} failed=true")
+                        throw failure
                     }
-                })
-            }
-            testJobs.joinAll(); testPool?.close(); test.finish(false); test.flushPending()
+                },
+                publish = { profile, result ->
+                    result.fold(
+                        onSuccess = { latency -> profile.status = 1; profile.ping = latency; profile.error = "" },
+                        onFailure = { failure ->
+                            profile.status = if (failure is PluginManager.PluginNotFoundException) 2 else 3
+                            profile.error = failure.readableMessage
+                        },
+                    )
+                    test.update(profile)
+                },
+            )
+            testPool?.close(); test.finish(false); test.flushPending()
             if (test.ownsSession()) {
                 activeLatencyIds.removeAll(profilesList.map { it.id }.toSet()); DataStore.runningTest = false; activeLatencyCancel = null; activeLatencyMinimize = null
                 GroupManager.postReload(groupId)
@@ -1909,10 +1928,12 @@ class ConfigurationFragment @JvmOverloads constructor(
         activeLatencyCancel = {
             if (test.dialogStatus.getAndSet(2) != 2) {
             test.finish(true)
-            runCatching { testPool?.close() }
+            // Cancel first and join native cleanup BEFORE shutting its executor.
+            // Closing the executor first can prevent a prepared Box from closing.
+            mainJob.cancel()
             runOnDefaultDispatcher {
-                mainJob.cancelAndJoin()
-                testJobs.forEach { it.cancelAndJoin() }
+                mainJob.join()
+                runCatching { testPool?.close() }
                 test.flushPending()
                 if (test.ownsSession()) {
                     activeLatencyIds.removeAll(test.targetIds); activeLatencyCancel = null; activeLatencyMinimize = null; DataStore.runningTest = false

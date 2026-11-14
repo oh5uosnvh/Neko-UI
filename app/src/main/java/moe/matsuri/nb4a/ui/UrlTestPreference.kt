@@ -43,11 +43,11 @@ constructor(
 
         setOnPreferenceChangeListener { _, _ ->
             concurrent?.apply {
-                var newConcurrent = text?.toString()?.toIntOrNull()
-                if (newConcurrent == null || newConcurrent <= 0) {
-                    newConcurrent = 5
-                }
-                DataStore.connectionTestConcurrent = newConcurrent
+                val newConcurrent = text?.toString()?.toIntOrNull()
+                    ?.takeIf { it > 0 }
+                    ?: io.nekohasekai.sagernet.bg.LatencyProbePolicy.DEFAULT_CONCURRENCY
+                DataStore.connectionTestConcurrent = newConcurrent.coerceAtMost(
+                    io.nekohasekai.sagernet.bg.LatencyProbePolicy.MAX_CONCURRENCY)
             }
             timeout?.apply {
                 var newTimeout = text?.toString()?.toIntOrNull()

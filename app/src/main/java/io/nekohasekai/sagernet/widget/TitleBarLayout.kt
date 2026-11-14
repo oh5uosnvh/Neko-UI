@@ -51,6 +51,10 @@ class TitleBarLayout @JvmOverloads constructor(
     internal fun titleEdgeBandHeight(): Float =
         (headerBottom.toFloat() - titleGlyphBottom).coerceAtLeast(0f)
 
+    /** Integer padding from the laid-out content origin to the complete header. */
+    internal fun titleContentTopInset(): Int =
+        (headerBottom - ceil(titleGlyphBottom).toInt()).coerceAtLeast(0)
+
     /** The content fade must end at the toolbar's glyph baseline, not below the
      * group-name pill. This keeps the first card visible from the character
      * bottom exactly as on the pre-title-bar layout. */
@@ -160,7 +164,7 @@ class TitleBarLayout @JvmOverloads constructor(
         } ?: availableBottom
         contentBottom = footerTop.coerceAtLeast(paddingTop).toFloat()
         updateTitleBoundary()
-        val padded = insets.sync(content, (headerBottom - ceil(titleGlyphBottom).toInt()).coerceAtLeast(0))
+        val padded = syncContentInsets()
         content?.takeIf { it.visibility != GONE }?.let {
             val y = ceil(titleGlyphBottom).toInt().coerceAtMost(footerTop)
             val lp = it.layoutParams as LayoutParams
@@ -186,16 +190,46 @@ class TitleBarLayout @JvmOverloads constructor(
         view.layout(x, y, x + view.measuredWidth, y + view.measuredHeight)
     }
 
+    /** The menu-carrying Toolbar can be GONE while a sibling custom row draws
+     * the configuration title. Its host, not the tabs/AppBar bottom, is then the
+     * toolbar boundary. Plain-title pages still use the Toolbar itself. */
+    private fun toolbarSurface(bar: Toolbar?, appbar: View?): View? {
+        if (bar == null) return null
+        if (bar.visibility == VISIBLE) return bar
+        return (bar.parent as? View)?.takeIf { it !== appbar && it.visibility == VISIBLE }
+    }
+
+    private fun visibleInHeader(title: View, appbar: View): Boolean {
+        var view: View? = title
+        while (view != null && view !== appbar) {
+            if (view.visibility != VISIBLE) return false
+            view = view.parent as? View
+        }
+        return view === appbar
+    }
+
+    private fun syncContentInsets(): Boolean {
+        // A tab visibility/height change need not move the edge container at all.
+        // Sync its bound pages here as well, rather than waiting for a descendant
+        // onLayout which Android may legitimately skip when its bounds are unchanged.
+        val pagerEdge = content as? GroupListEdgeLayout
+        return pagerEdge?.syncHeaderInsets() ?: insets.sync(content, titleContentTopInset())
+    }
+
     private fun updateTitleBoundary(): Boolean {
         val bar = toolbar
         val appbar = header
         val headerVisible = appbar != null && appbar.visibility != GONE
         headerBottom = if (headerVisible &&
             TitleGlyphMetrics.bounds(appbar!!, this, rect)) ceil(rect.bottom).toInt() else paddingTop
-        val toolbarVisible = headerVisible && bar != null && bar.visibility == VISIBLE
-        toolbarBottom = if (toolbarVisible &&
-            TitleGlyphMetrics.bounds(bar!!, this, rect)) ceil(rect.bottom).toInt() else headerBottom
-        val measured = bar?.takeIf { toolbarVisible }?.let(TitleGlyphMetrics::titleView)
+        val surface = if (headerVisible) toolbarSurface(bar, appbar) else null
+        toolbarBottom = if (surface != null &&
+            TitleGlyphMetrics.bounds(surface, this, rect)) ceil(rect.bottom).toInt() else headerBottom
+        // Resolve the marked title independently of the native Toolbar's visibility.
+        // TopBarController deliberately hides that Toolbar; gating on it moved the
+        // entire pager clip origin down to group_tab.bottom before any mask could draw.
+        val measured = bar?.takeIf { headerVisible }?.let(TitleGlyphMetrics::titleView)
+            ?.takeIf { visibleInHeader(it, appbar!!) }
             ?.let { TitleGlyphMetrics.bottom(it, this) }
         // A toolbar without title ink safely keeps content below the header until a title arrives.
         val next = (measured ?: toolbarBottom.toFloat()).coerceIn(paddingTop.toFloat(),
@@ -212,7 +246,7 @@ class TitleBarLayout @JvmOverloads constructor(
         return try {
             bindChildren()
             val changed = updateTitleBoundary()
-            val padded = insets.sync(content, (headerBottom - ceil(titleGlyphBottom).toInt()).coerceAtLeast(0))
+            val padded = syncContentInsets()
             changed || padded
         } finally { syncing = false }
     }

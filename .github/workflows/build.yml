@@ -65,6 +65,10 @@ jobs:
           # TestRealTCPCancellationClosesBlockedConnection 依赖真实 DNS TCP 出网，
           # 在 CI runner 上偶发超时导致假失败，与代码无关，跳过。
           go test -race -count=1 -skip 'TestRealTCPCancellationClosesBlockedConnection' ./dnspolicy
+      - name: Verify cold/warm latency budgets and native cancellation
+        run: |
+          cd libcore
+          go test -race -count=1 ./probe
       - name: Verify atomic routing snapshot and failure rollback
         run: |
           cd ../sing-box

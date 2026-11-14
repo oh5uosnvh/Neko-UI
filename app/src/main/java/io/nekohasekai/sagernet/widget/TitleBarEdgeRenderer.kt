@@ -22,11 +22,13 @@ internal class TitleBarEdgeRenderer {
     private var blurRadius = 0f
 
     fun draw(canvas: Canvas, width: Int, top: Float, bottom: Float, clearFrom: Float, density: Float,
-        hardwareBlur: Boolean, drawContent: (Canvas) -> Boolean): Boolean {
+        hardwareBlur: Boolean, edgeBandLimit: Float = 48f * density,
+        drawContent: (Canvas) -> Boolean): Boolean {
         if (width <= 0 || bottom <= top) return false
-        // The first stationary row begins at clearFrom + its original padding, so
-        // blur/fade must be completely gone by the toolbar's bottom, not 48dp later.
-        val band = minOf(48f * density, bottom - top, (clearFrom - top).coerceAtLeast(0f))
+        // Groups retains the 48dp default. Configuration opts into the measured
+        // toolbar+tabs band; both use exactly the same masks and drawing path.
+        val band = minOf(edgeBandLimit.coerceAtLeast(0f), bottom - top,
+            (clearFrom - top).coerceAtLeast(0f))
         if (band <= 0f) {
             val save = canvas.save()
             canvas.clipRect(0f, top, width.toFloat(), bottom)
