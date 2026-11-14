@@ -134,6 +134,9 @@
         app:showAsAction="always">
         <menu>
             <item
+                android:id="@+id/action_vmess_source_repair"
+                android:title="@string/vmess_recovery_menu" />
+            <item
                 android:id="@+id/action_update_subscription"
                 android:title="@string/update_current_subscription" />
             <item

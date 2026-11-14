@@ -193,6 +193,7 @@ class ConfigurationFragment @JvmOverloads constructor(
     /** Non-null while the configuration pager is locked to one tag's members. */
     @Volatile private var scopedTagId: Long? = null
     private val groupProfileExport = GroupProfileExport(this)
+    private val vmessSourceRepair = VmessSourceRepair(this)
     private var groupTabsMediator: TabLayoutMediator? = null
     // TabLayout pools/recreates TabViews. Weak entries must not retain removed tabs.
     private val tabLongPressBindings =
@@ -675,6 +676,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         super.onCreate(savedInstanceState)
         scopedTagId = savedInstanceState?.getLong("scopedTagId", 0L)?.takeIf { it > 0L }
         groupProfileExport.restoreState(savedInstanceState)
+        vmessSourceRepair.restoreState(savedInstanceState)
         setHasOptionsMenu(true)
         startProfileStateActor()
         refreshProfileState()
@@ -687,6 +689,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         outState.putLong("scopedTagId", scopedTagId ?: 0L)
         super.onSaveInstanceState(outState)
         groupProfileExport.saveState(outState)
+        vmessSourceRepair.saveState(outState)
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -833,6 +836,8 @@ class ConfigurationFragment @JvmOverloads constructor(
         LatencyTestMenuPolicy.apply(menu, DataStore.runningTest || pendingLatencyRequest != null)
         menu.findItem(R.id.action_global_mode)?.isChecked = DataStore.globalMode
         menu.findItem(R.id.action_always_show_address)?.isChecked = DataStore.alwaysShowAddress
+        menu.findItem(R.id.action_vmess_source_repair)?.isVisible = !select &&
+            runCatching { DataStore.currentGroup().type == GroupType.BASIC }.getOrDefault(false)
     }
 
     override fun onPrepareOptionsMenu(menu: Menu) {
@@ -1286,6 +1291,13 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             R.id.action_new_chain -> {
                 startActivity(Intent(requireActivity(), ChainSettingsActivity::class.java))
+            }
+
+            R.id.action_vmess_source_repair -> {
+                if (!select) {
+                    val group = DataStore.currentGroup()
+                    if (group.type == GroupType.BASIC) vmessSourceRepair.open(group.id)
+                }
             }
 
             R.id.action_update_subscription -> {

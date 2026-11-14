@@ -1105,7 +1105,8 @@ object RawUpdater : GroupUpdater() {
                 }
                 return proxies
             } catch (e: YAMLException) {
-                Logs.w(e)
+                // SnakeYAML exceptions may embed source snippets with UUIDs/tokens.
+                Logs.w("Subscription YAML parse failed: ${e.javaClass.simpleName}")
             }
         } else if (text.contains("[Interface]")) {
             // wireguard

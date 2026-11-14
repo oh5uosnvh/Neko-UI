@@ -3,8 +3,10 @@ package io.nekohasekai.sagernet.bg.proto
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.bg.GuardedProcessPool
 import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.fmt.KryoConverters
 import io.nekohasekai.sagernet.fmt.buildConfig
 import io.nekohasekai.sagernet.ktx.Logs
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -21,6 +23,17 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
     BoxInstance(profile) {
 
     private val closed = AtomicBoolean(false)
+    @Volatile private var currentStage = ProbeFailure.Stage.CONFIG
+
+    private fun profileSnapshot(): ProxyEntity =
+        KryoConverters.deserialize(ProxyEntity(), KryoConverters.serialize(profile))
+
+    private fun wrap(stage: ProbeFailure.Stage, error: Throwable): ProbeFailure {
+        val vmess = profile.vmessBean
+        val hint = if (vmess != null && !vmess.isVLESS && vmess.type == "ws" && vmess.path.isNullOrBlank())
+            "VMess WS uses the default root path; if a legacy import lost its path, repair from the original config" else null
+        return ProbeFailure.from(stage, error, hint)
+    }
 
     // 013: 取消时最多关一次。close() 自带全套守卫（processes/box 未初始化自动跳过），
     // 在测的 Go urlTest 会被 close 打断并立即报错返回。
@@ -47,8 +60,9 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
         return suspendCancellableCoroutine { c ->
             c.invokeOnCancellation { closeOnce() }
             processes = GuardedProcessPool {
-                Logs.w(it)
-                runCatching { c.resumeWith(Result.failure(it)) }
+                val failure = wrap(ProbeFailure.Stage.CORE_START, it)
+                Logs.w(failure.message ?: "probe failed")
+                runCatching { c.resumeWith(Result.failure(failure)) }
             }
             // 外层跑 Default，阻塞段用 withContext 进专用池：池被提前关闭时
             // withContext 抛 RejectedExecutionException，走 catch 干净失败，
@@ -64,12 +78,20 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
                             // wait for plugin start
                             delay(500)
                         }
+                        currentStage = ProbeFailure.Stage.HTTP_REQUEST
                         val latency = withContext(context) {
                             Libcore.urlTest(box, link, timeout)
                         }
                         c.resumeWith(Result.success(latency))
+                    } catch (e: CancellationException) {
+                        // Complete the caller with cancellation even if native/plugin
+                        // cancellation originated inside this independent worker.
+                        c.cancel(e)
+                        throw e
                     } catch (e: Exception) {
-                        runCatching { c.resumeWith(Result.failure(e)) }
+                        val failure = wrap(currentStage, e)
+                        Logs.w(failure.message ?: "probe failed")
+                        runCatching { c.resumeWith(Result.failure(failure)) }
                     }
                 }
             }
@@ -77,13 +99,22 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
     }
 
     override fun buildConfig() {
-        config = buildConfig(profile, true)
+        currentStage = ProbeFailure.Stage.CONFIG
+        // Builders normalize beans in place. Never let a latency probe mutate the
+        // live Room entity: a later recovery CAS must still see its original bytes.
+        config = buildConfig(profileSnapshot(), true)
     }
 
     override suspend fun loadConfig() {
-        // don't call destroyAllJsi here
-        if (BuildConfig.DEBUG) Logs.d(config.config)
+        currentStage = ProbeFailure.Stage.CORE_CREATE
+        // don't call destroyAllJsi here; and never dump the full config (it has
+        // UUIDs, endpoints and transport credentials) even in debug builds.
         box = Libcore.newSingBoxInstance(config.config, LocalResolverImpl)
+    }
+
+    override fun launch() {
+        currentStage = ProbeFailure.Stage.CORE_START
+        super.launch()
     }
 
 }

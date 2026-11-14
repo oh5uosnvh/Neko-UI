@@ -3,7 +3,7 @@ package io.nekohasekai.sagernet.ui
 import android.os.Bundle
 
 /** A document picker belongs to the group that opened it, not the current tab. */
-internal class PendingGroupExport {
+internal class PendingGroupExport(private val stateKey: String = STATE_GROUP_ID) {
     var pendingExportGroupId: Long? = null
         private set
 
@@ -17,14 +17,14 @@ internal class PendingGroupExport {
     fun consume(): Long? = pendingExportGroupId.also { pendingExportGroupId = null }
 
     fun restoreState(savedInstanceState: Bundle?) {
-        pendingExportGroupId = savedInstanceState?.getLong(STATE_GROUP_ID, 0L)
+        pendingExportGroupId = savedInstanceState?.getLong(stateKey, 0L)
             ?.takeIf { it > 0L }
     }
 
     fun saveState(outState: Bundle) {
         val groupId = pendingExportGroupId
-        if (groupId == null) outState.remove(STATE_GROUP_ID)
-        else outState.putLong(STATE_GROUP_ID, groupId)
+        if (groupId == null) outState.remove(stateKey)
+        else outState.putLong(stateKey, groupId)
     }
 
     private companion object {

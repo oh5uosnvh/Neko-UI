@@ -50,6 +50,20 @@ class PendingGroupExportTest {
         assertTrue(restored.begin(8L))
     }
 
+    @Test fun sourceRepairAndExportUseIndependentSavedTargets() {
+        val export = PendingGroupExport()
+        val repair = PendingGroupExport("pending_vmess_source_repair_group_id")
+        export.begin(11L); repair.begin(22L)
+        val state = Bundle()
+        export.saveState(state); repair.saveState(state)
+        val restoredExport = PendingGroupExport().apply { restoreState(state) }
+        val restoredRepair = PendingGroupExport("pending_vmess_source_repair_group_id").apply { restoreState(state) }
+        assertEquals(11L, restoredExport.consume())
+        assertEquals(22L, restoredRepair.consume())
+        repair.consume(); repair.saveState(state)
+        assertEquals(11L, PendingGroupExport().apply { restoreState(state) }.consume())
+    }
+
     @Test fun invalidIdsAndMissingStateCannotFallBackToASelectedGroup() {
         val pending = PendingGroupExport()
         for (id in listOf(0L, -1L, Long.MIN_VALUE)) assertFalse(pending.begin(id))

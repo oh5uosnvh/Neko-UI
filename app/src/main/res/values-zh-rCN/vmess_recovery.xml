@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="vmess_recovery_menu">从原配置修复旧 VMess</string>
+    <string name="vmess_recovery_title">修复旧 VMess</string>
+    <string name="vmess_recovery_confirm">找到 %1$d 个可安全修复的旧 VMess WebSocket 路径。只修复空路径，凭据、顺序、流量和用户设置均会保留。继续吗？</string>
+    <string name="vmess_recovery_no_match">没有找到安全匹配项，未作任何更改。</string>
+    <string name="vmess_recovery_done">已修复 %1$d/%2$d 个候选项。其余条目因已变更或无法安全匹配而跳过。</string>
+    <string name="vmess_recovery_error">无法读取或修复所选配置，未作任何更改。</string>
+</resources>

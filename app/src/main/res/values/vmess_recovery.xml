@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="vmess_recovery_menu">Repair legacy VMess from original configuration</string>
+    <string name="vmess_recovery_title">Repair legacy VMess</string>
+    <string name="vmess_recovery_confirm">Found %1$d safe legacy VMess WebSocket path replacements. Only the empty path will be repaired; credentials, order, traffic and user settings are preserved. Continue?</string>
+    <string name="vmess_recovery_no_match">No safe match found. Nothing was changed.</string>
+    <string name="vmess_recovery_done">Repaired %1$d of %2$d candidates. Other entries were skipped because they changed or no longer matched safely.</string>
+    <string name="vmess_recovery_error">Could not read or repair the selected configuration. Nothing was changed.</string>
+</resources>

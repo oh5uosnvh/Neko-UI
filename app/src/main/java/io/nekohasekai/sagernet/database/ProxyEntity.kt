@@ -666,6 +666,9 @@ data class ProxyEntity(
         @Update
         fun updateProxy(proxies: List<ProxyEntity>): Int
 
+        @Query("UPDATE proxy_entities SET vmessBean = :bean, status = 0, ping = 0, error = NULL WHERE id = :proxyId AND groupId = :groupId AND type = 4")
+        fun repairLegacyVmessPath(proxyId: Long, groupId: Long, bean: ByteArray): Int
+
         @Query("UPDATE proxy_entities SET rx = :rx, tx = :tx WHERE id = :proxyId")
         fun updateTraffic(proxyId: Long, rx: Long, tx: Long): Int
 
