@@ -3601,6 +3601,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val popup = PopupMenu(requireContext(), anchor)
                 popup.menuInflater.inflate(R.menu.double_column_item_menu, popup.menu)
                 if (select) popup.menu.removeItem(R.id.action_delete)
+                val latestError = (parentFragment as? ConfigurationFragment)?.cardLatencySession
+                    ?.get(proxyEntity.id)?.result?.error ?: proxyEntity.error
+                popup.menu.findItem(R.id.action_probe_failure_details)?.isVisible = !latestError.isNullOrBlank()
                 // 「分享 ▶」合并进同一窗口：其子项成为二级页，不再弹第二个菜单。
                 val share = popup.menu.findItem(R.id.action_share)
                 if (share != null) {
@@ -3639,6 +3642,13 @@ class ConfigurationFragment @JvmOverloads constructor(
                                     anchor.context, proxyGroup.type == GroupType.SUBSCRIPTION
                                 )
                             )
+                            true
+                        }
+                        R.id.action_probe_failure_details -> {
+                            if (!latestError.isNullOrBlank()) MaterialAlertDialogBuilder(requireContext())
+                                .setTitle(R.string.probe_failure_details)
+                                .setMessage(io.nekohasekai.sagernet.bg.proto.ProbeFailure.sanitize(latestError))
+                                .setPositiveButton(android.R.string.ok, null).show()
                             true
                         }
                         R.id.action_share -> true // Handled through its submenu page.
