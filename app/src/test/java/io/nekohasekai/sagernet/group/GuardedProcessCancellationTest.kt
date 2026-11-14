@@ -31,6 +31,8 @@ class GuardedProcessCancellationTest {
         }
     }
 
+    private fun alive(pid: Long): Boolean = File("/proc/$pid").exists()
+
     @Test fun processStartedBeforeGuardDispatchIsStillDestroyedOnCancel() = runBlocking {
         val appContext = org.robolectric.RuntimeEnvironment.getApplication()
         org.robolectric.util.ReflectionHelpers.callInstanceMethod<Void>(
@@ -47,16 +49,16 @@ class GuardedProcessCancellationTest {
             // Child may start before its paused Main looper has entered.
             withTimeout(2000) { while (pidFile.readText().trim().toLongOrNull() == null) delay(5) }
             val pid = pidFile.readText().trim().toLong()
-            assertTrue(ProcessHandle.of(pid).map { it.isAlive }.orElse(false))
+            assertTrue(alive(pid))
             pool.close(scope)
             shadowOf(Looper.getMainLooper()).idle()
             withTimeout(2500) {
-                while (ProcessHandle.of(pid).map { it.isAlive }.orElse(false)) {
+                while (alive(pid)) {
                     shadowOf(Looper.getMainLooper()).idle()
                     delay(10)
                 }
             }
-            assertFalse(ProcessHandle.of(pid).map { it.isAlive }.orElse(false))
+            assertFalse(alive(pid))
         } finally {
             pool.close(scope)
             shadowOf(Looper.getMainLooper()).idle()
