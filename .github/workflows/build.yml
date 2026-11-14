@@ -72,6 +72,9 @@ jobs:
         run: |
           bash buildScript/lib/core/get_source.sh
           cd libcore
+          # sing-box 1.14's Android/oomprofile glue uses guarded linkname
+          # symbols; the release linker flag must also cover host-side tests.
+          export GOFLAGS='-ldflags=-checklinkname=0'
           # TestRealTCPCancellationClosesBlockedConnection 依赖真实 DNS TCP 出网，
           # 在 CI runner 上偶发超时导致假失败，与代码无关，跳过。
           go test -race -count=1 -skip 'TestRealTCPCancellationClosesBlockedConnection' ./dnspolicy
