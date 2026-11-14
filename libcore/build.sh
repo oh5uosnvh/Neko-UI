@@ -15,7 +15,7 @@ if [ -z "$GOPATH" ]; then
 fi
 
 export GOBIND=gobind-matsuri
-"$GOPATH"/bin/gomobile-matsuri bind -v -androidapi 21 -cache "$(realpath $BUILD)" -trimpath -ldflags='-s -w -checklinkname=0' -tags='with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' . || exit 1
+"$GOPATH"/bin/gomobile-matsuri bind -v -androidapi 21 -cache "$(realpath $BUILD)" -trimpath -ldflags="-s -w -checklinkname=0 -X github.com/sagernet/sing-box/constant.Version=${SING_BOX_VERSION:-1.14.4-neko-1}" -tags='with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_naive_outbound,with_openvpn,with_openconnect,with_tailscale,with_cloudflared' . || exit 1
 rm -r libcore-sources.jar
 
 proj=../app/libs

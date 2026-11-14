@@ -70,6 +70,7 @@ jobs:
           go test -race -count=1 -skip 'TestRealTCPCancellationClosesBlockedConnection' ./dnspolicy
           go test -count=1 geo_validate.go geo_validate_test.go
           go test -tags with_utls -count=1 vmess_probe_contract_test.go
+          go test -tags 'with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_naive_outbound,with_openvpn,with_openconnect,with_tailscale,with_cloudflared' -count=1 . -run 'TestNekoBoxProtocolRegistriesKeepCustomAndOfficialProtocols'
       - name: Verify atomic routing snapshot and failure rollback
         run: |
           cd ../sing-box

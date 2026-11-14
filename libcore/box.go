@@ -15,7 +15,6 @@ import (
 	"github.com/matsuridayo/libneko/protect_server"
 	"github.com/matsuridayo/libneko/speedtest"
 	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/boxapi"
 	libbox "github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/protocol/group"
@@ -88,7 +87,8 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = box.Context(ctx,
 		nekoboxAndroidInboundRegistry(), nekoboxAndroidOutboundRegistry(), nekoboxAndroidEndpointRegistry(),
-		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(), certificate.NewRegistry(),
+		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(),
+		nekoboxAndroidCertificateRegistry(),
 	)
 	ctx = service.ContextWithDefaultRegistry(ctx)
 	service.MustRegister[libbox.PlatformInterface](ctx, platformInterface)

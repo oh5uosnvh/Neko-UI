@@ -1,5 +1,7 @@
-export COMMIT_SING_BOX="7d063d4feabd790f832e77a7c99aacfa39b2708a"
+# sing-box v1.14.4 + 1.14.x-neko Android/runtime compatibility fixes.
+export COMMIT_SING_BOX="ff0a591f8e6b3c74a1261e4c900e41102a5b37be"
 export SING_BOX_REPO_URL="https://github.com/oh5uosnvh/sing-box.git"
+export SING_BOX_VERSION="1.14.4-neko-1"
 export COMMIT_LIBNEKO="6a85c185d62435a5293ef70ac3b638ae3ee1efa7"
 
 export COMMIT_ANYTLS_SHANLIAN="35fe946085e3cd5782fd095dd5878c7388519895"

@@ -218,6 +218,9 @@ replace github.com/oh5uosnvh/oppa-mod => ../../oppa-mod
 
 replace github.com/sagernet/sing-vmess => github.com/starifly/sing-vmess v0.2.8-mod.1
 
+// Snell 魔改实现必须保留；不要被官方 1.14 依赖解析覆盖。
+replace github.com/sagernet/sing-snell => github.com/reF1nd/sing-snell v0.0.0-20260904135315-bc5a12ac736f
+
 // replace github.com/sagernet/sing-quic => github.com/matsuridayo/sing-quic v0.0.0-20241009042333-b49ce60d9b36
 // replace github.com/sagernet/sing-quic => ../../sing-quic
 

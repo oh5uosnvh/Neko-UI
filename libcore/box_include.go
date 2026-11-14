@@ -1,6 +1,7 @@
 package libcore
 
 import (
+	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -14,6 +15,7 @@ import (
 	libbox "github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/protocol/anytls"
 	"github.com/sagernet/sing-box/protocol/block"
+	"github.com/sagernet/sing-box/protocol/bridge"
 	"github.com/sagernet/sing-box/protocol/direct"
 	protocolDns "github.com/sagernet/sing-box/protocol/dns"
 	"github.com/sagernet/sing-box/protocol/group"
@@ -58,6 +60,8 @@ func nekoboxAndroidInboundRegistry() *inbound.Registry {
 	socks.RegisterInbound(registry)
 	http.RegisterInbound(registry)
 	mixed.RegisterInbound(registry)
+	registerNaiveInbound(registry)
+	registerCloudflaredInbound(registry)
 
 	return registry
 }
@@ -66,6 +70,7 @@ func nekoboxAndroidOutboundRegistry() *outbound.Registry {
 	registry := outbound.NewRegistry()
 
 	direct.RegisterOutbound(registry)
+	bridge.RegisterOutbound(registry)
 
 	block.RegisterOutbound(registry)
 	protocolDns.RegisterOutbound(registry)
@@ -75,6 +80,7 @@ func nekoboxAndroidOutboundRegistry() *outbound.Registry {
 
 	socks.RegisterOutbound(registry)
 	http.RegisterOutbound(registry)
+	registerNaiveOutbound(registry)
 	shadowsocks.RegisterOutbound(registry)
 	shadowsocksr.RegisterOutbound(registry)
 	vmess.RegisterOutbound(registry)
@@ -103,9 +109,20 @@ func nekoboxAndroidEndpointRegistry() *endpoint.Registry {
 	registry := endpoint.NewRegistry()
 
 	wireguard.RegisterEndpoint(registry)
+	registerOptionalEndpoints(registry)
 
 	return registry
 }
+
+func nekoboxAndroidCertificateRegistry() *certificate.Registry {
+	registry := certificate.NewRegistry()
+	registerOptionalCertificateProviders(registry)
+	return registry
+}
+
+// Registered protocol set is intentionally kept in source: the pre26 core
+// must retain every Neko custom outbound while exposing official 1.14 types.
+// Custom registrations below are not replaced by upstream registration.
 
 func nekoboxAndroidDNSTransportRegistry(localTransport LocalDNSTransport) *dns.TransportRegistry {
 	registry := dns.NewTransportRegistry()
@@ -127,11 +144,12 @@ func nekoboxAndroidDNSTransportRegistry(localTransport LocalDNSTransport) *dns.T
 
 	quic.RegisterTransport(registry)
 	quic.RegisterHTTP3Transport(registry)
+	registerOptionalDNSTransports(registry)
 	return registry
 }
 
 func nekoboxAndroidServiceRegistry() *service.Registry {
 	registry := service.NewRegistry()
-
+	registerOptionalServices(registry)
 	return registry
 }

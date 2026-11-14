@@ -9,11 +9,15 @@ DEPS="$(dirname "$ROOT")"
 checkout_dep() {
   local name="$1" url="$2" commit="$3" dir="$DEPS/$1"
   local clone_url="$url"
+  local -a git_auth=()
   if [ -n "${SING_BOX_CLONE_TOKEN:-}" ] && [ "$name" = sing-box ]; then
-    clone_url="https://${SING_BOX_CLONE_TOKEN}@${url#https://}"
+    # Use an in-memory extra header; do not place the token in clone URLs or
+    # the repository's origin config, where it could leak into diagnostics.
+    git_auth=(-c "http.extraheader=Authorization: Bearer ${SING_BOX_CLONE_TOKEN}")
   fi
+  git_cmd() { git "${git_auth[@]}" "$@"; }
   if [ ! -e "$dir" ]; then
-    git clone "$clone_url" "$dir"
+    git_cmd clone "$clone_url" "$dir"
   fi
   if [ ! -d "$dir/.git" ]; then
     echo "Not a Git checkout: $dir" >&2; exit 1
@@ -26,7 +30,7 @@ checkout_dep() {
       if [ "$manifest_commit" != "$commit" ]; then
         git -C "$dir" checkout -- . || true
         git -C "$dir" clean -fd || true
-        git -C "$dir" cat-file -e "$commit^{commit}" 2>/dev/null || git -C "$dir" fetch "$clone_url" "$commit"
+        git_cmd -C "$dir" cat-file -e "$commit^{commit}" 2>/dev/null || git_cmd -C "$dir" fetch "$url" "$commit"
         git -C "$dir" checkout --detach "$commit"
       else
         python3 "$ROOT/libcore/runtimepatch/apply.py" --verify-existing "$dir" "$commit"
@@ -36,7 +40,7 @@ checkout_dep() {
       echo "Refusing to overwrite dirty dependency: $dir" >&2; exit 1
     fi
   fi
-  git -C "$dir" cat-file -e "$commit^{commit}" 2>/dev/null || git -C "$dir" fetch "$clone_url" "$commit"
+  git_cmd -C "$dir" cat-file -e "$commit^{commit}" 2>/dev/null || git_cmd -C "$dir" fetch "$url" "$commit"
   git -C "$dir" checkout --detach "$commit"
 }
 checkout_dep sing-box "${SING_BOX_REPO_URL:-https://github.com/starifly/sing-box.git}" "$COMMIT_SING_BOX"

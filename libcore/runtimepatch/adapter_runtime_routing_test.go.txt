@@ -1,0 +1,51 @@
+package adapter
+
+import (
+ "context"
+ "sync"
+ "sync/atomic"
+ "testing"
+)
+
+func TestRuntimeRoutingNestedPinRetirement(t *testing.T) {
+ s:=new(RuntimeRoutingState)
+ var closed atomic.Int32
+ a:=&RuntimeRoutingSnapshot{ReleaseResources:func(){closed.Add(1)}}
+ if g,e:=s.Publish(a);e!=nil||g!=1{t.Fatal(g,e)}
+ ctx,release,e:=s.Pin(context.Background());if e!=nil{t.Fatal(e)}
+ b:=&RuntimeRoutingSnapshot{}
+ if g,e:=s.Publish(b);e!=nil||g!=2{t.Fatal(g,e)}
+ nested,nestedRelease,e:=s.Pin(ctx);if e!=nil{t.Fatal(e)}
+ if RuntimeRoutingFromContext(nested)!=a{t.Fatal("nested DNS changed generation")}
+ release();if closed.Load()!=0{t.Fatal("closed with nested reader")}
+ nestedRelease();if closed.Load()!=1{t.Fatal("old resources not reclaimed")}
+ fresh,freshRelease,e:=s.Pin(ctx);if e!=nil{t.Fatal(e)}
+ defer freshRelease()
+ if RuntimeRoutingFromContext(fresh)!=b{t.Fatal("borrowed retired context resurrected")}
+ s.Close()
+ if _,_,e=s.Pin(context.Background());e==nil{t.Fatal("closed state accepted query")}
+ if _,e=s.Publish(&RuntimeRoutingSnapshot{});e==nil{t.Fatal("closed state accepted commit")}
+}
+func TestRuntimeRoutingConcurrentRouteDNSAtomicity(t *testing.T) {
+ s:=new(RuntimeRoutingState)
+ _,_=s.Publish(&RuntimeRoutingSnapshot{})
+ var failed atomic.Bool
+ var wg sync.WaitGroup
+ for i:=0;i<16;i++ {wg.Add(1);go func(){defer wg.Done();for j:=0;j<500;j++{
+  ctx,done,e:=s.Pin(context.Background());if e!=nil{failed.Store(true);return}
+  first:=RuntimeRoutingFromContext(ctx)
+  dnsCtx,dnsDone,e:=s.Pin(ctx);if e!=nil||RuntimeRoutingFromContext(dnsCtx)!=first{failed.Store(true)}
+  dnsDone();done()
+ }}()}
+ for i:=0;i<500;i++{if _,e:=s.Publish(&RuntimeRoutingSnapshot{});e!=nil{t.Fatal(e)}}
+ wg.Wait();s.Close()
+ if failed.Load(){t.Fatal("route/DNS observed different generations")}
+}
+func TestRuntimeRoutingAsyncSessionUnpins(t *testing.T){
+ s:=new(RuntimeRoutingState);_,_=s.Publish(&RuntimeRoutingSnapshot{})
+ ctx,release,_:=s.Pin(context.Background())
+ ctx=WithoutRuntimeRouting(ctx);release()
+ _,_=s.Publish(&RuntimeRoutingSnapshot{})
+ fresh,done,_:=s.Pin(ctx);defer done()
+ if RuntimeRoutingFromContext(fresh).Generation!=2{t.Fatal("DNS session kept old generation")}
+}
