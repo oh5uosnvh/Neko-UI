@@ -415,7 +415,9 @@ class GroupPickerTagsSessionTest {
                 f.call("backPage"); f.settleMotion(); f.open(other.id)
                 assertEquals(expected.filter { it in setOf(original[3], original[5], original[8]) }, f.memberAdapter.ids)
                 f.reopen()
+                assertEquals(GroupPickerNavigation.Page.Configuration, f.navigation.page)
                 assertEquals(expected, f.adapter.ids)
+                f.tags(); f.open(other.id)
                 assertEquals(expected.filter { it in setOf(original[3], original[5], original[8]) }, f.memberAdapter.ids)
                 assertEquals(1, listener.receipts)
             } finally { GroupManager.removeListener(listener) }
@@ -478,7 +480,9 @@ class GroupPickerTagsSessionTest {
             assertNull(f.memberList.dragTouch)
             assertEquals(f.roots[19].id, DataStore.selectedGroup)
             f.reopen()
+            assertEquals(GroupPickerNavigation.Page.Configuration, f.navigation.page)
             assertEquals(expected, f.adapter.ids)
+            f.tags(); f.open(tag.id)
             assertEquals(if (cancel) members else subset, f.memberAdapter.ids)
         }
     }
