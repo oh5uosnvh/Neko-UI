@@ -9,7 +9,6 @@ import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.FileProvider
-import androidx.core.view.isVisible
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.jakewharton.processphoenix.ProcessPhoenix
 import io.nekohasekai.sagernet.BuildConfig
@@ -17,10 +16,8 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.bg.Executable
 import io.nekohasekai.sagernet.database.*
-import io.nekohasekai.sagernet.database.preference.KeyValuePair
 import io.nekohasekai.sagernet.database.preference.PublicDatabase
 import io.nekohasekai.sagernet.databinding.LayoutBackupBinding
-import io.nekohasekai.sagernet.databinding.LayoutImportBinding
 import io.nekohasekai.sagernet.databinding.LayoutProgressBinding
 import io.nekohasekai.sagernet.ktx.*
 import kotlinx.coroutines.delay
@@ -456,16 +453,7 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                         return@onMainDispatcher
                     }
 
-                    val import = LayoutImportBinding.inflate(layoutInflater)
-                    if (!json.has("profiles")) {
-                        import.backupConfigurations.isVisible = false
-                    }
-                    if (!json.has("rules")) {
-                        import.backupRules.isVisible = false
-                    }
-                    if (!json.has("settings")) {
-                        import.backupSettings.isVisible = false
-                    }
+                    val import = BackupImportDialog.inflate(layoutInflater)
 
                     MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.backup_import)
                         .setView(import.root)
@@ -489,7 +477,9 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                                         json,
                                         import.backupConfigurations.isChecked,
                                         import.backupRules.isChecked,
-                                        import.backupSettings.isChecked
+                                        import.backupSettings.isChecked,
+                                        import.backupConfigurations.isChecked &&
+                                            import.appendBackupConfigurations.isChecked
                                     )
                                     ProcessPhoenix.triggerRebirth(
                                         activity, Intent(activity, MainActivity::class.java)
@@ -632,16 +622,7 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
 
             val json = JSONObject(content)
             onMainDispatcher {
-                val import = LayoutImportBinding.inflate(layoutInflater)
-                if (!json.has("profiles")) {
-                    import.backupConfigurations.isVisible = false
-                }
-                if (!json.has("rules")) {
-                    import.backupRules.isVisible = false
-                }
-                if (!json.has("settings")) {
-                    import.backupSettings.isVisible = false
-                }
+                val import = BackupImportDialog.inflate(layoutInflater)
                 MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.backup_import)
                     .setView(import.root)
                     .setPositiveButton(R.string.backup_import) { _, _ ->
@@ -659,7 +640,9 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                                     json,
                                     import.backupConfigurations.isChecked,
                                     import.backupRules.isChecked,
-                                    import.backupSettings.isChecked
+                                    import.backupSettings.isChecked,
+                                    import.backupConfigurations.isChecked &&
+                                        import.appendBackupConfigurations.isChecked
                                 )
                                 triggerFullRestart(requireContext())
                             }.onFailure {
@@ -683,47 +666,12 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
     }
 
     fun finishImport(
-        content: JSONObject, profile: Boolean, rule: Boolean, setting: Boolean
+        content: JSONObject, profile: Boolean, rule: Boolean, setting: Boolean,
+        appendConfigurations: Boolean = false,
     ) {
-        require(content.optInt("version", 0) == 1) { "Unsupported NekoBox backup version" }
-        // Decode ALL selected sections before touching storage. Unknown keys, including every
-        // tag/group-membership extension, are deliberately never interpreted.
-        fun <T> read(name: String, creator: Parcelable.Creator<T>): List<T> =
-            content.getJSONArray(name).let { array ->
-                (0 until array.length()).map { BackupCompatibility.decode(array.getString(it), creator) }
-            }
-        val replaceProfiles = profile && content.has("profiles")
-        val profiles = if (replaceProfiles) read("profiles", ProxyEntity.CREATOR) else emptyList()
-        val groups = if (replaceProfiles) read("groups", ProxyGroup.CREATOR) else emptyList()
-        profiles.forEach { it.requireBean() } // Fail on unsupported types BEFORE clearing data.
-        val rules = if (rule && content.has("rules")) {
-            content.getJSONArray("rules").let { array ->
-                (0 until array.length()).map { BackupCompatibility.decodeRule(array.getString(it)) }
-            }
-        } else null
-        val settings = if (setting && content.has("settings")) {
-            read("settings", KeyValuePair.CREATOR).filterNot { BackupCompatibility.isTagSetting(it.key) }
-        } else null
-        SagerDatabase.instance.runInTransaction {
-            if (replaceProfiles) {
-                SagerDatabase.proxyDao.reset()
-                // The existing FK cascade clears old tag memberships, not tag definitions.
-                // Imported group IDs must NEVER rebind stale local classification metadata.
-                SagerDatabase.groupDao.reset()
-                SagerDatabase.groupDao.insert(groups)
-                SagerDatabase.proxyDao.insert(profiles)
-            }
-            if (rules != null) {
-                SagerDatabase.rulesDao.reset()
-                SagerDatabase.rulesDao.insert(rules)
-            }
-        }
-        if (settings != null) {
-            PublicDatabase.instance.runInTransaction {
-                PublicDatabase.kvPairDao.reset()
-                PublicDatabase.kvPairDao.insert(settings)
-            }
-        }
+        BackupRestore.restore(
+            content, profile, rule, setting, appendConfigurations, SagerDatabase.instance
+        )
     }
 
     private fun showMessage(message: String) {

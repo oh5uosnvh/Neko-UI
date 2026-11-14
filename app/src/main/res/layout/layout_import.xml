@@ -14,6 +14,14 @@
         android:textAppearance="?attr/textAppearanceSubtitle2" />
 
     <CheckBox
+        android:id="@+id/append_backup_configurations"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:checked="false"
+        android:text="@string/backup_append_configurations"
+        android:textAppearance="?attr/textAppearanceSubtitle2" />
+
+    <CheckBox
         android:id="@+id/backup_rules"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
@@ -28,21 +36,5 @@
         android:checked="false"
         android:text="@string/backup_settings"
         android:textAppearance="?attr/textAppearanceSubtitle2" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:textColor="@color/material_red_accent_200"
-        android:text="@string/backup_import_summary">
-
-    </TextView>
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="@string/backup_original_format_notice"
-        android:textAppearance="?attr/textAppearanceBody2" />
 
 </LinearLayout>

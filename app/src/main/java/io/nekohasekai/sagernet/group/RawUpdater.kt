@@ -59,6 +59,23 @@ object RawUpdater : GroupUpdater() {
         bean.wsExtraHeaders = if (extra.length() == 0) "" else extra.toString()
     }
 
+    private fun importWebSocketOptions(bean: StandardV2RayBean, proxy: Map<String, Any?>) {
+        // Resolve aliases in a fixed order, not YAML iteration order. Modern ws-opts
+        // wins, including an explicitly empty path; legacy values are fallback only.
+        bean.type = "ws"
+        bean.path = proxy["ws-path"]?.toString() ?: proxy["path"]?.toString()
+        (proxy["ws-headers"] as? Map<*, *>)?.let { importWebSocketHeaders(bean, it) }
+        (proxy["ws-opts"] as? Map<*, *>)?.forEach { (key, value) ->
+            when (key.toString().lowercase()) {
+                "headers" -> (value as? Map<*, *>)?.let { importWebSocketHeaders(bean, it) }
+                "path" -> bean.path = value?.toString()
+                "max-early-data" -> bean.wsMaxEarlyData = value?.toString()?.toIntOrNull()
+                "early-data-header-name" -> bean.earlyDataHeaderName = value?.toString()
+                "v2ray-http-upgrade" -> if (value as? Boolean == true) bean.type = "httpupgrade"
+            }
+        }
+    }
+
     @SuppressLint("Recycle")
     override suspend fun doUpdate(
         proxyGroup: ProxyGroup,
@@ -579,8 +596,12 @@ object RawUpdater : GroupUpdater() {
 
                             bean.serverAddress = proxy["server"]?.toString() ?: continue
                             bean.serverPort = proxy["port"]?.toString()?.toIntOrNull() ?: continue
+                            val usesWebSocket = proxy["network"] == "ws"
 
                             for (opt in proxy) {
+                                // Unselected transport blocks must not overwrite WS Host/path
+                                // (or throw on a foreign transport's differently typed options).
+                                if (usesWebSocket && opt.key in setOf("h2-opts", "http-opts", "grpc-opts")) continue
                                 when (opt.key) {
                                     "name" -> bean.name = opt.value?.toString()
                                     "password" -> if (bean is TrojanBean) {
@@ -659,31 +680,8 @@ object RawUpdater : GroupUpdater() {
                                         }
                                     }
 
-                                    "ws-path", "path" -> bean.path = opt.value?.toString()
-
-                                    "ws-headers" -> (opt.value as? Map<*, *>)?.let { headers ->
-                                        importWebSocketHeaders(bean, headers)
-                                    }
-
-                                    "ws-opts" -> (opt.value as? Map<*, *>)?.also {
-                                        for (wsOpt in it) {
-                                            when (wsOpt.key.toString().lowercase()) {
-                                                "headers" -> (wsOpt.value as? Map<*, *>)?.let { headers ->
-                                                    importWebSocketHeaders(bean, headers)
-                                                }
-                                                "path" -> bean.path = wsOpt.value?.toString()
-                                                "max-early-data" -> bean.wsMaxEarlyData =
-                                                    wsOpt.value?.toString()?.toIntOrNull()
-                                                "early-data-header-name" -> bean.earlyDataHeaderName =
-                                                    wsOpt.value?.toString()
-                                                "v2ray-http-upgrade" -> {
-                                                    if (wsOpt.value as? Boolean == true) {
-                                                        bean.type = "httpupgrade"
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                                    "path" -> if (!usesWebSocket) bean.path = opt.value?.toString()
+                                    // WS-specific options are resolved once below, after network.
 
                                     "h2-opts" -> (opt.value as? Map<String, Any?>)?.also {
                                         for (h2Opt in it) {
@@ -850,6 +848,7 @@ object RawUpdater : GroupUpdater() {
                                     }
                                 }
                             }
+                            if (usesWebSocket) importWebSocketOptions(bean, proxy)
                             proxies.add(bean)
                         }
 
