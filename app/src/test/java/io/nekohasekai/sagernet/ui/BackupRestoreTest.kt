@@ -188,7 +188,11 @@ class BackupRestoreTest {
     @Test fun malformedSelectedSettingsAreDecodedBeforeConfigurationOverwrite() {
         val json = backup().put("settings", JSONArray().put("invalid-parcel"))
         var failed = false
-        try { restore(json, append = false, setting = true) } catch (_: Exception) { failed = true }
+        try { restore(json, append = false, setting = true) }
+        catch (_: Exception) { failed = true }
+        // Robolectric's custom Parcel wire format reports corrupt bytes as an
+        // Error, unlike Android's runtime exception. Both must precede writes.
+        catch (_: org.robolectric.shadows.ShadowParcel.UnreliableBehaviorError) { failed = true }
         assertTrue(failed)
         localStateIntact()
     }
