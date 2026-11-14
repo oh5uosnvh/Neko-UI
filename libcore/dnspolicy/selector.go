@@ -14,6 +14,13 @@ import (
 
 const SelectorType = "neko-selector"
 
+// RegisterSelectorTransport exposes the selector-aware DNS transport to the
+// sing-box 1.14 transport registry. It is separate from RegisterTransport so
+// the ordinary policy transport remains independently reusable.
+func RegisterSelectorTransport(registry *boxdns.TransportRegistry) {
+	boxdns.RegisterTransport[SelectorOptions](registry, SelectorType, newSelector)
+}
+
 // SelectorOptions contains an immutable, complete outbound -> resolver graph.
 // No fallback to a different group is permitted for missing membership.
 type SelectorOptions struct {
