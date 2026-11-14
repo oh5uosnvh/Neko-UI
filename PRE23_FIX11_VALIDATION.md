@@ -58,10 +58,14 @@ is not a complete FlClash-style shared-core/outbound rewrite.
 
 - Complete Android application AND complete unit-test sources: compiled locally.
 - JVM cancellation/scheduling/retry tests: 14 passed.
-- Native startup cancellation/watchdog tests: 3 passed, repeated five rounds.
+- Native startup cancellation/watchdog tests: 4 passed, repeated five rounds.
+- Real OS plugin process with Main guard dispatch paused: 1 passed locally.
 - HTTP probe tests: 7 passed; repeated five rounds and 120 concurrent probes.
-- Local native drawing tests cannot run: Robolectric reports Linux aarch64 native
-  runtime unsupported. Their actual pixel execution is gated in GitHub x86_64 CI.
+- Local native drawing is unsupported on aarch64. GitHub x86_64 first-round CI
+  passed 706 tests with 0 failures, including all 7 new real-hierarchy/pixel edge
+  tests and the existing Groups/latency-strip reference regressions.
+- Final audit additionally fixes startup watchdog publication races and executes
+  the real pending-Main process cancellation test before the final r3 build.
 - Local ThreadSanitizer cannot run on this Android kernel's 39-bit VMA; race tests
   are required in GitHub CI (`go test -race ./probe`).
 - These are deterministic local test endpoints. Real subscription nodes,

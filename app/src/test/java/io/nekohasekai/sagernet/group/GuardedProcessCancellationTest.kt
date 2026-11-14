@@ -19,14 +19,10 @@ import java.util.concurrent.Executors
 
 /** The real OS child exists while Main guard dispatch is paused. */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [28], application = GuardedProcessCancellationTest.TestApplication::class,
+@Config(sdk = [28], application = android.app.Application::class,
     shadows = [GuardedProcessCancellationTest.NoNativeLogging::class])
 @LooperMode(LooperMode.Mode.PAUSED)
 class GuardedProcessCancellationTest {
-    class TestApplication : io.nekohasekai.sagernet.SagerNet() {
-        override fun onCreate() = Unit
-    }
-
     @Implements(value = Libcore::class, isInAndroidSdk = false)
     class NoNativeLogging {
         companion object {
@@ -36,6 +32,10 @@ class GuardedProcessCancellationTest {
     }
 
     @Test fun processStartedBeforeGuardDispatchIsStillDestroyedOnCancel() = runBlocking {
+        val appContext = org.robolectric.RuntimeEnvironment.getApplication()
+        org.robolectric.util.ReflectionHelpers.callInstanceMethod<Void>(
+            io.nekohasekai.sagernet.SagerNet(), "attachBaseContext",
+            org.robolectric.util.ReflectionHelpers.ClassParameter.from(android.content.Context::class.java, appContext))
         val pidFile = File.createTempFile("guard-cancel-pid", ".txt")
         val executor = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
         val scope = CoroutineScope(Dispatchers.IO + Job())

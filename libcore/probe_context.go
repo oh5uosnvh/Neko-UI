@@ -23,6 +23,7 @@ func NewProbeContext(setupTimeout int32) *ProbeContext {
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &ProbeContext{ctx: ctx, cancel: cancel}
 	if setupTimeout > 0 {
+		p.access.Lock()
 		p.setupTimer = time.AfterFunc(time.Duration(setupTimeout)*time.Millisecond, func() {
 			p.access.Lock()
 			defer p.access.Unlock()
@@ -31,6 +32,7 @@ func NewProbeContext(setupTimeout int32) *ProbeContext {
 				p.cancel()
 			}
 		})
+		p.access.Unlock()
 	}
 	return p
 }
