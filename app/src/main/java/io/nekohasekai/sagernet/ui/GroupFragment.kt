@@ -488,17 +488,24 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     }
 
     private fun confirmGlobalRemoval(group: ProxyGroup) {
-        MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
-            .setMessage(R.string.group_delete_confirm_prompt)
-            .setPositiveButton(R.string.yes) { _, _ ->
-                // Existing entities and every tag relation remain intact throughout the undo window.
-                val index = groupAdapter.groupList.indexOfFirst { it.id == group.id }
-                if (index < 0 || PendingGroupDeletes.contains(group.id)) return@setPositiveButton
+        val removeAction = {
+            // Existing entities and every tag relation remain intact throughout the undo window.
+            val index = groupAdapter.groupList.indexOfFirst { it.id == group.id }
+            if (index >= 0 && !PendingGroupDeletes.contains(group.id)) {
                 PendingGroupDeletes.mark(group.id)
                 groupAdapter.remove(index)
                 undoManager.remove(index to group)
                 runOnDefaultDispatcher { GroupManager.iterator { groupRemoved(group.id) } }
-            }.setNegativeButton(android.R.string.cancel, null).show()
+            }
+        }
+        if (DataStore.confirmProfileDelete) {
+            MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
+                .setMessage(R.string.group_delete_confirm_prompt)
+                .setPositiveButton(R.string.yes) { _, _ -> removeAction() }
+                .setNegativeButton(android.R.string.cancel, null).show()
+        } else {
+            removeAction()
+        }
     }
 
     private fun updateTagSubscriptions() {

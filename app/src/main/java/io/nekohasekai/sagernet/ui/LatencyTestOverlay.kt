@@ -79,7 +79,17 @@ class LatencyTestOverlay(
         val container = host ?: return
         if (released || container.width <= 0) return
         val tabs = root.findViewById<View>(R.id.group_tab)
-        val tabBottom = tabs?.takeIf { it.visibility == View.VISIBLE && it.height > 0 }?.bottom
+        // group_tab lives in AppBarLayout while the strip is a child of
+        // group_list_foreground. Convert the tab bottom into the strip host's
+        // local coordinates; using tabs.bottom directly places the strip over
+        // the node cards after the tab was moved into the header layer.
+        val tabBottom = tabs?.takeIf { it.visibility == View.VISIBLE && it.height > 0 }?.let {
+            val tabLocation = IntArray(2)
+            val hostLocation = IntArray(2)
+            it.getLocationInWindow(tabLocation)
+            container.getLocationInWindow(hostLocation)
+            tabLocation[1] + it.height - hostLocation[1]
+        }
         val y = tabBottom ?: fallbackY()
         val pill = tabs?.let { findPill(it) ?: findTextView(it) }
         val pillHeight = pill?.height?.takeIf { it > 0 } ?: tabs?.height?.takeIf { it > 0 }
