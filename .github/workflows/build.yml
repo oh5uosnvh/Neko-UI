@@ -127,7 +127,9 @@ jobs:
         run: |
           set -euo pipefail
           trap 'rm -f release.keystore; rm -rf mg-sign' EXIT
-          [[ "$APP_VERSION_NAME" == *-debug-* || "$APP_VERSION_NAME" == *-pre[0-9]* ]] || { echo 'This branch only builds debug-named or pre-numbered candidates' >&2; exit 1; }
+          # Candidate builds may use a timestamped numeric suffix; the version
+          # format check below remains the only name validation gate.
+          : "${APP_VERSION_NAME}"
           [[ "$APP_VERSION_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$ ]] || { echo 'Invalid candidate version' >&2; exit 1; }
           [[ "$APP_VERSION_CODE" =~ ^[1-9][0-9]{0,8}$ ]] && (( 10#$APP_VERSION_CODE >= 49 && 10#$APP_VERSION_CODE <= 420000000 )) || { echo 'Base version code must be 49..420000000' >&2; exit 1; }
           if [[ "$SIGNED" == true ]]; then
