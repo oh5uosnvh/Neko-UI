@@ -2,8 +2,12 @@
 <resources>
     <string name="vmess_recovery_menu">从原配置修复旧 VMess</string>
     <string name="vmess_recovery_title">修复旧 VMess</string>
-    <string name="vmess_recovery_confirm">找到 %1$d 个可安全修复的旧 VMess WebSocket 路径。只修复空路径，凭据、顺序、流量和用户设置均会保留。继续吗？</string>
+    <string name="vmess_recovery_confirm">找到 %1$d 个与原配置唯一匹配、但空路径或默认根路径不一致的旧 VMess。仅按原配置修复路径，凭据、顺序、流量和用户设置均会保留。继续吗？</string>
     <string name="vmess_recovery_no_match">没有找到安全匹配项，未作任何更改。</string>
     <string name="vmess_recovery_done">已修复 %1$d/%2$d 个候选项。其余条目因已变更或无法安全匹配而跳过。</string>
     <string name="vmess_recovery_error">无法读取或修复所选配置，未作任何更改。</string>
+    <string name="vmess_recovery_import_choice">当前分组有 %1$d 个旧 VMess 与原配置唯一匹配，但空路径或默认根路径不一致。请选择修复现有节点，或仍按原方式追加导入。</string>
+    <string name="vmess_recovery_repair_existing">修复现有节点</string>
+    <string name="vmess_recovery_append_instead">仍然追加</string>
+    <string name="vmess_recovery_wait_test">请先停止当前测速，再修复节点。</string>
 </resources>

@@ -6,7 +6,7 @@ import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
 /** Repairs only pre22's loss of a WS path, never guessed defaults or unrelated node settings. */
 internal object LegacyVmessWsRecovery {
     fun eligible(bean: VMessBean): Boolean = !bean.isVLESS && bean.type == "ws" &&
-        bean.path.isNullOrBlank() && bean.customOutboundJson.isNullOrBlank() && bean.customConfigJson.isNullOrBlank()
+        (bean.path.isNullOrBlank() || bean.path == "/") && bean.customOutboundJson.isNullOrBlank() && bean.customConfigJson.isNullOrBlank()
 
     fun replacement(old: VMessBean, source: List<AbstractBean>): VMessBean? {
         if (!eligible(old)) return null
@@ -16,7 +16,7 @@ internal object LegacyVmessWsRecovery {
         val originalAddress = identity(old)
         if (originalAddress.isBlank()) return null
         val candidates = source.filterIsInstance<VMessBean>().filter { candidate ->
-            !candidate.isVLESS && candidate.type == "ws" && candidate.path.isNotBlank() &&
+            !candidate.isVLESS && candidate.type == "ws" && candidate.path.startsWith("/") && candidate.path != "/" &&
                 candidate.uuid == old.uuid && candidate.serverPort == old.serverPort &&
                 candidate.alterId == old.alterId && candidate.security == old.security &&
                 candidate.host.equals(old.host, true) &&

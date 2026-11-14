@@ -20,5 +20,6 @@ internal class CardLatencySession {
         entries[profile.id]?.takeIf { it.generation == generation }?.result = profile
     }
     fun get(id: Long) = entries[id]
+    fun invalidate(ids: Collection<Long>) { ids.forEach(entries::remove) }
     fun clear() = entries.clear()
 }

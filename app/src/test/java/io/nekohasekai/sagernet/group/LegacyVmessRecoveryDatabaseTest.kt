@@ -190,6 +190,170 @@ class LegacyVmessRecoveryDatabaseTest {
         assertFalse(b.recover(db.proxyDao().getById(first.id)!!))
     }
 
+    @Test fun importPlanRepairsRenamedSourceInPlaceWithoutAppendingOrLosingCurrentCounters() {
+        val p = profile()
+        val original = bytes(p.id)
+        val imported = source(p).apply { name = "renamed-synthetic-source" }
+        val plan = VmessSourceRepairPlan.prepare(groupId, listOf(p), listOf(imported))
+        assertEquals(groupId, plan.groupId)
+        assertEquals(listOf(p.id), plan.candidates.map { it.profileId })
+        assertArrayEquals(original, plan.candidates.single().expected)
+        assertArrayEquals("Preparing must not write before user confirmation", original, bytes(p.id))
+        assertEquals("", p.vmessBean!!.path)
+
+        // Traffic/order may change while the import confirmation is visible.
+        db.proxyDao().updateProxy(db.proxyDao().getById(p.id)!!.apply {
+            tx = 91001; rx = 91002; userOrder = 91003
+        })
+        val before = row(p.id)
+        assertEquals(setOf(p.id), plan.commitIds(db))
+        assertEquals(1L, db.proxyDao().countByGroup(groupId))
+        val after = row(p.id)
+        for ((column, value) in before) {
+            if (column !in setOf("vmessBean", "status", "ping", "error")) assertEquals(column, value, after[column])
+        }
+        val expected = p.vmessBean!!.clone().apply { path = "/recovered" }
+        assertArrayEquals(KryoConverters.serialize(expected), bytes(p.id))
+        assertEquals("synthetic-node", db.proxyDao().getById(p.id)!!.vmessBean!!.name)
+        assertEquals(0L, after["status"]); assertEquals(0L, after["ping"]); assertNull(after["error"])
+        assertEquals("A second confirmation must not report an already repaired active ID", emptySet<Long>(), plan.commitIds(db))
+    }
+
+    @Test fun importPlanCapturesProfileIdGroupAndBeanBytesInsteadOfMutableImportObjects() {
+        val p = profile()
+        val id = p.id
+        val imported = source(p)
+        val expected = KryoConverters.serialize(imported)
+        val plan = VmessSourceRepairPlan.prepare(groupId, listOf(p), listOf(imported))
+        imported.path = "/changed-after-confirmation"
+        p.id = id + 100000
+        p.groupId = groupId + 100000
+        p.vmessBean!!.apply { path = "/detached-caller-edit"; uuid = "detached-credential" }
+        assertEquals(setOf(id), plan.commitIds(db))
+        assertArrayEquals(expected, bytes(id))
+        assertEquals(groupId, db.proxyDao().getById(id)!!.groupId)
+        assertEquals(1L, db.proxyDao().countByGroup(groupId))
+    }
+
+    @Test fun importPlanLeavesOtherGroupNonemptyPathsAndCustomBeansUntouched() {
+        val eligible = profile()
+        val otherGroup = db.groupDao().createGroup(ProxyGroup(name = "synthetic-other-group", userOrder = 42))
+        val foreign = profile().apply { groupId = otherGroup }.also { db.proxyDao().updateProxy(it) }
+        val nonempty = profile().apply { vmessBean!!.path = "/user-path" }.also { db.proxyDao().updateProxy(it) }
+        val outbound = profile().apply { vmessBean!!.customOutboundJson = "{}" }.also { db.proxyDao().updateProxy(it) }
+        val config = profile().apply { vmessBean!!.customConfigJson = "{}" }.also { db.proxyDao().updateProxy(it) }
+        val profiles = listOf(eligible, foreign, nonempty, outbound, config)
+        val before = profiles.associate { it.id to row(it.id) }
+        val plan = VmessSourceRepairPlan.prepare(groupId, profiles, listOf(source(eligible)))
+        assertEquals(listOf(eligible.id), plan.candidates.map { it.profileId })
+        assertEquals(setOf(eligible.id), plan.commitIds(db))
+        for (p in profiles.drop(1)) assertEquals(before[p.id], row(p.id))
+        assertEquals(4L, db.proxyDao().countByGroup(groupId))
+        assertEquals(1L, db.proxyDao().countByGroup(otherGroup))
+    }
+
+    @Test fun importPlanRequiresExplicitNonrootSourceForRootPathAndRejectsAmbiguity() {
+        val p = profile().apply { vmessBean!!.path = "/" }.also { db.proxyDao().updateProxy(it) }
+        val before = row(p.id)
+        val rootSource = source(p).apply { path = "/" }
+        for (sources in listOf(emptyList(), listOf(rootSource), listOf(rootSource.clone().apply { path = "" }))) {
+            val rejected = VmessSourceRepairPlan.prepare(groupId, listOf(p), sources)
+            assertTrue(rejected.candidates.isEmpty())
+            assertTrue(rejected.commitIds(db).isEmpty())
+            assertEquals(before, row(p.id))
+        }
+        val explicit = source(p).apply { path = "/source"; name = "renamed-source" }
+        val ambiguous = VmessSourceRepairPlan.prepare(groupId, listOf(p), listOf(
+            explicit, explicit.clone().apply { path = "/different-source"; name = "second-renamed-source" }
+        ))
+        assertTrue(ambiguous.candidates.isEmpty())
+        assertTrue(ambiguous.commitIds(db).isEmpty())
+        val plan = VmessSourceRepairPlan.prepare(groupId, listOf(p), listOf(rootSource, explicit))
+        assertEquals(before, row(p.id)) // Detection alone is not permission to repair '/'.
+        assertEquals(setOf(p.id), plan.commitIds(db))
+        assertEquals("/source", db.proxyDao().getById(p.id)!!.vmessBean!!.path)
+        assertEquals(1L, db.proxyDao().countByGroup(groupId))
+    }
+
+    @Test fun importPlanSkipsStaleEditsMovedDeletedAndRetypedRowsAndReturnsOnlyWrittenIds() {
+        val repaired = profile()
+        val changes: List<VMessBean.() -> Unit> = listOf(
+            { uuid = "new-credential" }, { subscriptionDns = "new-dns" },
+            { path = "/user-edited" }, { customConfigJson = "{}" }, { enableMux = false }
+        )
+        val edited = changes.map { profile() }
+        val moved = profile()
+        val deleted = profile()
+        val retyped = profile()
+        val profiles = listOf(repaired) + edited + listOf(moved, deleted, retyped)
+        val plan = VmessSourceRepairPlan.prepare(groupId, profiles, listOf(source(repaired)))
+        assertEquals(profiles.map { it.id }, plan.candidates.map { it.profileId })
+        edited.zip(changes).forEach { (p, change) ->
+            db.proxyDao().updateProxy(db.proxyDao().getById(p.id)!!.apply { vmessBean!!.apply(change) })
+        }
+        val otherGroup = db.groupDao().createGroup(ProxyGroup(name = "synthetic-moved-group", userOrder = 43))
+        db.openHelper.writableDatabase.execSQL("UPDATE proxy_entities SET groupId = ? WHERE id = ?", arrayOf(otherGroup, moved.id))
+        db.proxyDao().deleteById(deleted.id)
+        db.openHelper.writableDatabase.execSQL("UPDATE proxy_entities SET type = 0 WHERE id = ?", arrayOf(retyped.id))
+        val skipped = edited + listOf(moved, retyped)
+        val before = skipped.associate { it.id to row(it.id) }
+        val countBefore = db.proxyDao().countByGroup(groupId)
+        val repairedIds = plan.commitIds(db)
+        assertEquals("Only committed IDs may trigger an active-service reload", setOf(repaired.id), repairedIds)
+        for (p in skipped) {
+            assertFalse(repairedIds.contains(p.id))
+            assertEquals(before[p.id], row(p.id))
+        }
+        assertFalse(repairedIds.contains(deleted.id))
+        assertNull(db.proxyDao().getById(deleted.id))
+        assertEquals("/recovered", db.proxyDao().getById(repaired.id)!!.vmessBean!!.path)
+        assertEquals(countBefore, db.proxyDao().countByGroup(groupId))
+        assertTrue(plan.commitIds(db).isEmpty())
+    }
+
+    @Test fun importPlanCancellationAfterFirstWriteRollsBackEveryCandidateAndFailureStatus() {
+        val first = profile()
+        val second = profile()
+        val plan = VmessSourceRepairPlan.prepare(groupId, listOf(first, second), listOf(source(first)))
+        assertEquals(listOf(first.id, second.id), plan.candidates.map { it.profileId })
+        val firstBefore = row(first.id)
+        val secondBefore = row(second.id)
+        val job = Job()
+        var checks = 0
+        var sawFirstWrite = false
+        var completed = false
+        try {
+            plan.commitIds(db) {
+                checks++
+                if (checks == 3) {
+                    // Entry, first candidate, then second candidate: the first UPDATE is real
+                    // but still uncommitted on this same SQLite transaction/connection.
+                    assertEquals("/recovered", db.proxyDao().getById(first.id)!!.vmessBean!!.path)
+                    assertEquals(0, db.proxyDao().getById(first.id)!!.status)
+                    assertEquals(secondBefore, row(second.id))
+                    sawFirstWrite = true
+                    job.cancel()
+                }
+                job.ensureActive()
+            }
+            completed = true
+        } catch (_: CancellationException) {
+            // Room must end the failed transaction without publishing any repaired IDs.
+        } finally {
+            job.cancel()
+        }
+        assertFalse("Cancelled transaction must not return success IDs", completed)
+        assertTrue("Cancellation must happen after a candidate was actually written", sawFirstWrite)
+        assertEquals(3, checks)
+        assertEquals(firstBefore, row(first.id))
+        assertEquals(secondBefore, row(second.id))
+        assertEquals(2L, db.proxyDao().countByGroup(groupId))
+        assertEquals("", first.vmessBean!!.path)
+        assertEquals("", second.vmessBean!!.path)
+        assertEquals(setOf(first.id, second.id), plan.commitIds(db))
+        assertTrue(plan.commitIds(db).isEmpty())
+    }
+
     @Test fun cancellationDuringMatchingMustNotCommitOrMutateCaller() = runBlocking {
         val p = profile()
         val before = row(p.id)

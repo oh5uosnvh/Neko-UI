@@ -29,7 +29,7 @@ class LegacyVmessWsRecoveryTest {
     @Test fun onlyLegacyEmptyWsVmessWithoutCustomJsonIsEligible() {
         assertTrue(LegacyVmessWsRecovery.eligible(old()))
         val excluded: List<VMessBean.() -> Unit> = listOf(
-            { path = "/" }, { path = "/user-choice" }, { type = "tcp" },
+            { path = "/user-choice" }, { type = "tcp" },
             { type = "httpupgrade" }, { alterId = -1 }, { alterId = -2 },
             { customOutboundJson = "{}" }, { customConfigJson = "{}" }
         )
@@ -40,6 +40,16 @@ class LegacyVmessWsRecoveryTest {
             assertNull(replace(b, source()))
             assertArrayEquals(before, KryoConverters.serialize(b))
         }
+    }
+
+    @Test fun rootPathCanOnlyBeReplacedByUniqueExplicitNonRootSource() {
+        val b = old().apply { path = "/" }
+        assertEquals("/recovered", replace(b, source(b))!!.path)
+        assertNull(replace(b, source(b).apply { path = "/" }))
+        assertNull(replace(b, source(b).apply { path = "" }))
+        assertNull(replace(b, source(b).apply { path = "relative-path" }))
+        assertNull(replace(b, source(b), source(b).apply { path = "/ambiguous" }))
+        assertEquals("/", b.path)
     }
 
     @Test fun identityMismatchNeverFallsBackToNameOrGuessesPath() {

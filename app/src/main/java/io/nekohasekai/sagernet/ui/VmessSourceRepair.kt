@@ -46,6 +46,34 @@ internal class VmessSourceRepair(private val fragment: Fragment) {
         }
     }
 
+    /** Normal YAML import must not silently add good duplicates while the selected old ID stays broken. */
+    suspend fun chooseImportRepair(count: Int): Int = withContext(Dispatchers.Main) {
+        if (!fragment.isAdded) return@withContext 0
+        if (io.nekohasekai.sagernet.database.DataStore.runningTest) {
+            show(R.string.vmess_recovery_wait_test)
+            return@withContext 0
+        }
+        kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+            val context = fragment.requireContext()
+            val dialog = MaterialAlertDialogBuilder(context)
+                .setTitle(R.string.vmess_recovery_title)
+                .setMessage(context.getString(R.string.vmess_recovery_import_choice, count))
+                .setPositiveButton(R.string.vmess_recovery_repair_existing) { _, _ ->
+                    if (continuation.isActive) continuation.resumeWith(kotlin.Result.success(1))
+                }
+                .setNeutralButton(R.string.vmess_recovery_append_instead) { _, _ ->
+                    if (continuation.isActive) continuation.resumeWith(kotlin.Result.success(2))
+                }
+                .setNegativeButton(android.R.string.cancel) { _, _ ->
+                    if (continuation.isActive) continuation.resumeWith(kotlin.Result.success(0))
+                }.create()
+            dialog.setOnCancelListener { if (continuation.isActive) continuation.resumeWith(kotlin.Result.success(0)) }
+            dialog.setOnDismissListener { if (continuation.isActive) continuation.resumeWith(kotlin.Result.success(0)) }
+            continuation.invokeOnCancellation { android.os.Handler(android.os.Looper.getMainLooper()).post { dialog.dismiss() } }
+            dialog.show()
+        }
+    }
+
     private fun repair(groupId: Long, uri: Uri) {
         val context = fragment.context ?: return
         fragment.lifecycleScope.launch {
@@ -55,15 +83,9 @@ internal class VmessSourceRepair(private val fragment: Fragment) {
                         ?: return@withContext Result.NoMatch
                     val source = RawUpdater.parseRaw(sourceText).orEmpty()
                     coroutineContext.ensureActive()
-                    val candidates = SagerDatabase.proxyDao.getByGroup(groupId)
-                        .mapNotNull { old ->
-                            val bean = old.vmessBean ?: return@mapNotNull null
-                            if (!LegacyVmessWsRecovery.eligible(bean)) return@mapNotNull null
-                            val repaired = LegacyVmessWsRecovery.replacement(bean, source)
-                                ?: return@mapNotNull null
-                            Candidate(old, repaired)
-                        }
-                    if (candidates.isEmpty()) Result.NoMatch else Result.Candidates(candidates)
+                    val plan = io.nekohasekai.sagernet.group.VmessSourceRepairPlan.prepare(groupId,
+                        SagerDatabase.proxyDao.getByGroup(groupId), source)
+                    if (plan.candidates.isEmpty()) Result.NoMatch else Result.Candidates(plan)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -74,49 +96,42 @@ internal class VmessSourceRepair(private val fragment: Fragment) {
             when (result) {
                 Result.Error -> show(R.string.vmess_recovery_error)
                 Result.NoMatch -> show(R.string.vmess_recovery_no_match)
-                is Result.Candidates -> confirm(groupId, result.items)
+                is Result.Candidates -> confirm(result.plan)
             }
         }
     }
 
-    private fun confirm(groupId: Long, candidates: List<Candidate>) {
+    private fun confirm(plan: io.nekohasekai.sagernet.group.VmessSourceRepairPlan) {
         val context = fragment.context ?: return
         MaterialAlertDialogBuilder(context)
             .setTitle(R.string.vmess_recovery_title)
-            .setMessage(context.getString(R.string.vmess_recovery_confirm, candidates.size))
-            .setPositiveButton(R.string.yes) { _, _ -> commit(groupId, candidates) }
-            .setNegativeButton(R.string.no, null)
-            .show()
+            .setMessage(context.getString(R.string.vmess_recovery_confirm, plan.candidates.size))
+            .setPositiveButton(R.string.yes) { _, _ -> commit(plan) }
+            .setNegativeButton(R.string.no, null).show()
     }
 
-    private fun commit(groupId: Long, candidates: List<Candidate>) {
+    private fun commit(plan: io.nekohasekai.sagernet.group.VmessSourceRepairPlan) {
         fragment.lifecycleScope.launch {
-            val repaired = try {
-                withContext(Dispatchers.IO) {
-                    var count = 0
-                    val job = currentCoroutineContext()[Job]
-                    SagerDatabase.instance.runInTransaction {
-                        for (candidate in candidates) {
-                            job?.ensureActive()
-                            if (LegacyVmessWsRecovery.commitIfUnchanged(
-                                    SagerDatabase.instance, candidate.old.id, groupId,
-                                    candidate.snapshot, candidate.repaired
-                                )) count++
-                        }
-                    }
-                    count
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                -1
+            if (io.nekohasekai.sagernet.database.DataStore.runningTest) {
+                show(R.string.vmess_recovery_wait_test)
+                return@launch
             }
+            val repairedIds = try {
+                withContext(Dispatchers.IO) {
+                    val job = currentCoroutineContext()[Job]
+                    plan.commitIds(SagerDatabase.instance) { job?.ensureActive() }
+                }
+            } catch (e: CancellationException) { throw e }
+              catch (_: Exception) { null }
             if (!fragment.isAdded) return@launch
-            if (repaired < 0) {
-                show(R.string.vmess_recovery_error)
-            } else {
-                GroupManager.postReload(groupId)
-                show(fragment.resources.getString(R.string.vmess_recovery_done, repaired, candidates.size))
+            if (repairedIds == null) show(R.string.vmess_recovery_error)
+            else {
+                (fragment as? ConfigurationFragment)?.invalidateRepairedLatencyResults(repairedIds)
+                GroupManager.postReload(plan.groupId)
+                if (io.nekohasekai.sagernet.database.DataStore.serviceState.canStop &&
+                    io.nekohasekai.sagernet.database.DataStore.currentProfile in repairedIds)
+                    io.nekohasekai.sagernet.SagerNet.reloadService()
+                show(fragment.resources.getString(R.string.vmess_recovery_done, repairedIds.size, plan.candidates.size))
             }
         }
     }
@@ -133,16 +148,10 @@ internal class VmessSourceRepair(private val fragment: Fragment) {
         else fragment.view?.let { com.google.android.material.snackbar.Snackbar.make(it, message, com.google.android.material.snackbar.Snackbar.LENGTH_SHORT).show() }
     }
 
-    private data class Candidate(
-        val old: ProxyEntity,
-        val repaired: io.nekohasekai.sagernet.fmt.v2ray.VMessBean,
-        val snapshot: ByteArray = KryoConverters.serialize(old.vmessBean)
-    )
-
     private sealed interface Result {
         data object NoMatch : Result
         data object Error : Result
-        data class Candidates(val items: List<Candidate>) : Result
+        data class Candidates(val plan: io.nekohasekai.sagernet.group.VmessSourceRepairPlan) : Result
     }
 
     private fun java.io.InputStream.readUtf8Limited(): String {

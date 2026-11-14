@@ -1060,6 +1060,35 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     suspend fun import(proxies: List<AbstractBean>, source: String = "", fileName: String = "") {
         val targetId = DataStore.selectedGroupForImport()
+        if (source == "file") {
+            val plan = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                io.nekohasekai.sagernet.group.VmessSourceRepairPlan.prepare(targetId,
+                    SagerDatabase.proxyDao.getByGroup(targetId), proxies)
+            }
+            if (plan.candidates.isNotEmpty()) {
+                when (vmessSourceRepair.chooseImportRepair(plan.candidates.size)) {
+                    0 -> return
+                    1 -> {
+                        if (DataStore.runningTest) {
+                            onMainDispatcher { if (isAdded) snackbar(R.string.vmess_recovery_wait_test).show() }
+                            return
+                        }
+                        val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
+                        val repairedIds = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                            plan.commitIds(SagerDatabase.instance) { job?.ensureActive() }
+                        }
+                        onMainDispatcher { invalidateRepairedLatencyResults(repairedIds) }
+                        GroupManager.postReload(targetId)
+                        onMainDispatcher {
+                            if (DataStore.serviceState.canStop && DataStore.currentProfile in repairedIds) SagerNet.reloadService()
+                            if (isAdded) snackbar(getString(R.string.vmess_recovery_done, repairedIds.size, plan.candidates.size)).show()
+                        }
+                        return
+                    }
+                    // Explicit append choice keeps the original import behavior.
+                }
+            }
+        }
         kotlinx.coroutines.withContext(Dispatchers.IO) {
             ProfileBatchStore.append(SagerDatabase.instance, targetId, proxies, source, fileName)
         }
@@ -1546,6 +1575,10 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private fun cancelActiveLatencyTest() {
         activeLatencyCancel?.invoke()
+    }
+
+    internal fun invalidateRepairedLatencyResults(ids: Collection<Long>) {
+        cardLatencySession.invalidate(ids)
     }
 
     private var activeLatencyCancel: (() -> Unit)? = null
