@@ -192,7 +192,10 @@ class BackupRestoreTest {
         catch (_: Exception) { failed = true }
         // Robolectric's custom Parcel wire format reports corrupt bytes as an
         // Error, unlike Android's runtime exception. Both must precede writes.
-        catch (_: org.robolectric.shadows.ShadowParcel.UnreliableBehaviorError) { failed = true }
+        catch (error: AssertionError) {
+            if (error.javaClass.name != "org.robolectric.shadows.ShadowParcel\$UnreliableBehaviorError") throw error
+            failed = true
+        }
         assertTrue(failed)
         localStateIntact()
     }
