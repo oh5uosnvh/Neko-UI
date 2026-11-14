@@ -46,6 +46,8 @@ jobs:
           path: sing-box
           token: ${{ secrets.GH_PAT }}
           persist-credentials: false
+      - name: Place kernel checkout beside the app repository
+        run: mv sing-box ../sing-box
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.10'
@@ -111,13 +113,6 @@ jobs:
             Neko-viewTurbo
             Neko-fastup
             Neko-oppa
-      - uses: actions/checkout@v4
-        with:
-          repository: oh5uosnvh/sing-box
-          ref: ff0a591f8e6b3c74a1261e4c900e41102a5b37be
-          path: sing-box
-          token: ${{ secrets.GH_PAT }}
-          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.10'
