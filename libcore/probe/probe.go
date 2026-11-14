@@ -28,27 +28,24 @@ func RTT(parent context.Context, client *http.Client, link string, timeout time.
 	}
 	defer client.CloseIdleConnections()
 	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	// The user-provided timeout is the complete deadline for this node. Do not
+	// add a hidden 5/8-second warm-up allowance or let the second sample extend it.
+	probeCtx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
 
-	first, err := request(parent, client, link, timeout)
+	first, err := request(probeCtx, client, link, timeout)
 	if err != nil {
 		return 0, err
 	}
-	// A slow/unresponsive optional sample must not stall an otherwise healthy
-	// batch for a second complete cold-start timeout.
-	warmBudget := time.Second
-	if adaptive := 4*first + 250*time.Millisecond; adaptive > warmBudget {
-		warmBudget = adaptive
-	}
-	if warmBudget > timeout {
-		warmBudget = timeout
-	}
-	second, err := request(parent, client, link, warmBudget)
 	if ownerErr := parent.Err(); ownerErr != nil {
 		return 0, ownerErr
 	}
-	if err == nil {
-		return milliseconds(second), nil
+	if deadlineErr := probeCtx.Err(); deadlineErr != nil {
+		return 0, deadlineErr
 	}
+	// One request is the complete quick-delay test. A second warm sample would
+	// consume part of the user's deadline and could turn a valid result into a
+	// delayed 5/8-second-style decision.
 	return milliseconds(first), nil
 }
 

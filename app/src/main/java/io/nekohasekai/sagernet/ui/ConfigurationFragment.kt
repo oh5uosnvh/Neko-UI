@@ -1895,6 +1895,9 @@ class ConfigurationFragment @JvmOverloads constructor(
             io.nekohasekai.sagernet.bg.runLatencyProbeBatch(
                 targets = profilesList,
                 concurrency = workers,
+                // A user-configured deadline is terminal; do not perform
+                // FlClash-style transient timeout verification here.
+                shouldRetry = { false },
                 probe = { profile ->
                     val started = SystemClock.elapsedRealtime()
                     try {

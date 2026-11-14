@@ -609,6 +609,7 @@
     <string name="invalid_backup_file">Invalid backup file</string>
     <string name="backup_import">Import</string>
     <string name="backup_import_summary">Importing will overwrite the existing data.</string>
+    <string name="backup_import_append_summary">Importing will append the backup configuration groups without overwriting existing data.</string>
     <string name="backup_importing">Importing…</string>
 
     <string name="packet_encoding">Packet Encoding</string>

@@ -14,7 +14,8 @@ class LatencyProbeBatchTest {
     @Test fun workerCountIsBoundedAndNeverExceedsTargets() {
         assertEquals(0, LatencyProbePolicy.workers(999, 0))
         assertEquals(1, LatencyProbePolicy.workers(-20, 100))
-        assertEquals(16, LatencyProbePolicy.workers(Int.MAX_VALUE, 365))
+        assertEquals(365, LatencyProbePolicy.workers(Int.MAX_VALUE, 365))
+        assertEquals(25, LatencyProbePolicy.DEFAULT_CONCURRENCY)
         assertEquals(3, LatencyProbePolicy.workers(12, 3))
     }
 

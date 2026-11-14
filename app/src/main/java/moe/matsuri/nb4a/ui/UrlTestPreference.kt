@@ -46,8 +46,7 @@ constructor(
                 val newConcurrent = text?.toString()?.toIntOrNull()
                     ?.takeIf { it > 0 }
                     ?: io.nekohasekai.sagernet.bg.LatencyProbePolicy.DEFAULT_CONCURRENCY
-                DataStore.connectionTestConcurrent = newConcurrent.coerceAtMost(
-                    io.nekohasekai.sagernet.bg.LatencyProbePolicy.MAX_CONCURRENCY)
+                DataStore.connectionTestConcurrent = newConcurrent
             }
             timeout?.apply {
                 var newTimeout = text?.toString()?.toIntOrNull()

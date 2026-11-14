@@ -489,10 +489,11 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                                     }
                                     finishImport(
                                         json,
-                                        import.backupConfigurations.isChecked || import.appendBackupConfigurations.isChecked,
+                                        import.backupConfigurations.isChecked,
                                         import.backupRules.isChecked,
                                         import.backupSettings.isChecked,
-                                        import.appendBackupConfigurations.isChecked
+                                        import.backupConfigurations.isChecked &&
+                                            import.appendBackupConfigurations.isChecked
                                     )
                                     ProcessPhoenix.triggerRebirth(
                                         activity, Intent(activity, MainActivity::class.java)
@@ -673,6 +674,12 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                 if (!json.has("settings")) {
                     import.backupSettings.isVisible = false
                 }
+                import.appendBackupConfigurations.setOnCheckedChangeListener { _, checked ->
+                    import.backupImportSummary.setText(
+                        if (checked) R.string.backup_import_append_summary
+                        else R.string.backup_import_summary
+                    )
+                }
                 MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.backup_import)
                     .setView(import.root)
                     .setPositiveButton(R.string.backup_import) { _, _ ->
@@ -688,10 +695,11 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                             runCatching {
                                 finishImport(
                                     json,
-                                    import.backupConfigurations.isChecked || import.appendBackupConfigurations.isChecked,
+                                    import.backupConfigurations.isChecked,
                                     import.backupRules.isChecked,
                                     import.backupSettings.isChecked,
-                                    import.appendBackupConfigurations.isChecked
+                                    import.backupConfigurations.isChecked &&
+                                        import.appendBackupConfigurations.isChecked
                                 )
                                 triggerFullRestart(requireContext())
                             }.onFailure {

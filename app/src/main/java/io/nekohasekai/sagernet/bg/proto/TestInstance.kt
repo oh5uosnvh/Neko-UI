@@ -48,9 +48,8 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
                     probeProcesses?.coroutineContext?.get(Job)?.join()
                 },
                 probe = {
-                    // Native outbounds start synchronously. External plugins still
-                    // need their historical readiness allowance, outside RTT time.
-                    if (processes.processCount > 0) delay(500)
+                    // The configured timeout is the complete per-node deadline.
+                    // Do not add a hidden readiness grace period before probing.
                     coroutineContext.ensureActive()
                     pluginFailure.get()?.let { throw it }
                     Libcore.urlTest(box, link, timeout)
@@ -71,7 +70,7 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
     override suspend fun loadConfig() {
         // don't call destroyAllJsi here
         if (BuildConfig.DEBUG) Logs.d(config.config)
-        val native = Libcore.newProbeContext(maxOf(timeout, 5000))
+        val native = Libcore.newProbeContext(timeout)
         probeContext = native
         coroutineContext.ensureActive()
         box = Libcore.newSingBoxProbe(config.config, LocalResolverImpl, native)

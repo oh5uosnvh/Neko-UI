@@ -37,8 +37,8 @@ func TestHealthyRepeatedRunsUseCurrentWarmSample(t *testing.T) {
 			t.Fatalf("unexpected real sample %dms", result)
 		}
 	}
-	if calls.Load() != 24 {
-		t.Fatalf("history was reused or extra probes sent: %d", calls.Load())
+	if calls.Load() != 12 {
+		t.Fatalf("unexpected extra probes sent: %d", calls.Load())
 	}
 	if connections.Load() != 12 {
 		t.Fatalf("connection was not reused inside each run: %d", connections.Load())
@@ -60,8 +60,8 @@ func TestColdPrimeBudgetDoesNotConsumeWarmSampleBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result < 55 || result > 145 {
-		t.Fatalf("wanted warm sample, not cold prime: %dms", result)
+	if result < 120 || result > 185 {
+		t.Fatalf("wanted the single real sample: %dms", result)
 	}
 }
 
@@ -82,10 +82,13 @@ func TestSuccessfulPrimeIsNotOverwrittenByFailedWarmRequest(t *testing.T) {
 		t.Fatalf("valid current-run first sample discarded: %v", err)
 	}
 	if result < 12 || result > 90 {
-		t.Fatalf("failed sample waiting was counted as RTT: %dms", result)
+		t.Fatalf("unexpected single-sample RTT: %dms", result)
+	}
+	if count.Load() != 1 {
+		t.Fatalf("quick test issued extra warm requests: %d", count.Load())
 	}
 	if time.Since(started) > 600*time.Millisecond {
-		t.Fatal("warm sample exceeded bounded budget")
+		t.Fatal("single sample exceeded bounded budget")
 	}
 }
 
@@ -94,10 +97,7 @@ func TestOwningCoreCancellationInterruptsReadAndNeverReturnsCachedSuccess(t *tes
 	entered := make(chan struct{})
 	var count atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if count.Add(1) == 1 {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
+		count.Add(1)
 		close(entered)
 		<-r.Context().Done()
 	}))

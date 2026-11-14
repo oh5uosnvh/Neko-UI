@@ -10,13 +10,12 @@ import kotlin.coroutines.coroutineContext
 
 /** Per-run limits: live probes, initialization, and verification never disagree. */
 internal object LatencyProbePolicy {
-    const val DEFAULT_CONCURRENCY = 12
-    const val MAX_CONCURRENCY = 16
+    const val DEFAULT_CONCURRENCY = 25
     const val INITIALIZATION_CONCURRENCY = 2
     const val VERIFICATION_CONCURRENCY = 2
 
     fun workers(configured: Int, targets: Int): Int =
-        if (targets <= 0) 0 else configured.coerceIn(1, MAX_CONCURRENCY).coerceAtMost(targets)
+        if (targets <= 0) 0 else configured.coerceAtLeast(1).coerceAtMost(targets)
 
     /** Configuration/auth/certificate errors cannot become healthy by waiting. */
     fun isTransient(failure: Exception): Boolean {
