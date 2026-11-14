@@ -39,6 +39,7 @@ class TitleBarLayout @JvmOverloads constructor(
     private var syncing = false
     private var contentBottom = 0f
     private var headerBottom = 0
+    private var toolbarBottom = 0
     private var rejectedGesture = false
     private var contentGesture = false
 
@@ -49,6 +50,12 @@ class TitleBarLayout @JvmOverloads constructor(
     /** Pixel distance from title ink bottom to the complete appbar bottom. */
     internal fun titleEdgeBandHeight(): Float =
         (headerBottom.toFloat() - titleGlyphBottom).coerceAtLeast(0f)
+
+    /** The content fade must end at the toolbar's glyph baseline, not below the
+     * group-name pill. This keeps the first card visible from the character
+     * bottom exactly as on the pre-title-bar layout. */
+    internal fun toolbarEdgeBandHeight(): Float =
+        (toolbarBottom.toFloat() - titleGlyphBottom).coerceAtLeast(0f)
 
     /** Optional animation hook. Nonzero translationX on this root/ancestors is automatic. */
     var pageTransitionRunning: Boolean = false
@@ -186,8 +193,8 @@ class TitleBarLayout @JvmOverloads constructor(
         headerBottom = if (headerVisible &&
             TitleGlyphMetrics.bounds(appbar!!, this, rect)) ceil(rect.bottom).toInt() else paddingTop
         val toolbarVisible = headerVisible && bar != null && bar.visibility == VISIBLE
-        val toolbarBottom = if (toolbarVisible &&
-            TitleGlyphMetrics.bounds(bar!!, this, rect)) rect.bottom else headerBottom.toFloat()
+        toolbarBottom = if (toolbarVisible &&
+            TitleGlyphMetrics.bounds(bar!!, this, rect)) ceil(rect.bottom).toInt() else headerBottom
         val measured = bar?.takeIf { toolbarVisible }?.let(TitleGlyphMetrics::titleView)
             ?.let { TitleGlyphMetrics.bottom(it, this) }
         // A toolbar without title ink safely keeps content below the header until a title arrives.
@@ -233,7 +240,7 @@ class TitleBarLayout @JvmOverloads constructor(
         if (child is GroupListEdgeLayout ||
             child.findViewById<GroupListEdgeLayout>(R.id.group_list_foreground) != null
         ) return super.drawChild(canvas, child, drawingTime)
-        return edge.draw(canvas, width, titleGlyphBottom, contentBottom, headerBottom.toFloat(),
+        return edge.draw(canvas, width, titleGlyphBottom, contentBottom, toolbarBottom.toFloat(),
             resources.displayMetrics.density, useLocalBlur(canvas.isHardwareAccelerated)) {
             super.drawChild(it, child, drawingTime)
         }

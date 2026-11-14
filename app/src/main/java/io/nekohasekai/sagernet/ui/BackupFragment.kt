@@ -489,7 +489,7 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                                     }
                                     finishImport(
                                         json,
-                                        import.backupConfigurations.isChecked,
+                                        import.backupConfigurations.isChecked || import.appendBackupConfigurations.isChecked,
                                         import.backupRules.isChecked,
                                         import.backupSettings.isChecked,
                                         import.appendBackupConfigurations.isChecked
@@ -688,7 +688,7 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                             runCatching {
                                 finishImport(
                                     json,
-                                    import.backupConfigurations.isChecked,
+                                    import.backupConfigurations.isChecked || import.appendBackupConfigurations.isChecked,
                                     import.backupRules.isChecked,
                                     import.backupSettings.isChecked,
                                     import.appendBackupConfigurations.isChecked
@@ -760,9 +760,14 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
             }
             val groupIds = groups.map { it.id }.toSet()
             val validGroups = groups.distinctBy { it.id }
-            val acceptedGroups = validGroups.associateBy { it.id }
+            val acceptedGroups = validGroups.mapNotNull { group ->
+                runCatching { group.applyDefaultValues(); group }.onFailure {
+                    skipped++
+                    Logs.w("Skipping invalid backup group ${group.id}", it)
+                }.getOrNull()
+            }.associateBy { it.id }
             val acceptedProfiles = profiles.filter { profile ->
-                if (profile.groupId != 0L && profile.groupId !in groupIds) return@filter false
+                if (profile.groupId != 0L && profile.groupId !in acceptedGroups) return@filter false
                 runCatching { profile.requireBean(); profile.displayName() }.onFailure {
                     skipped++
                     Logs.w("Skipping unsupported backup profile", it)
@@ -827,7 +832,20 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
 
                 val importedProfiles = acceptedProfiles.mapNotNull { source ->
                     val newGroupId = groupIdMap[source.groupId] ?: return@mapNotNull null
-                    source.copy(id = 0L, groupId = newGroupId)
+                    runCatching {
+                        val bean = source.requireBean().applyDefaultValues()
+                        source.copy(id = 0L, groupId = newGroupId).apply {
+                            // Rebuild the one active bean explicitly. This removes
+                            // stale/null sibling blobs from old or magic backups,
+                            // which otherwise fail Room bindBlob at a later index.
+                            putBean(bean)
+                            uuid = source.uuid.orEmpty()
+                            error = null
+                        }
+                    }.onFailure {
+                        skipped++
+                        Logs.w("Skipping unsupported backup profile ${source.id}", it)
+                    }.getOrNull()
                 }
                 if (groupIdMap.isNotEmpty() && importedProfiles.isNotEmpty()) {
                     SagerDatabase.proxyDao.insert(importedProfiles)
@@ -872,7 +890,7 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                     try {
                         parcel.unmarshall(data, 0, data.size)
                         parcel.setDataPosition(0)
-                        rules += ParcelizeBridge.createRule(parcel)
+                        rules += ParcelizeBridge.createRule(parcel).normalizedForImport()
                     } finally { parcel.recycle() }
                 } catch (error: Throwable) {
                     skipped++
