@@ -24,6 +24,7 @@ MAPPING = [
     ('adapter_runtime_routing_test.go.txt', 'adapter/runtime_routing_test.go'),
     ('box_runtime_routing_test.go.txt', 'runtime_routing_test.go'),
     ('selector.go.txt', 'protocol/group/selector.go'),
+    ('libbox_adapter_platform.go.txt', 'experimental/libbox/platform_android_compat.go'),
 ]
 
 MARK = '// neko-runtime-routing-v1'
@@ -52,7 +53,8 @@ if MARK not in (root / 'route/router.go').read_text():
 changed = {}
 for source, target in MAPPING:
     expected = (here / source).read_text()
-    current = (root / target).read_text()
+    target_path = root / target
+    current = target_path.read_text() if target_path.exists() else ""
     if current != expected:
         changed[target] = expected
 

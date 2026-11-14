@@ -1,0 +1,25 @@
+package libbox
+
+import (
+	"context"
+
+	"github.com/sagernet/sing-box/adapter"
+	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/dns"
+	"github.com/sagernet/sing-box/log"
+	"github.com/sagernet/sing-box/option"
+)
+
+// NewAdapterPlatformInterface exposes the adapter bridge used by Neko's
+// Android host. The upstream wrapper remains private by design.
+func NewAdapterPlatformInterface(iif PlatformInterface) adapter.PlatformInterface {
+	return &platformInterfaceWrapper{iif: iif}
+}
+
+// RegisterPlatformLocalDNSTransport installs the Android local DNS bridge when
+// Neko constructs box.Context directly rather than using baseContext.
+func RegisterPlatformLocalDNSTransport(registry *dns.TransportRegistry, iif LocalDNSTransport) {
+	dns.RegisterTransport[option.LocalDNSServerOptions](registry, C.DNSTypeLocal, func(ctx context.Context, logger log.ContextLogger, tag string, options option.LocalDNSServerOptions) (adapter.DNSTransport, error) {
+		return newPlatformTransport(ctx, logger, iif, tag, options)
+	})
+}
