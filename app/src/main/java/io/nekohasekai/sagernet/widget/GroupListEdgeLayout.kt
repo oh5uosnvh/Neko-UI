@@ -110,9 +110,11 @@ class GroupListEdgeLayout @JvmOverloads constructor(
             return super.drawChild(canvas, child, drawingTime)
         }
         val parentTitle = (parent as? TitleBarLayout)
-        // Fade ends at the bottom of the app title glyph/toolbar. The group
-        // pill belongs to the header but must not extend the card blur baseline.
-        updateShaders(parentTitle?.toolbarEdgeBandHeight()?.takeIf { it > 0f } ?: defaultBandHeight)
+        // Cards scroll behind the complete header: fade from the bottom edge
+        // of the group-name tabs up to the bottom edge of the Neko title glyph.
+        // The header band includes toolbar + group_tab; using only toolbarBottom
+        // leaves cards crisp while they are still underneath the group tabs.
+        updateShaders(parentTitle?.titleEdgeBandHeight()?.takeIf { it > 0f } ?: defaultBandHeight)
         val band = bandHeight.coerceAtMost(height.toFloat())
         // The unaffected rest is drawn normally (including fast-scroll/overscroll).
         var save = canvas.save()
