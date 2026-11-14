@@ -110,6 +110,7 @@ class LatencyProbeBatchTest {
     @Test fun classificationNeverRetriesAuthCertificatesOrCancellation() {
         assertTrue(LatencyProbePolicy.isTransient(IOException("connection reset by peer")))
         assertTrue(LatencyProbePolicy.isTransient(IOException("context deadline exceeded")))
+        assertTrue(LatencyProbePolicy.isTransient(IOException("Get \"https://example.org/204\": EOF")))
         assertFalse(LatencyProbePolicy.isTransient(IOException("x509 certificate timeout")))
         assertFalse(LatencyProbePolicy.isTransient(IOException("authentication failed: timeout")))
         assertFalse(LatencyProbePolicy.isTransient(IOException("no such host")))

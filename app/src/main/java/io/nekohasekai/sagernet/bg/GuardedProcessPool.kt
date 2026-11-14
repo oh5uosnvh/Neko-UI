@@ -111,7 +111,10 @@ class GuardedProcessPool(private val onFatal: suspend (IOException) -> Unit) : C
         Logs.i("start process: ${Commandline.toString(cmd)}")
         Guard(cmd, env).apply {
             start() // if start fails, IOException will be thrown directly
-            launch { looper(onRestartCallback) }
+            // The OS process already exists. Enter looper's disposal finally
+            // even if the pool is cancelled before Main dispatches this guard.
+            @Suppress("EXPERIMENTAL_API_USAGE")
+            launch(start = CoroutineStart.ATOMIC) { looper(onRestartCallback) }
         }
         processCount += 1
     }

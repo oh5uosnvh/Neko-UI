@@ -30,7 +30,7 @@ internal object LatencyProbePolicy {
         return listOf("timeout", "timed out", "deadline exceeded", "connection reset",
             "connection refused", "econnreset", "econnrefused", "broken pipe", "unexpected eof",
             "temporary failure", "try again", "network is unreachable", "no route to host")
-            .any(text::contains) || text.trim() == "eof"
+            .any(text::contains) || text.trim() == "eof" || text.trim().endsWith(": eof")
     }
 }
 

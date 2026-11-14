@@ -38,6 +38,9 @@ No historical RTT cache is used as a successful current result.
 - Replace unowned `GlobalScope` per-instance work with structured worker/cleanup.
   Initialization and close are ordered, and cancellation joins native/plugin
   cleanup before closing or reusing the test executor.
+- Native construction/startup has an independently published cancellation handle
+  and a max(configured timeout, 5s) setup watchdog, cancelled before native locks.
+  A paused Main guard still atomically enters OS-process disposal on cancellation.
 - Native HTTP request contexts inherit the owning Box cancellation.
 - Prime and warm RTT samples get separate bounded budgets. Count request-header
   write to first response byte, not queueing/Box startup/TLS setup.
@@ -54,7 +57,8 @@ is not a complete FlClash-style shared-core/outbound rewrite.
 ## Validation
 
 - Complete Android application AND complete unit-test sources: compiled locally.
-- JVM cancellation/scheduling/retry tests: 13 passed.
+- JVM cancellation/scheduling/retry tests: 14 passed.
+- Native startup cancellation/watchdog tests: 3 passed, repeated five rounds.
 - HTTP probe tests: 7 passed; repeated five rounds and 120 concurrent probes.
 - Local native drawing tests cannot run: Robolectric reports Linux aarch64 native
   runtime unsupported. Their actual pixel execution is gated in GitHub x86_64 CI.

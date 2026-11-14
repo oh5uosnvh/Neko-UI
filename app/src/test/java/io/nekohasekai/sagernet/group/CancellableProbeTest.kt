@@ -79,6 +79,31 @@ class CancellableProbeTest {
         } finally { finishInit.countDown(); pool.close() }
     }
 
+    @Test fun blockingStartupExitsOnlyFromIndependentCancelSignal() = runBlocking {
+        val pool = Executors.newFixedThreadPool(1).asCoroutineDispatcher()
+        val entered = CompletableDeferred<Unit>()
+        val interrupted = CountDownLatch(1)
+        val released = AtomicInteger()
+        val probes = AtomicInteger()
+        try {
+            val job = launch {
+                runCancellableProbe(pool,
+                    prepare = {
+                        entered.complete(Unit)
+                        assertTrue("cancel cannot wait for the startup lock",
+                            interrupted.await(2, TimeUnit.SECONDS))
+                    },
+                    interrupt = { interrupted.countDown() },
+                    close = { released.incrementAndGet() },
+                    probe = { probes.incrementAndGet(); 50 })
+            }
+            entered.await()
+            withTimeout(2000) { job.cancelAndJoin() }
+            assertEquals(1, released.get())
+            assertEquals(0, probes.get())
+        } finally { interrupted.countDown(); pool.close() }
+    }
+
     @Test fun thrownFailureStillClosesExactlyOnce() = runBlocking {
         val pool = Executors.newFixedThreadPool(1).asCoroutineDispatcher()
         val closed = AtomicInteger()

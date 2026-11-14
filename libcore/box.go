@@ -82,11 +82,19 @@ type BoxInstance struct {
 	pauseManager pause.Manager
 }
 
+func NewSingBoxProbe(config string, localTransport LocalDNSTransport, p *ProbeContext) (*BoxInstance, error) {
+	return newSingBoxInstance(config, localTransport, p.ctx)
+}
+
 func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *BoxInstance, err error) {
+	return newSingBoxInstance(config, localTransport, context.Background())
+}
+
+func newSingBoxInstance(config string, localTransport LocalDNSTransport, parent context.Context) (b *BoxInstance, err error) {
 	defer device.DeferPanicToError("NewSingBoxInstance", func(err_ error) { err = err_ })
 
-	// create box context
-	ctx, cancel := context.WithCancel(context.Background())
+	// Probe callers supply a cancellation context BEFORE native construction.
+	ctx, cancel := context.WithCancel(parent)
 	ctx = box.Context(ctx,
 		nekoboxAndroidInboundRegistry(), nekoboxAndroidOutboundRegistry(), nekoboxAndroidEndpointRegistry(),
 		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(),
@@ -148,6 +156,11 @@ func (b *BoxInstance) Start() (err error) {
 }
 
 func (b *BoxInstance) Close() (err error) {
+	// Cancel first: Start may hold access while waiting for DNS/network I/O.
+	// Context cancellation is concurrent-safe and makes it release that lock.
+	if b.cancel != nil {
+		b.cancel()
+	}
 	b.access.Lock()
 	defer b.access.Unlock()
 

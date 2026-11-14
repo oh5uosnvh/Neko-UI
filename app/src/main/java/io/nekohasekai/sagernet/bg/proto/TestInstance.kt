@@ -19,6 +19,8 @@ import kotlin.coroutines.coroutineContext
 class TestInstance(profile: ProxyEntity, val link: String, private val timeout: Int) :
     BoxInstance(profile) {
 
+    @Volatile private var probeContext: libcore.ProbeContext? = null
+
     /** Full lifecycle is bounded; native close is awaited before the slot is reused. */
     suspend fun doTest(context: CoroutineContext, initialization: Semaphore): Int {
         val pluginFailure = java.util.concurrent.atomic.AtomicReference<Exception?>()
@@ -32,14 +34,16 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
                         processes = GuardedProcessPool { failure ->
                             Logs.w(failure)
                             pluginFailure.compareAndSet(null, failure)
-                            if (isInitialized()) runCatching { box.close() }
+                            probeContext?.cancel()
                         }.also { probeProcesses = it }
                         init()
                         coroutineContext.ensureActive()
                         launch()
                     }
                 },
+                interrupt = { probeContext?.cancel() },
                 close = {
+                    probeContext?.cancel()
                     runCatching { close() }
                     probeProcesses?.coroutineContext?.get(Job)?.join()
                 },
@@ -55,6 +59,7 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
+            if (probeContext?.timedOut() == true) throw java.io.IOException("probe setup timeout", failure)
             throw (pluginFailure.get() ?: failure)
         }
     }
@@ -66,7 +71,15 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
     override suspend fun loadConfig() {
         // don't call destroyAllJsi here
         if (BuildConfig.DEBUG) Logs.d(config.config)
-        box = Libcore.newSingBoxInstance(config.config, LocalResolverImpl)
+        val native = Libcore.newProbeContext(maxOf(timeout, 5000))
+        probeContext = native
+        coroutineContext.ensureActive()
+        box = Libcore.newSingBoxProbe(config.config, LocalResolverImpl, native)
+    }
+
+    override fun launch() {
+        super.launch()
+        probeContext?.ready()
     }
 
 }

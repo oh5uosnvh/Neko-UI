@@ -69,6 +69,7 @@ jobs:
         run: |
           cd libcore
           go test -race -count=1 ./probe
+          go test -race -count=1 probe_context.go probe_context_test.go
       - name: Verify atomic routing snapshot and failure rollback
         run: |
           cd ../sing-box

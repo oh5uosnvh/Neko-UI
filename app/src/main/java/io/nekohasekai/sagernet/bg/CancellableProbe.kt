@@ -24,6 +24,7 @@ internal suspend fun <T> runCancellableProbe(
     prepare: suspend () -> Unit,
     close: suspend () -> Unit,
     probe: suspend () -> T,
+    interrupt: suspend () -> Unit = {},
 ): T = coroutineScope {
     val owner = this
     val lifecycle = Mutex()
@@ -57,7 +58,14 @@ internal suspend fun <T> runCancellableProbe(
             worker.cancel()
             // ATOMIC enters the cleanup body even when the owner was cancelled.
             @Suppress("EXPERIMENTAL_API_USAGE")
-            owner.launch(Dispatchers.IO, start = CoroutineStart.ATOMIC) { closeResource() }
+            owner.launch(Dispatchers.IO, start = CoroutineStart.ATOMIC) {
+                withContext(NonCancellable) {
+                    // Signal native context BEFORE waiting for initialization's
+                    // lifecycle lock. A blocking Start must be able to return.
+                    runCatching { interrupt() }
+                    closeResource()
+                }
+            }
         }
         worker.invokeOnCompletion { failure ->
             if (failure != null) runCatching { continuation.resumeWith(Result.failure(failure)) }
