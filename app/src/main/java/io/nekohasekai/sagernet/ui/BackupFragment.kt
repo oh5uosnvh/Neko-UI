@@ -3,7 +3,6 @@ package io.nekohasekai.sagernet.ui
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.os.Parcel
 import android.os.Parcelable
 import android.provider.OpenableColumns
 import android.view.View
@@ -25,7 +24,6 @@ import io.nekohasekai.sagernet.databinding.LayoutImportBinding
 import io.nekohasekai.sagernet.databinding.LayoutProgressBinding
 import io.nekohasekai.sagernet.ktx.*
 import kotlinx.coroutines.delay
-import moe.matsuri.nb4a.utils.Util
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -109,11 +107,13 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
 
         binding.actionExport.setOnClickListener {
             runOnDefaultDispatcher {
-                backupData = doBackup(
-                    binding.backupConfigurations.isChecked,
-                    binding.backupRules.isChecked,
-                    binding.backupSettings.isChecked
-                )
+                backupData = runCatching {
+                    doBackup(binding.backupConfigurations.isChecked,
+                        binding.backupRules.isChecked, binding.backupSettings.isChecked)
+                }.getOrElse { error ->
+                    onMainDispatcher { MessageStore.showMessage(requireActivity(), error.readableMessage) }
+                    return@runOnDefaultDispatcher
+                }
                 onMainDispatcher {
                     startFilesForResult(
                         exportSettings, "nekobox_backup_${Date().toLocaleString()}.json"
@@ -124,11 +124,13 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
 
         binding.actionShare.setOnClickListener {
             runOnDefaultDispatcher {
-                backupData = doBackup(
-                    binding.backupConfigurations.isChecked,
-                    binding.backupRules.isChecked,
-                    binding.backupSettings.isChecked
-                )
+                backupData = runCatching {
+                    doBackup(binding.backupConfigurations.isChecked,
+                        binding.backupRules.isChecked, binding.backupSettings.isChecked)
+                }.getOrElse { error ->
+                    onMainDispatcher { MessageStore.showMessage(requireActivity(), error.readableMessage) }
+                    return@runOnDefaultDispatcher
+                }
                 app.cacheDir.mkdirs()
                 val cacheFile = File(
                     app.cacheDir, "nekobox_backup_${Date().toLocaleString()}.json"
@@ -168,7 +170,8 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                 showMessage(R.string.webdav_server_empty)
                 return@setOnClickListener
             }
-            backupToWebDAV()
+            backupToWebDAV(binding.backupConfigurations.isChecked,
+                binding.backupRules.isChecked, binding.backupSettings.isChecked)
         }
         
         binding.restoreFromWebdav.setOnClickListener {
@@ -180,7 +183,7 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
         }
     }
 
-    private fun backupToWebDAV() {
+    private fun backupToWebDAV(profile: Boolean, rule: Boolean, setting: Boolean) {
         if (isBackupInProgress) {
             showMessage(R.string.backup_in_progress)
             return
@@ -190,11 +193,7 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
         runOnDefaultDispatcher {
             try {
                 isWebDAVBackup = true
-                val backupData = doBackup(
-                    true,  // 备份配置和分组
-                    true,  // 备份路由规则
-                    true   // 备份设置
-                )
+                val backupData = doBackup(profile, rule, setting)
                 isWebDAVBackup = false
                 
                 val client = OkHttpClient()
@@ -521,15 +520,7 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
         }
     }
 
-    fun Parcelable.toBase64Str(): String {
-        val parcel = Parcel.obtain()
-        writeToParcel(parcel, 0)
-        try {
-            return Util.b64EncodeUrlSafe(parcel.marshall())
-        } finally {
-            parcel.recycle()
-        }
-    }
+    fun Parcelable.toBase64Str(): String = BackupCompatibility.encode(this)
 
     private fun doBackup(
         profile: Boolean,
@@ -560,7 +551,9 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
             }
             if (setting) {
                 put("settings", JSONArray().apply {
-                    PublicDatabase.kvPairDao.all().forEach {
+                    PublicDatabase.kvPairDao.all().filterNot {
+                        BackupCompatibility.isTagSetting(it.key)
+                    }.forEach {
                         put(it.toBase64Str())
                     }
                 })
@@ -692,60 +685,44 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
     fun finishImport(
         content: JSONObject, profile: Boolean, rule: Boolean, setting: Boolean
     ) {
-        if (profile && content.has("profiles")) {
-            val profiles = mutableListOf<ProxyEntity>()
-            val jsonProfiles = content.getJSONArray("profiles")
-            for (i in 0 until jsonProfiles.length()) {
-                val data = Util.b64Decode(jsonProfiles[i] as String)
-                val parcel = Parcel.obtain()
-                parcel.unmarshall(data, 0, data.size)
-                parcel.setDataPosition(0)
-                profiles.add(ProxyEntity.CREATOR.createFromParcel(parcel))
-                parcel.recycle()
+        require(content.optInt("version", 0) == 1) { "Unsupported NekoBox backup version" }
+        // Decode ALL selected sections before touching storage. Unknown keys, including every
+        // tag/group-membership extension, are deliberately never interpreted.
+        fun <T> read(name: String, creator: Parcelable.Creator<T>): List<T> =
+            content.getJSONArray(name).let { array ->
+                (0 until array.length()).map { BackupCompatibility.decode(array.getString(it), creator) }
             }
-            SagerDatabase.proxyDao.reset()
-            SagerDatabase.proxyDao.insert(profiles)
-
-            val groups = mutableListOf<ProxyGroup>()
-            val jsonGroups = content.getJSONArray("groups")
-            for (i in 0 until jsonGroups.length()) {
-                val data = Util.b64Decode(jsonGroups[i] as String)
-                val parcel = Parcel.obtain()
-                parcel.unmarshall(data, 0, data.size)
-                parcel.setDataPosition(0)
-                groups.add(ProxyGroup.CREATOR.createFromParcel(parcel))
-                parcel.recycle()
+        val replaceProfiles = profile && content.has("profiles")
+        val profiles = if (replaceProfiles) read("profiles", ProxyEntity.CREATOR) else emptyList()
+        val groups = if (replaceProfiles) read("groups", ProxyGroup.CREATOR) else emptyList()
+        profiles.forEach { it.requireBean() } // Fail on unsupported types BEFORE clearing data.
+        val rules = if (rule && content.has("rules")) {
+            content.getJSONArray("rules").let { array ->
+                (0 until array.length()).map { BackupCompatibility.decodeRule(array.getString(it)) }
             }
-            SagerDatabase.groupDao.reset()
-            SagerDatabase.groupDao.insert(groups)
+        } else null
+        val settings = if (setting && content.has("settings")) {
+            read("settings", KeyValuePair.CREATOR).filterNot { BackupCompatibility.isTagSetting(it.key) }
+        } else null
+        SagerDatabase.instance.runInTransaction {
+            if (replaceProfiles) {
+                SagerDatabase.proxyDao.reset()
+                // The existing FK cascade clears old tag memberships, not tag definitions.
+                // Imported group IDs must NEVER rebind stale local classification metadata.
+                SagerDatabase.groupDao.reset()
+                SagerDatabase.groupDao.insert(groups)
+                SagerDatabase.proxyDao.insert(profiles)
+            }
+            if (rules != null) {
+                SagerDatabase.rulesDao.reset()
+                SagerDatabase.rulesDao.insert(rules)
+            }
         }
-        if (rule && content.has("rules")) {
-            val rules = mutableListOf<RuleEntity>()
-            val jsonRules = content.getJSONArray("rules")
-            for (i in 0 until jsonRules.length()) {
-                val data = Util.b64Decode(jsonRules[i] as String)
-                val parcel = Parcel.obtain()
-                parcel.unmarshall(data, 0, data.size)
-                parcel.setDataPosition(0)
-                rules.add(ParcelizeBridge.createRule(parcel))
-                parcel.recycle()
+        if (settings != null) {
+            PublicDatabase.instance.runInTransaction {
+                PublicDatabase.kvPairDao.reset()
+                PublicDatabase.kvPairDao.insert(settings)
             }
-            SagerDatabase.rulesDao.reset()
-            SagerDatabase.rulesDao.insert(rules)
-        }
-        if (setting && content.has("settings")) {
-            val settings = mutableListOf<KeyValuePair>()
-            val jsonSettings = content.getJSONArray("settings")
-            for (i in 0 until jsonSettings.length()) {
-                val data = Util.b64Decode(jsonSettings[i] as String)
-                val parcel = Parcel.obtain()
-                parcel.unmarshall(data, 0, data.size)
-                parcel.setDataPosition(0)
-                settings.add(KeyValuePair.CREATOR.createFromParcel(parcel))
-                parcel.recycle()
-            }
-            PublicDatabase.kvPairDao.reset()
-            PublicDatabase.kvPairDao.insert(settings)
         }
     }
 

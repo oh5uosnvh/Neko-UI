@@ -40,6 +40,25 @@ import io.nekohasekai.sagernet.widget.UserAgentPreference
 @Suppress("EXPERIMENTAL_API_USAGE")
 object RawUpdater : GroupUpdater() {
 
+    private fun importWebSocketHeaders(bean: StandardV2RayBean, headers: Map<*, *>) {
+        val extra = if (bean.wsExtraHeaders.isNullOrBlank()) JSONObject()
+            else JSONObject(bean.wsExtraHeaders)
+        headers.forEach { (key, value) ->
+            if (key != null && value != null) {
+                val name = key.toString()
+                if (name.equals("host", ignoreCase = true)) bean.host = value.toString()
+                else {
+                    // HTTP header names are case-insensitive, including mixed
+                    // legacy/modern Clash definitions of the same header.
+                    extra.keys().asSequence().filter { it.equals(name, true) }.toList()
+                        .forEach(extra::remove)
+                    extra.put(name, value.toString())
+                }
+            }
+        }
+        bean.wsExtraHeaders = if (extra.length() == 0) "" else extra.toString()
+    }
+
     @SuppressLint("Recycle")
     override suspend fun doUpdate(
         proxyGroup: ProxyGroup,
@@ -640,31 +659,23 @@ object RawUpdater : GroupUpdater() {
                                         }
                                     }
 
-                                    "ws-opts" -> (opt.value as? Map<String, Any?>)?.also {
+                                    "ws-path", "path" -> bean.path = opt.value?.toString()
+
+                                    "ws-headers" -> (opt.value as? Map<*, *>)?.let { headers ->
+                                        importWebSocketHeaders(bean, headers)
+                                    }
+
+                                    "ws-opts" -> (opt.value as? Map<*, *>)?.also {
                                         for (wsOpt in it) {
-                                            when (wsOpt.key) {
-                                                "headers" -> (wsOpt.value as? Map<Any, Any?>)?.forEach { (key, value) ->
-                                                    when (key.toString().lowercase()) {
-                                                        "host" -> {
-                                                            bean.host = value?.toString()
-                                                        }
-                                                    }
+                                            when (wsOpt.key.toString().lowercase()) {
+                                                "headers" -> (wsOpt.value as? Map<*, *>)?.let { headers ->
+                                                    importWebSocketHeaders(bean, headers)
                                                 }
-
-                                                "path" -> {
-                                                    bean.path = wsOpt.value?.toString()
-                                                }
-
-                                                "max-early-data" -> {
-                                                    bean.wsMaxEarlyData =
-                                                        wsOpt.value?.toString()?.toIntOrNull()
-                                                }
-
-                                                "early-data-header-name" -> {
-                                                    bean.earlyDataHeaderName =
-                                                        wsOpt.value?.toString()
-                                                }
-
+                                                "path" -> bean.path = wsOpt.value?.toString()
+                                                "max-early-data" -> bean.wsMaxEarlyData =
+                                                    wsOpt.value?.toString()?.toIntOrNull()
+                                                "early-data-header-name" -> bean.earlyDataHeaderName =
+                                                    wsOpt.value?.toString()
                                                 "v2ray-http-upgrade" -> {
                                                     if (wsOpt.value as? Boolean == true) {
                                                         bean.type = "httpupgrade"

@@ -65,6 +65,7 @@ jobs:
           # TestRealTCPCancellationClosesBlockedConnection 依赖真实 DNS TCP 出网，
           # 在 CI runner 上偶发超时导致假失败，与代码无关，跳过。
           go test -race -count=1 -skip 'TestRealTCPCancellationClosesBlockedConnection' ./dnspolicy
+          go test -count=1 geo_validate.go geo_validate_test.go
       - name: Build libcore
         run: ./run lib core
       - uses: actions/upload-artifact@v4
@@ -117,7 +118,7 @@ jobs:
         run: |
           set -euo pipefail
           trap 'rm -f release.keystore; rm -rf mg-sign' EXIT
-          [[ "$APP_VERSION_NAME" == *-debug-* || "$APP_VERSION_NAME" == *-pre[0-9]* ]] || { echo 'This branch only builds debug-named or pre-numbered candidates' >&2; exit 1; }
+          # Candidate builds may use a numeric version name; never publish a tag here.
           [[ "$APP_VERSION_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$ ]] || { echo 'Invalid candidate version' >&2; exit 1; }
           [[ "$APP_VERSION_CODE" =~ ^[1-9][0-9]{0,8}$ ]] && (( 10#$APP_VERSION_CODE >= 49 && 10#$APP_VERSION_CODE <= 420000000 )) || { echo 'Base version code must be 49..420000000' >&2; exit 1; }
           if [[ "$SIGNED" == true ]]; then

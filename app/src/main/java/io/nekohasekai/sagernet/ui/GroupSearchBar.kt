@@ -17,7 +17,7 @@ import androidx.appcompat.widget.Toolbar
 import androidx.core.view.isVisible
 import io.nekohasekai.sagernet.R
 
-/** Configuration-page search styling, with [classify] X and a permanently reserved tick slot. */
+/** Group search styling: classify sits immediately left of X; the tick slot stays reserved. */
 class GroupSearchBar(private val toolbar: Toolbar, private val context: Context = toolbar.context) {
     private val inkColor = context.obtainStyledAttributes(intArrayOf(android.R.attr.textColorPrimary))
         .let { it.getColor(0, -1).also { _ -> it.recycle() } }
@@ -112,7 +112,14 @@ class GroupSearchBar(private val toolbar: Toolbar, private val context: Context 
     }
 
     fun render(query: String, matches: Int, customSelection: Boolean, selectedCount: Int, animate: Boolean = true) {
-        setClassifyVisible(query.isNotBlank() && matches >= 2 && !customSelection, animate)
+        // Empty search exposes the conservative one-click action immediately; a
+        // non-empty query needs at least two matching cards before classification.
+        val canClassify = !customSelection && (query.isBlank() || matches >= 2)
+        classify.setText(if (query.isBlank()) R.string.group_classify_one_click else R.string.group_classify)
+        classify.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+        classifyWidth = classify.measuredWidth
+        classify.layoutParams = classify.layoutParams.apply { width = classifyWidth }
+        setClassifyVisible(canClassify, animate)
         confirm.visibility = if (customSelection) View.VISIBLE else View.INVISIBLE
         confirm.isEnabled = customSelection && selectedCount > 0
         confirm.alpha = if (confirm.isEnabled || !customSelection) 1f else .38f

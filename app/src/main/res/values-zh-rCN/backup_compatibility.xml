@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="backup_original_format_notice">使用原版 NekoBox 格式。不会备份或恢复任何标签组及成员关系。导出时，本应用专有的分组选择器、前置/落地代理及订阅 DNS/过滤选项会投影为原版默认值，不予保留。协议能否使用取决于目标应用。第三方路由备份布局可能不同，建议仅选择“分组和配置”。</string>
+</resources>

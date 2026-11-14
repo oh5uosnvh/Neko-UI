@@ -87,14 +87,55 @@ class GroupPickerTagsTest {
             header.bind(GroupPickerNavigation.Page.Members(42L), "Flower")
             assertEquals(View.VISIBLE, descendants(backRow).filterIsInstance<ImageView>().single().visibility)
             assertNotNull(descendants(backRow).filterIsInstance<ImageView>().single().drawable)
-            assertEquals("Flower", descendants(backRow).filterIsInstance<TextView>().single().text.toString())
+            assertEquals("Flower", descendants(backRow).filterIsInstance<TextView>()
+                .first { it.text.toString() == "Flower" }.text.toString())
             backRow.performClick()
             assertEquals(1, back)
             assertEquals(0, configuration)
         } finally { activity.pause().stop().destroy() }
     }
 
-    @Test fun tagCountsUseStableIdsAndRemovedHoldersCannotOpenWrongTags() {
+    @Test
+    @Config(qualifiers = "zh-rCN")
+    fun memberHeaderUsesExplicitLockUnlockButtonWithoutLongPressOrDismissal() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup()
+        try {
+            var locked: Long? = 42L
+            var back = 0
+            val toggled = ArrayList<Long>()
+            val header = GroupPickerHeader(activity.get(), Color.BLACK, { ColorDrawable(Color.GRAY) },
+                {}, {}, { back++ }, { locked }, { id -> toggled += id; locked = null })
+            header.bind(GroupPickerNavigation.Page.Members(42L), "Flower")
+            val row = header.getChildAt(1) as ViewGroup
+            val button = descendants(row).filterIsInstance<TextView>().first { it.text.toString() == "解锁" }
+            assertEquals(View.VISIBLE, button.visibility)
+            button.performClick()
+            assertEquals(listOf(42L), toggled)
+            assertEquals(0, back)
+            locked = 42L
+            header.bind(GroupPickerNavigation.Page.Members(42L), "Flower")
+            assertEquals("解锁", button.text.toString())
+            row.performClick()
+            assertEquals(1, back)
+        } finally { activity.pause().stop().destroy() }
+    }
+
+    @Test fun reopeningLockedNavigationStartsAtMembersAndBackKeepsLockModel() {
+        val navigation = GroupPickerNavigation()
+        var locked: Long? = 18L
+        fun reopen() { navigation.members(locked!!) }
+        reopen()
+        assertEquals(GroupPickerNavigation.Page.Members(18L), navigation.page)
+        assertTrue(navigation.back())
+        assertEquals(GroupPickerNavigation.Page.Tags, navigation.page)
+        assertEquals(18L, locked)
+        reopen()
+        assertEquals(GroupPickerNavigation.Page.Members(18L), navigation.page)
+        locked = null
+        assertFalse(GroupPickerTagScope.valid(locked, listOf(TagGroup(18L, "gone", 1L))))
+    }
+
+    @Test fun tagPickerHeadersKeepShortBackAndLockedMarkerOnlyForMatchingTag() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup()
         try {
             val context = activity.get()

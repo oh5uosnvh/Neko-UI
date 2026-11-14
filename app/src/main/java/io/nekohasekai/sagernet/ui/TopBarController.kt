@@ -696,12 +696,27 @@ internal class TopBarController(
 
     private fun reconcilePickerContext() {
         if (host.select) return
-        val page = pickerNavigation.page as? GroupPickerNavigation.Page.Members ?: return
-        val selected = DataStore.selectedGroup
-        val stillInTag = try {
-            selected > 0L && selected in TagGroupStore.members(page.tagId)
-        } catch (_: Exception) { false }
-        if (!stillInTag) pickerNavigation.configuration()
+        // A locked scope is the source of truth for every fresh open: start on
+        // that tag's Members page rather than reopening the last transient page.
+        val locked = host.currentLockedTagId()
+        if (locked != null) {
+            val live = try { TagGroupStore.get(locked) != null } catch (_: Exception) { false }
+            if (live) {
+                pickerNavigation.members(locked)
+                return
+            }
+            // Deletion fallback is deliberately the existing scope exit path;
+            // it clears the lock and returns the configuration pager to all groups.
+            host.exitTagScope()
+            pickerNavigation.configuration()
+            return
+        }
+        // Once unlocked, a fresh menu open always starts from the configuration
+        // page. Never resurrect the previous tag-members page just because the
+        // selected group still belongs to that tag.
+        if (pickerNavigation.page is GroupPickerNavigation.Page.Members) {
+            pickerNavigation.configuration()
+        }
     }
 
     /** Owns only display state. The process-wide writer outlives this popup/fragment. */
@@ -753,7 +768,11 @@ internal class TopBarController(
         private val navigation = if (host.select) GroupPickerNavigation() else pickerNavigation
         private var tagRows: List<TagGroup> = emptyList()
         private var memberIds: Set<Long> = emptySet()
-        private var memberNeedsSelection = false
+        // Fresh opens of a locked scope locate the current selected GROUP, not the
+        // last browsing anchor captured on close. Ordinary in-session tag navigation
+        // still restores each tag's exact viewport.
+        private var memberNeedsSelection = (navigation.page as? GroupPickerNavigation.Page.Members)
+            ?.tagId?.let { !host.select && it == host.currentLockedTagId() } == true
         private var tagsLoaded = false
         private var tagsFailed = false
         private var tagsWatching: Job? = null
@@ -809,7 +828,15 @@ internal class TopBarController(
             { navigateConfiguration() }, { navigateTags() }, { backPage() })
         private val memberHeader = GroupPickerHeader(popupContext,
             themeColor(android.R.attr.textColorPrimary), { groupHeaderCard(it) },
-            { navigateConfiguration() }, { navigateTags() }, { backPage() })
+            { navigateConfiguration() }, { navigateTags() }, { backPage() },
+            lockedTagId = { host.currentLockedTagId() },
+            onLockedTap = { id ->
+                if (host.toggleTagLockFromPicker(id)) {
+                    // Keep the popup and current member page alive; refresh only the
+                    // state marker and selected root list. The next open uses the new scope.
+                    requestTagRefresh(seedSelection = true)
+                }
+            })
         private fun pageView(title: GroupPickerHeader, recycler: RecyclerView) = LinearLayout(popupContext).apply {
             orientation = LinearLayout.VERTICAL
             // Real vertical measurement, not two overlapping MATCH_PARENT FrameLayout children.
@@ -1215,10 +1242,13 @@ internal class TopBarController(
                         memberIds = ids
                         val memberId = (navigation.page as? GroupPickerNavigation.Page.Members)?.tagId
                         val remembered = memberId?.let { pickerMemberViewports[it] }
-                        val seed = (seedSelection || memberNeedsSelection || restoringMembers) && remembered == null
+                        val prioritizeSelection = memberNeedsSelection
+                        val seed = prioritizeSelection || ((seedSelection || restoringMembers) && remembered == null)
                         memberNeedsSelection = false
                         refreshMemberRows(seed)
-                        if (restoringMembers && remembered != null) remembered.restore(memberList, memberAdapter.ids)
+                        // A fresh locked-scope open must not restore an old browsing anchor
+                        // over the just-seeded selected GROUP ID.
+                        if (restoringMembers && remembered != null && !prioritizeSelection) remembered.restore(memberList, memberAdapter.ids)
                         restoringMembers = false
                         renderPage() // rename updates third-level title immediately
                     }

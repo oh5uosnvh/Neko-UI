@@ -63,6 +63,7 @@ import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.database.TagGroupStore
 import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
 import io.nekohasekai.sagernet.databinding.LayoutProfileListBinding
 import io.nekohasekai.sagernet.databinding.LayoutProgressListBinding
@@ -127,6 +128,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.collectLatest
 import moe.matsuri.nb4a.Protocols
 import moe.matsuri.nb4a.Protocols.getProtocolColor
 import moe.matsuri.nb4a.proxy.anytls.AnyTLSSettingsActivity
@@ -188,6 +190,8 @@ class ConfigurationFragment @JvmOverloads constructor(
     lateinit var tabLayout: TabLayout
     lateinit var groupPager: ViewPager2
     private var isRestoringGroup = false
+    /** Non-null while the configuration pager is locked to one tag's members. */
+    @Volatile private var scopedTagId: Long? = null
     private val groupProfileExport = GroupProfileExport(this)
     private var groupTabsMediator: TabLayoutMediator? = null
     // TabLayout pools/recreates TabViews. Weak entries must not retain removed tabs.
@@ -407,6 +411,32 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private fun isCurrentGroupPagerAdapter(candidate: GroupPagerAdapter): Boolean {
         return ::adapter.isInitialized && adapter === candidate
+    }
+
+    private fun currentScopeTag(): Long? = scopedTagId?.takeIf { it > 0L }
+
+    /** Picker-facing state: lock is explicit and survives popup dismissal. */
+    internal fun currentLockedTagId(): Long? = currentScopeTag()
+
+    /** Toggle only the displayed group scope; no core/configuration rebuild is involved. */
+    internal fun toggleTagLockFromPicker(tagId: Long): Boolean {
+        if (tagId <= 0L || !isAdded) return false
+        if (currentScopeTag() == tagId) {
+            scopedTagId = null
+        } else {
+            if (try { TagGroupStore.get(tagId) == null } catch (_: Exception) { true }) return false
+            scopedTagId = tagId
+        }
+        prepareConfigurationMenu(toolbar.menu)
+        if (::adapter.isInitialized) adapter.reload(now = true)
+        return true
+    }
+
+    internal fun exitTagScope() {
+        if (scopedTagId == null) return
+        scopedTagId = null
+        prepareConfigurationMenu(toolbar.menu)
+        if (::adapter.isInitialized) adapter.reload(now = true)
     }
 
     fun getCurrentGroupFragment(): GroupFragment? {
@@ -643,6 +673,7 @@ class ConfigurationFragment @JvmOverloads constructor(
     @SuppressLint("DetachAndAttachSameFragment")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        scopedTagId = savedInstanceState?.getLong("scopedTagId", 0L)?.takeIf { it > 0L }
         groupProfileExport.restoreState(savedInstanceState)
         setHasOptionsMenu(true)
         startProfileStateActor()
@@ -653,12 +684,23 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putLong("scopedTagId", scopedTagId ?: 0L)
         super.onSaveInstanceState(outState)
         groupProfileExport.saveState(outState)
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        if (!select) {
+            viewLifecycleOwner.lifecycleScope.launch {
+                TagGroupStore.changes.collectLatest {
+                    val id = currentScopeTag() ?: return@collectLatest
+                    if (!isAdded || TagGroupStore.get(id) == null) exitTagScope()
+                    else if (::adapter.isInitialized) adapter.reload(now = true)
+                }
+            }
+        }
 
         if (!select) {
             // 菜单仍然 inflate 到 toolbar 上 —— checkOrderMenu / global_mode
@@ -2163,8 +2205,16 @@ class ConfigurationFragment @JvmOverloads constructor(
             groupPager.unregisterOnPageChangeCallback(updateSelectedCallback)
 
             runOnDefaultDispatcher {
-                var newGroupList = ArrayList(SagerDatabase.groupDao.allGroups().filterNot { io.nekohasekai.sagernet.database.PendingGroupDeletes.contains(it.id) })
-                if (newGroupList.isEmpty()) {
+                val requestedTag = currentScopeTag()
+                if (requestedTag != null && (try { TagGroupStore.get(requestedTag) } catch (_: Exception) { null }) == null) {
+                    onMainDispatcher { if (generation == reloadGeneration.get()) exitTagScope() }
+                    return@runOnDefaultDispatcher
+                }
+                val memberIds = requestedTag?.let { try { TagGroupStore.members(it) } catch (_: Exception) { emptySet() } }
+                var newGroupList = ArrayList(SagerDatabase.groupDao.allGroups()
+                    .filterNot { io.nekohasekai.sagernet.database.PendingGroupDeletes.contains(it.id) }
+                    .filter { requestedTag == null || it.id in memberIds.orEmpty() })
+                if (newGroupList.isEmpty() && requestedTag == null) {
                     SagerDatabase.groupDao.createGroup(ProxyGroup(ungrouped = true))
                     newGroupList = ArrayList(SagerDatabase.groupDao.allGroups().filterNot { io.nekohasekai.sagernet.database.PendingGroupDeletes.contains(it.id) })
                 }
@@ -2277,6 +2327,8 @@ class ConfigurationFragment @JvmOverloads constructor(
         override suspend fun groupAdd(group: ProxyGroup) {
             onMainDispatcher {
                 if (viewLifecycleOwnerLiveData.value == null || !isCurrentGroupPagerAdapter(this@GroupPagerAdapter)) return@onMainDispatcher
+                val lockedTag = currentScopeTag()
+                if (lockedTag != null && group.id !in (try { TagGroupStore.members(lockedTag) } catch (_: Exception) { emptySet() })) return@onMainDispatcher
                 if (groupList.any { it.id == group.id }) return@onMainDispatcher
                 tabMutation.change(tabMutation.capture(group.id), centerSelected = true) {
                     val newIndex = groupList.size

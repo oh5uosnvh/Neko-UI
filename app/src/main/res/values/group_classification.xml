@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="group_classify_one_click">One-click classify</string>
+    <string name="group_classify_preview_title">Preview similar groups</string>
+    <string name="group_classify_preview_message">Only the order of group cards will change. No groups or configurations will be merged or deleted. Proposed order:\n%s</string>
+    <string name="group_classify_reordered">Groups reordered</string>
+    <string name="group_classify_no_matches">No conservative similar-name groups found</string>
+</resources>

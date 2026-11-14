@@ -647,6 +647,12 @@ fun buildSingBoxOutboundStreamSettings(bean: StandardV2RayBean): V2RayTransportO
                 type = "ws"
                 headers = mutableMapOf()
 
+                if (bean.wsExtraHeaders.isNotBlank()) {
+                    val extra = org.json.JSONObject(bean.wsExtraHeaders)
+                    extra.keys().forEach { key ->
+                        if (!key.equals("Host", true)) headers[key] = extra.getString(key)
+                    }
+                }
                 if (bean.host.isNotBlank()) {
                     headers["Host"] = bean.host
                 }
@@ -893,7 +899,12 @@ fun buildSingBoxOutboundStandardV2RayBean(bean: StandardV2RayBean): Outbound {
                 server_port = bean.serverPort
                 uuid = bean.uuid
                 alter_id = bean.alterId
-                security = bean.encryption.takeIf { it.isNotBlank() } ?: "auto"
+                // Match the last successful build: sing-box maps auto + TLS to
+                // zero, which some legacy VMess servers reject. Keep explicit
+                // user-selected ciphers intact, resolving only auto + TLS.
+                val vmessAuto = bean.encryption.isBlank() || bean.encryption.equals("auto", true)
+                security = if (vmessAuto && bean.isTLS()) "aes-128-gcm"
+                    else bean.encryption.takeIf { it.isNotBlank() } ?: "auto"
                 when (bean.packetEncoding) {
                     0 -> packet_encoding = ""
                     1 -> packet_encoding = "packetaddr"

@@ -668,6 +668,9 @@ fun buildConfig(
                 }.toHashSet().filterNotNull()
                 val ruleSets = mutableListOf<RuleSet>()
 
+                val builtIn = rule.builtinKey.isNotBlank()
+                var compiledDomainList: List<String>? = null
+                var compiledIpList: List<String>? = null
                 val ruleObj = Rule_DefaultOptions().apply {
                     if (uidList.isNotEmpty()) {
                         PackageCache.awaitLoadSync()
@@ -676,13 +679,22 @@ fun buildConfig(
                     var domainList: List<String>? = null
                     if (rule.domains.isNotBlank()) {
                         domainList = rule.domains.listByLineOrComma()
+                        if (builtIn) domainList = sanitizeBuiltInRuleValues(domainList, false)
+                        compiledDomainList = domainList
                         makeSingBoxRule(domainList, false)
                     }
                     if (rule.ip.isNotBlank()) {
-                        makeSingBoxRule(rule.ip.listByLineOrComma(), true)
+                        var ipList = rule.ip.listByLineOrComma()
+                        if (builtIn) ipList = sanitizeBuiltInRuleValues(ipList, true)
+                        compiledIpList = ipList
+                        makeSingBoxRule(ipList, true)
                     }
                     
-                    if (rule_set != null) generateRuleSet(rule_set, ruleSets)
+                    if (rule_set != null) {
+                        // Built-in selectors were already probed by sanitizeBuiltInRuleValues.
+                        // Do not scan the entire GeoIP database three times per rule.
+                        generateRuleSet(rule_set, ruleSets)
+                    }
                     
 		    // 存储ruleset标签和类型信息
                     val rulesetTags = mutableListOf<Pair<String, Boolean>>()
@@ -738,13 +750,13 @@ fun buildConfig(
                     fun makeDnsRuleObj(): DNSRule_DefaultOptions {
                         return DNSRule_DefaultOptions().apply {
                             if (uidList.isNotEmpty()) user_id = uidList
-                            domainList?.let { makeSingBoxRule(it) }
+                            compiledDomainList?.let { makeSingBoxRule(it) }
                         }
                     }
 
-                    val hasDomainCriteria = !domainList.isNullOrEmpty()
+                    val hasDomainCriteria = !compiledDomainList.isNullOrEmpty()
                     val hasIpCriteria =
-                        rule.ip.isNotBlank() || rulesetTags.any { it.second }
+                        !compiledIpList.isNullOrEmpty() || rulesetTags.any { it.second }
                     val hasDomainRuleset = rulesetTags.any { !it.second }
                     val isAppOnlyDns =
                         uidList.isNotEmpty() &&

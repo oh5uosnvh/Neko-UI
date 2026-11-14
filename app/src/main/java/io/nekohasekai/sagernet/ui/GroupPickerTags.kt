@@ -3,7 +3,10 @@ package io.nekohasekai.sagernet.ui
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Typeface
+import android.content.res.ColorStateList
+import android.graphics.drawable.RippleDrawable
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.TextUtils
@@ -25,6 +28,21 @@ import io.nekohasekai.sagernet.database.TagGroup
 import io.nekohasekai.sagernet.widget.SubmenuBackIcon
 
 /** Navigation only: none of these transitions select, reorder or mutate a root group. */
+
+/** Pure scope rules kept small so empty/deleted tags and stale results are testable. */
+internal object GroupPickerTagScope {
+    fun groups(roots: List<ProxyGroup>, memberIds: Set<Long>): List<ProxyGroup> =
+        tagPickerMembers(roots, memberIds)
+    fun valid(tagId: Long?, tags: List<TagGroup>): Boolean =
+        tagId != null && tagId > 0L && tags.any { it.id == tagId }
+
+    fun importTarget(roots: List<ProxyGroup>, members: Set<Long>, selectedId: Long): ProxyGroup? {
+        val manual = groups(roots, members).filter { it.type == io.nekohasekai.sagernet.GroupType.BASIC &&
+            !io.nekohasekai.sagernet.database.PendingGroupDeletes.contains(it.id) }
+        return manual.firstOrNull { it.id == selectedId } ?: manual.firstOrNull()
+    }
+}
+
 internal class GroupPickerNavigation {
     sealed class Page {
         data object Configuration : Page()
@@ -75,8 +93,11 @@ internal class GroupPickerHeader(
     configuration: () -> Unit,
     tags: () -> Unit,
     back: () -> Unit,
+    private val lockedTagId: () -> Long? = { null },
+    private val onLockedTap: (Long) -> Unit = {},
 ) : LinearLayout(context) {
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+    private var boundTagId: Long? = null
     private lateinit var configurationEntry: TextView
     private lateinit var tagsEntry: TextView
     private val entries = LinearLayout(context).apply {
@@ -111,27 +132,44 @@ internal class GroupPickerHeader(
         setColorFilter(color)
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
+    /** Explicit two-state control; it is always present on the member page. */
+    private val lockIndicator = TextView(context).apply {
+        textSize = 12f
+        setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+        setTextColor(android.graphics.Color.WHITE)
+        gravity = Gravity.CENTER
+        setPadding(dp(5), 0, dp(5), 0)
+        isClickable = true
+        isFocusable = true
+        setOnClickListener { boundTagId?.let { onLockedTap(it) } }
+    }
     private val backRow = LinearLayout(context).apply {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(8), 0, dp(8), 0)
-        background = card(false)
+        background = RippleDrawable(ColorStateList.valueOf((color and 0x00ffffff) or 0x24000000),
+            card(false), card(false))
         isFocusable = true
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         addView(SubmenuBackIcon(context, color), LayoutParams(dp(20), dp(24)))
         addView(icon, LayoutParams(dp(24), dp(24)).apply { marginStart = dp(8) })
         addView(title, LayoutParams(0, -2, 1f).apply { marginStart = dp(8) })
+        addView(lockIndicator, LayoutParams(dp(64), dp(28)).apply { marginStart = dp(8) })
         setOnClickListener { back() }
     }
     init {
         orientation = VERTICAL
         setPadding(dp(12), dp(4), dp(12), 0)
         minimumHeight = dp(52)
+        // Back remains the single owner of the capsule's short tap. The lock control
+        // is an independent child and therefore does not navigate or dismiss the menu.
         addView(entries, LayoutParams(-1, dp(48)))
         addView(backRow, LayoutParams(-1, dp(48)))
         // Initial state is already configured by the entry defaults; bind() is
         // called after construction when the actual page is known.
     }
     fun bind(page: GroupPickerNavigation.Page, tagName: String?) {
+        boundTagId = (page as? GroupPickerNavigation.Page.Members)?.tagId
         val members = page is GroupPickerNavigation.Page.Members
         // Keep the two-scope switch visible on the configuration and tag pages.
         // The member page gets the dedicated back/title row to avoid duplicate headers.
@@ -143,6 +181,15 @@ internal class GroupPickerHeader(
         tagsEntry.background = card(tagsEntry.isSelected)
         icon.visibility = if (members) View.VISIBLE else View.GONE
         title.text = tagName ?: context.getString(R.string.tag_picker_title)
+        lockIndicator.visibility = if (members) View.VISIBLE else View.GONE
+        val locked = members && boundTagId == lockedTagId()
+        lockIndicator.text = context.getString(if (locked) R.string.tag_picker_unlock else R.string.tag_picker_lock)
+        lockIndicator.background = GradientDrawable().apply {
+            cornerRadius = dp(12).toFloat()
+            setColor(if (locked) android.graphics.Color.rgb(96, 125, 139)
+                else android.graphics.Color.rgb(62, 125, 78))
+        }
+        lockIndicator.contentDescription = lockIndicator.text
         backRow.contentDescription = context.getString(R.string.tag_picker_back_to, title.text)
     }
 }

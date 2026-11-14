@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="backup_original_format_notice">Original NekoBox format. Tag groups and membership are never backed up or restored. Export projects app-only group selector, chain and subscription DNS/filter options to original defaults; those options are not retained. Only protocols supported by the destination app can work. Third-party route backup layouts may differ; groups and profiles are recommended.</string>
+</resources>

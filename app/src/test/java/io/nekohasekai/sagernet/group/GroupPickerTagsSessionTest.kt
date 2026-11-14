@@ -101,6 +101,10 @@ class GroupPickerTagsSessionTest {
         }
         fun reopen() {
             topbar.dismissGroupPicker(immediate = true)
+            // The production entry point reconciles the retained navigation with the
+            // explicit configuration lock before constructing PickerSession. Keep the
+            // fixture on that same path instead of testing the stale navigation alone.
+            ReflectionHelpers.callInstanceMethod<Void>(topbar, "reconcilePickerContext")
             session = newSession()
             show()
             settleMotion()
@@ -183,39 +187,40 @@ class GroupPickerTagsSessionTest {
         }
     }
 
-    @Test fun reopenRemembersMembersAndAllPixelViewportsDeletedTagFallsBack() {
+    @Test fun reopenReconcilesExplicitLockAndSelectedGroup() {
         Fixture().use { f ->
-            val tags = (0..23).map { TagGroupStore.create("Tag $it") }
-            val tag = tags[15]
+            val tag = TagGroupStore.create("Tag 15")
             TagGroupStore.add(tag.id, f.roots.map { it.id })
             f.show()
-            (f.list.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(24, -11)
-            f.frame()
-            val root = pickerViewport(f.list, f.adapter.ids)
             f.tags()
-            (f.tagList.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(15, -7)
-            f.frame()
-            val tagsViewport = pickerViewport(f.tagList, f.tagAdapter.ids)
             f.open(tag.id)
-            (f.memberList.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(23, -13)
-            f.frame()
-            val members = pickerViewport(f.memberList, f.memberAdapter.ids)
             val oldSession = f.session
+
+            // An unlocked fresh open must not resurrect the last transient Members page.
             f.reopen()
             assertNotSame(oldSession, f.session)
-            assertEquals(GroupPickerNavigation.Page.Members(tag.id), f.navigation.page)
-            assertEquals(members, pickerViewport(f.memberList, f.memberAdapter.ids))
+            assertEquals(GroupPickerNavigation.Page.Configuration, f.navigation.page)
+            assertEquals(f.roots[19].id, DataStore.selectedGroup)
+            val rootFirst = (f.list.layoutManager as LinearLayoutManager).findFirstVisibleItemPosition()
+            assertEquals(19, rootFirst)
             assertFalse(ReflectionHelpers.getField<PageSlideTransition>(f.session, "pageSlide").isRunning)
-            f.popup.dismiss(); f.settleMotion()
-            assertEquals(tagsViewport, pickerViewport(f.tagList, f.tagAdapter.ids))
-            f.popup.dismiss(); f.settleMotion()
-            assertEquals(root, pickerViewport(f.list, f.adapter.ids))
-            f.tags(); f.open(tag.id)
-            f.topbar.dismissGroupPicker(immediate = true)
-            TagGroupStore.delete(tag.id)
+
+            // The fixture has no real toolbar/adapter, so model the explicit lock at the
+            // same scoped state that the real header callback updates. GroupPickerTagsTest
+            // covers the actual header click callback separately.
+            ReflectionHelpers.setField(f.host, "scopedTagId", tag.id)
             f.reopen()
-            assertEquals(GroupPickerNavigation.Page.Tags, f.navigation.page)
-            assertFalse(f.tagAdapter.ids.contains(tag.id))
+            assertEquals(tag.id, f.host.currentLockedTagId())
+            assertEquals(GroupPickerNavigation.Page.Members(tag.id), f.navigation.page)
+            assertEquals(f.roots[19].id, DataStore.selectedGroup)
+            val memberFirst = (f.memberList.layoutManager as LinearLayoutManager).findFirstVisibleItemPosition()
+            assertEquals(f.roots[19].id, f.memberAdapter.ids[memberFirst])
+
+            // Unlocking is also a fresh-open boundary: it returns to Configuration.
+            ReflectionHelpers.setField(f.host, "scopedTagId", null)
+            f.reopen()
+            assertNull(f.host.currentLockedTagId())
+            assertEquals(GroupPickerNavigation.Page.Configuration, f.navigation.page)
             assertEquals(f.roots[19].id, DataStore.selectedGroup)
         }
     }

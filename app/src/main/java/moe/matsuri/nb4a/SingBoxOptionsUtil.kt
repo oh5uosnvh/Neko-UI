@@ -5,6 +5,9 @@ import moe.matsuri.nb4a.SingBoxOptions.RuleSet
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import kotlin.Exception
+import java.io.File
+import io.nekohasekai.sagernet.ktx.isIpAddress
+import libcore.Libcore
 
 object SingBoxOptionsUtil {
 
@@ -74,26 +77,63 @@ fun SingBoxOptions.DNSRule_DefaultOptions.checkEmpty(): Boolean {
 }
 
 fun generateRuleSet(ruleSetString: List<String>, ruleSet: MutableList<RuleSet>) {
-    ruleSetString.forEach {
+    ruleSetString.forEach { selector ->
         when {
-            it.startsWith("geoip:") -> {
-                ruleSet.add(RuleSet().apply {
-                    type = "local"
-                    tag = it
-                    format = "binary"
-                    path = it
-                })
-            }
+            selector.startsWith("geoip:") || selector.startsWith("geosite:") -> Unit
+            else -> return@forEach
+        }
+        ruleSet.add(RuleSet().apply {
+            type = "local"
+            tag = selector
+            format = "binary"
+            // The patched core interprets this selector and loads its matching
+            // external database itself; path must remain the selector (not .db).
+            path = selector
+        })
+    }
+}
 
-            it.startsWith("geosite:") -> {
-                ruleSet.add(RuleSet().apply {
-                    type = "local"
-                    tag = it
-                    format = "binary"
-                    path = it
-                })
+/** Built-in entries are optional: absent/unreadable geo databases must not stop startup. */
+fun availableBuiltInRuleSet(selector: String): Boolean {
+    val normalized = selector.trim().lowercase()
+    // These are the only local selectors shipped by DefaultRouteCatalog. Do not
+    // let an edited built-in card turn an unknown code into a startup failure.
+    if (normalized !in setOf("geosite:cn", "geosite:category-ads-all", "geoip:cn", "geoip:private")) {
+        return false
+    }
+    if (normalized == "geoip:private") return true
+    val fileName = if (normalized.startsWith("geoip:")) "geoip.db" else "geosite.db"
+    val file = File(SagerNet.application.externalAssets, fileName)
+    if (!file.isFile || !file.canRead() || file.length() <= 0L) return false
+    // Validate the actual category through the patched core. Reflection keeps
+    // older pre22 AARs source-compatible; fail closed if they lack the probe.
+    return runCatching {
+        val method = Libcore::class.java.getMethod("validateGeoRuleSet", String::class.java)
+        method.invoke(null, normalized)
+        true
+    }.getOrDefault(false)
+}
+
+private fun validDomainSelector(value: String): Boolean = value.isNotBlank() &&
+    value.length <= 253 && !value.any { it.isWhitespace() || it in ",/:" }
+
+/** Drops malformed entries only when compiling a built-in route. */
+fun sanitizeBuiltInRuleValues(values: List<String>, isIP: Boolean): List<String> = values.filter { value ->
+    val item = value.trim()
+    when {
+        item.startsWith("geoip:") || item.startsWith("geosite:") -> availableBuiltInRuleSet(item)
+        isIP -> {
+            if (item == "geoip:private") true else {
+                val address = item.substringBefore('/')
+                val prefix = item.substringAfter('/', "").toIntOrNull()
+                address.isIpAddress() && prefix != null &&
+                    prefix in 0..if (address.contains(':')) 128 else 32
             }
         }
+        item.startsWith("full:") -> validDomainSelector(item.removePrefix("full:"))
+        item.startsWith("domain:") -> validDomainSelector(item.removePrefix("domain:"))
+        item.startsWith("keyword:") -> validDomainSelector(item.removePrefix("keyword:"))
+        else -> validDomainSelector(item)
     }
 }
 

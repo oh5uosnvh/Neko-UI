@@ -610,6 +610,23 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     private fun openClassificationChoice() {
         val matched = groupAdapter.searchMatches()
         if (matched.isEmpty()) return
+        if (groupSearchQuery.isBlank()) {
+            val original = groupAdapter.currentOrderIds()
+            val proposed = groupAdapter.classifySimilarOrder()
+            if (proposed.map { it.id } == original) {
+                activity.snackbar(R.string.group_classify_no_matches).show()
+                return
+            }
+            val names = GroupClassification.previewText(proposed) { it.displayName() }
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.group_classify_preview_title)
+                .setMessage(getString(R.string.group_classify_preview_message, names))
+                .setNegativeButton(R.string.group_classify_cancel, null)
+                .setPositiveButton(R.string.group_classify_confirm) { _, _ ->
+                    commitClassification(original, proposed.map { it.id })
+                }.show()
+            return
+        }
         MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.group_classify)
             .setItems(arrayOf(
@@ -634,9 +651,30 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         if (ids.isEmpty()) return
         val selected = ids.toSet()
         val reordered = groupAdapter.classifyOrder(selected)
-        GroupOrderStore.submit(reordered.map { it.id }) { result -> result.error?.let { Logs.w(it) } }
+        commitClassification(groupAdapter.currentOrderIds(), reordered.map { it.id })
+    }
+
+    private fun commitClassification(original: List<Long>, reordered: List<Long>) {
+        if (original == reordered) return
+        val host = activity as? MainActivity ?: return
+        GroupOrderStore.submit(reordered) { result ->
+            val error = result.error
+            if (error != null) {
+                Logs.w(error)
+                host.snackbar(error.localizedMessage ?: "归类保存失败").show()
+            } else {
+                host.snackbar(R.string.group_classify_reordered).setAction(R.string.undo) {
+                    GroupOrderStore.submit(original) { restored ->
+                        restored.error?.let {
+                            Logs.w(it)
+                            host.snackbar(it.localizedMessage ?: "还原失败").show()
+                        }
+                    }
+                }.show()
+            }
+        }
         exitGroupSearchMode()
-        (activity as? MainActivity)?.displayFragmentWithId(R.id.nav_group)
+        host.displayFragmentWithId(R.id.nav_group)
     }
 
     override fun onMenuItemClick(item: MenuItem): Boolean {
@@ -828,11 +866,13 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
         fun searchMatches(): List<ProxyGroup> {
             val q = groupSearchQuery.trim()
-            if (q.isEmpty()) return emptyList()
-            return fullList
+            val candidates = fullList.filterNot { PendingGroupDeletes.contains(it.id) }
                 .filter { filterSubscription == null ||
                     (it.type == GroupType.SUBSCRIPTION) == filterSubscription }
-                .filter { it.displayName().contains(q, ignoreCase = true) }
+            // Tag-member search keeps its historical empty-query behavior; the
+            // one-click action belongs only to the root group search.
+            if (q.isEmpty()) return if (inTag) emptyList() else candidates
+            return candidates.filter { it.displayName().contains(q, ignoreCase = true) }
         }
 
         fun applyCustomSelection(group: ProxyGroup): Boolean {
@@ -848,6 +888,20 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
         fun classifyOrder(ids: Set<Long>): List<ProxyGroup> =
             GroupClassification.stackSelected(fullList.toList()) { it.id in ids }
+
+        fun currentOrderIds(): List<Long> = fullList
+            .filterNot { PendingGroupDeletes.contains(it.id) }
+            .map { it.id }
+
+        fun classifySimilarOrder(): List<ProxyGroup> {
+            val root = fullList.filterNot { PendingGroupDeletes.contains(it.id) }
+            val eligible = root.filter { filterSubscription == null ||
+                (it.type == GroupType.SUBSCRIPTION) == filterSubscription }
+            val clustered = GroupClassification.stableClusterOrder(eligible) { it.displayName() }
+            val byId = root.associateBy { it.id }
+            return GroupClassification.mergeSubsetOrder(root.map { it.id }, clustered.map { it.id })
+                .mapNotNull { byId[it] }
+        }
 
         fun submitGroups(groups: List<ProxyGroup>) {
             dataGeneration++
