@@ -57,7 +57,9 @@ jobs:
           java-version: '21'
       - uses: nttld/setup-ndk@v1
         with:
-          ndk-version: r25c
+          # Cronet archives in the sing-box Naive module use NDK r25c.
+          # Pin the numeric revision so the runner cannot silently select r27.
+          ndk-version: '25.2.9519653'
       - name: Stage pinned protocol modules at go.mod replacement paths
         run: |
           set -euo pipefail
@@ -139,7 +141,9 @@ jobs:
           java-version: '21'
       - uses: nttld/setup-ndk@v1
         with:
-          ndk-version: r25c
+          # Cronet archives in the sing-box Naive module use NDK r25c.
+          # Pin the numeric revision so the runner cannot silently select r27.
+          ndk-version: '25.2.9519653'
       - name: Retrieve legacy signing key only for an explicitly signed build
         if: ${{ inputs.signed }}
         uses: actions/checkout@v4
