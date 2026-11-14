@@ -8,16 +8,15 @@ DEPS="$(dirname "$ROOT")"
 
 checkout_dep() {
   local name="$1" url="$2" commit="$3" dir="$DEPS/$1"
-  local clone_url="$url"
-  local -a git_auth=()
+  local -a git_auth_env=()
   if [ -n "${SING_BOX_CLONE_TOKEN:-}" ] && [ "$name" = sing-box ]; then
-    # Use an in-memory extra header; do not place the token in clone URLs or
-    # the repository's origin config, where it could leak into diagnostics.
-    git_auth=(-c "http.extraheader=Authorization: Bearer ${SING_BOX_CLONE_TOKEN}")
+    # Use an in-memory environment config; never place the token in a clone URL
+    # or the repository's origin config, where it could leak into diagnostics.
+    git_auth_env=(env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader "GIT_CONFIG_VALUE_0=Authorization: Bearer ${SING_BOX_CLONE_TOKEN}")
   fi
-  git_cmd() { git "${git_auth[@]}" "$@"; }
+  git_cmd() { "${git_auth_env[@]}" git "$@"; }
   if [ ! -e "$dir" ]; then
-    git_cmd clone "$clone_url" "$dir"
+    git_cmd clone "$url" "$dir"
   fi
   if [ ! -d "$dir/.git" ]; then
     echo "Not a Git checkout: $dir" >&2; exit 1
