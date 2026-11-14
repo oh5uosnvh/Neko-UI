@@ -19,6 +19,7 @@ import (
 	"github.com/sagernet/sing-box/boxapi"
 	boxdns "github.com/sagernet/sing-box/dns"
 	"github.com/sagernet/sing-box/dns/transport"
+	"github.com/sagernet/sing-box/dns/transport/local"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/direct"
 	"github.com/sagernet/sing-box/protocol/vmess"
@@ -30,6 +31,7 @@ func probeContractBox(t *testing.T, config string) *box.Box {
 	t.Helper()
 	dns := boxdns.NewTransportRegistry()
 	transport.RegisterUDP(dns)
+	local.RegisterTransport(dns)
 	dnspolicy.RegisterTransport(dns)
 	in := inbound.NewRegistry()
 	vmess.RegisterInbound(in)
