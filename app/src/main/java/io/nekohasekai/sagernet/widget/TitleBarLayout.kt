@@ -198,8 +198,8 @@ class TitleBarLayout @JvmOverloads constructor(
         val measured = bar?.takeIf { toolbarVisible }?.let(TitleGlyphMetrics::titleView)
             ?.let { TitleGlyphMetrics.bottom(it, this) }
         // A toolbar without title ink safely keeps content below the header until a title arrives.
-        val next = (measured ?: toolbarBottom).coerceIn(paddingTop.toFloat(),
-            maxOf(paddingTop.toFloat(), toolbarBottom))
+        val next = (measured ?: toolbarBottom.toFloat()).coerceIn(paddingTop.toFloat(),
+            maxOf(paddingTop.toFloat(), toolbarBottom.toFloat()))
         if (titleGlyphBottom == next) return false
         titleGlyphBottom = next
         invalidate()
