@@ -1844,7 +1844,13 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val workers = io.nekohasekai.sagernet.bg.urlTestWorkerCount(
                     DataStore.connectionTestConcurrent, profilesList.size,
                 )
-                testPool = Executors.newFixedThreadPool(workers).asCoroutineDispatcher()
+                val useBatchProbe = io.nekohasekai.sagernet.bg.proto.canUseBatchProbe(profilesList)
+                // sing-box URLTest uses ten concurrent leaves per batch. Do not
+                // allocate dozens of blocking JNI workers when the shared-core
+                // path is selected; the isolated fallback still honors the user
+                // concurrency setting.
+                val poolWorkers = if (useBatchProbe) minOf(workers, 10) else workers
+                testPool = Executors.newFixedThreadPool(poolWorkers).asCoroutineDispatcher()
                 test.proxyN = profilesList.size
                 test.targetIds.addAll(profilesList.map { it.id })
                 activeLatencyIds.addAll(profilesList.map { it.id }); profilesList.forEach { it.status = 0 }
@@ -1855,18 +1861,41 @@ class ConfigurationFragment @JvmOverloads constructor(
                         latencyOverlay()?.running(0, profilesList.size, 0)
                     }
                 }
-                val urlTest = UrlTest(testPool!!, link, timeout)
-                io.nekohasekai.sagernet.bg.runUrlTestBatch(profilesList, workers) { profile ->
-                    try {
-                        profile.ping = urlTest.doTest(profile)
-                        profile.status = 1
-                        profile.error = ""
+                if (useBatchProbe) {
+                    // Built-in nodes share one disposable, warmed core. The core
+                    // exposes each root outbound by tag and probes at most ten
+                    // simultaneously, matching sing-box URLTest batch semantics.
+                    // External plugin/full-config profiles keep the old isolated
+                    // fallback because they need their own process/config graph.
+                    val batch = io.nekohasekai.sagernet.bg.proto.BatchTestInstance(profilesList, link, timeout)
+                    val byId = profilesList.associateBy { it.id }
+                    batch.doTest(testPool!!).forEach { result ->
+                        val profile = byId[result.profile.id] ?: return@forEach
+                        if (result.latency != null) {
+                            profile.ping = result.latency
+                            profile.status = 1
+                            profile.error = ""
+                        } else {
+                            profile.status = 3
+                            profile.error = result.error?.readableMessage ?: "Connection unavailable"
+                        }
+                        ensureActive()
+                        test.update(profile)
                     }
-                    catch (cancelled: CancellationException) { throw cancelled }
-                    catch (e: PluginManager.PluginNotFoundException) { profile.status = 2; profile.error = e.readableMessage }
-                    catch (e: Exception) { profile.status = 3; profile.error = e.readableMessage }
-                    ensureActive()
-                    test.update(profile)
+                } else {
+                    val urlTest = UrlTest(testPool!!, link, timeout)
+                    io.nekohasekai.sagernet.bg.runUrlTestBatch(profilesList, workers) { profile ->
+                        try {
+                            profile.ping = urlTest.doTest(profile)
+                            profile.status = 1
+                            profile.error = ""
+                        }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (e: PluginManager.PluginNotFoundException) { profile.status = 2; profile.error = e.readableMessage }
+                        catch (e: Exception) { profile.status = 3; profile.error = e.readableMessage }
+                        ensureActive()
+                        test.update(profile)
+                    }
                 }
                 test.finish(false)
             } finally {

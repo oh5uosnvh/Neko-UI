@@ -40,6 +40,7 @@ import io.nekohasekai.sagernet.fmt.wireguard.migrateWireGuardEndpoints
 import io.nekohasekai.sagernet.group.SubscriptionDns
 import io.nekohasekai.sagernet.group.SubscriptionDnsBuilder
 import io.nekohasekai.sagernet.group.NodeHostMapping
+import io.nekohasekai.sagernet.group.SingBoxJsonImport
 import io.nekohasekai.sagernet.ktx.isIpAddress
 import io.nekohasekai.sagernet.ktx.mkPort
 import io.nekohasekai.sagernet.utils.PackageCache
@@ -111,7 +112,10 @@ private fun serverHostOf(bean: AbstractBean): String? {
 }
 
 fun buildConfig(
-    proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean = false
+    proxy: ProxyEntity,
+    forTest: Boolean = false,
+    forExport: Boolean = false,
+    probeProfiles: List<ProxyEntity>? = null,
 ): ConfigBuildResult {
 
     if (proxy.type == TYPE_CONFIG) {
@@ -135,6 +139,8 @@ fun buildConfig(
     val trafficMap = HashMap<String, List<ProxyEntity>>()
     val tagMap = HashMap<Long, String>()
     val globalOutbounds = HashMap<Long, String>()
+    val importedDnsServers = mutableListOf<Map<String, Any?>>()
+    val importedTagNamespaces = hashSetOf<String>()
     val readableNames = mutableSetOf(TAG_DIRECT, TAG_BYPASS, TAG_BLOCK, TAG_FRAGMENT, TAG_MIXED, TAG_PROXY)
     val group = SagerDatabase.groupDao.getById(proxy.groupId)
 
@@ -182,7 +188,10 @@ fun buildConfig(
         if (forTest) mapOf() else SagerDatabase.proxyDao.getEntities(extraRules.mapNotNull { rule ->
             rule.outbound.takeIf { it > 0 && it != proxy.id }
         }.toHashSet().toList()).associateBy { it.id }
-    val buildSelector = !forTest && group?.isSelector == true && !forExport
+    // A batch URLTest uses one disposable core with a selector containing all
+    // requested leaf profiles. This avoids starting one cold core per node.
+    val buildSelector = (probeProfiles != null && probeProfiles.isNotEmpty()) ||
+        (!forTest && group?.isSelector == true && !forExport)
     val userDNSRuleList = mutableListOf<DNSRule_DefaultOptions>()
     val domainListDNSDirectForce = mutableListOf<String>()
     val bypassDNSBeans = hashSetOf<AbstractBean>()
@@ -446,7 +455,25 @@ fun buildConfig(
                     // internal outbound
 
                     currentOutbound = when (bean) {
-                        is ConfigBean -> CustomSingBoxOption(bean.config) as SingBoxOption
+                        is ConfigBean -> {
+                            // Preserve raw protocol fields, but make its tagged dependency
+                            // graph private to this profile occurrence (chains/selectors too).
+                            var namespace = "__neko_import_${proxyEntity.id}_${chainId}_${index}_"
+                            while (!importedTagNamespaces.add(namespace) || readableNames.any { it.startsWith(namespace) }) {
+                                namespace += "_"
+                            }
+                            val prepared = SingBoxJsonImport.prepare(bean.config, bean.outboundContext, namespace, tagOut)
+                            prepared.outbounds.forEach { raw ->
+                                val dependency = CustomSingBoxOption(raw)
+                                val dependencyTag = dependency.getBasicMap()["tag"] as? String
+                                dependencyTag?.let(readableNames::add)
+                                outbounds.add(dependency)
+                            }
+                            prepared.dnsServers.forEach { raw ->
+                                importedDnsServers.add(CustomSingBoxOption(raw).getBasicMap())
+                            }
+                            CustomSingBoxOption(prepared.outbound)
+                        }
 
                         is NaiveBean ->
                             buildSingBoxOutboundNaiveBean(bean)
@@ -505,7 +532,7 @@ fun buildConfig(
                         }
                     }
 
-                    if (needGlobal && DataStore.enableTLSFragment) {
+                    if (needGlobal && DataStore.enableTLSFragment && !(bean is ConfigBean && bean.outboundContext.isNotBlank())) {
                         val outboundMap = currentOutbound.asMap()
                         val tlsOptions = outboundMap["tls"] as? Map<*, *>
                         if (tlsOptions?.get("enabled") == true) {
@@ -532,8 +559,13 @@ fun buildConfig(
                             domainListDNSDirectForce.add("full:$serverAddress")
                         }
                     }
-                    _hack_config_map["domain_strategy"] = defaultServerDomainStrategy
-                    if (nodeResolver != null && !proxyEntity.needExternal()) {
+                    // Raw sing-box nodes already carry explicit dialing semantics.
+                    // Global defaults must not erase domain_strategy/domain_resolver.
+                    if (bean !is ConfigBean) {
+                        _hack_config_map["domain_strategy"] = defaultServerDomainStrategy
+                    }
+                    if (nodeResolver != null && !proxyEntity.needExternal() &&
+                        !(bean is ConfigBean && bean.outboundContext.isNotBlank())) {
                         _hack_config_map["domain_resolver"] = mapOf(
                             "server" to nodeResolver,
                             "strategy" to genDomainStrategy(true),
@@ -619,7 +651,7 @@ fun buildConfig(
 
         // build outbounds
         if (buildSelector) {
-            val list = group.id.let { SagerDatabase.proxyDao.getByGroup(it) }
+            val list = probeProfiles ?: group?.id?.let { SagerDatabase.proxyDao.getByGroup(it) }.orEmpty()
             list.forEach {
                 tagMap[it.id] = buildChain(it.id, it)
             }
@@ -1088,6 +1120,15 @@ fun buildConfig(
         if (!forTest) _hack_custom_config = DataStore.globalCustomConfig
     }.let {
         val configMap = it.asMap()
+        if (importedDnsServers.isNotEmpty()) {
+            // DNSServerOptions is a typed legacy model; attach raw servers after
+            // serialization so batch and future protocol-specific fields survive.
+            @Suppress("UNCHECKED_CAST")
+            val dnsMap = configMap["dns"] as MutableMap<String, Any?>
+            val servers = (dnsMap["servers"] as? List<*>)?.toMutableList() ?: mutableListOf()
+            servers.addAll(importedDnsServers)
+            dnsMap["servers"] = servers
+        }
         Util.mergeJSON(configMap, proxy.requireBean().customConfigJson)
         migrateWireGuardEndpoints(configMap)
         ConfigBuildResult(
@@ -1096,7 +1137,7 @@ fun buildConfig(
             proxy.id,
             trafficMap,
             tagMap,
-            if (buildSelector) group.id else -1L
+            if (buildSelector) group?.id ?: -1L else -1L
         )
     }
 

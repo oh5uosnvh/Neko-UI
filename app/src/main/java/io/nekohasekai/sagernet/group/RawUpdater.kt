@@ -429,6 +429,19 @@ object RawUpdater : GroupUpdater() {
     @Suppress("UNCHECKED_CAST")
     suspend fun parseRaw(text: String, fileName: String = ""): List<AbstractBean>? {
 
+        val trimmed = text.trimStart('\uFEFF', ' ', '\t', '\r', '\n')
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+            try {
+                val json = JSONTokener(trimmed).nextValue()
+                val parsed = parseJSON(json)
+                if (parsed.isNotEmpty()) return parsed
+            } catch (error: SingBoxJsonImportException) {
+                // A recognized graph must fail atomically, never degrade to a link list.
+                throw error
+            } catch (ignored: Exception) {
+            }
+        }
+
         val proxies = mutableListOf<AbstractBean>()
 
         if (text.contains("proxies:")) {
@@ -1122,8 +1135,13 @@ object RawUpdater : GroupUpdater() {
         }
 
         try {
-            val json = JSONTokener(text).nextValue()
-            return parseJSON(json)
+            val json = JSONTokener(text.trimStart('\uFEFF')).nextValue()
+            val parsed = parseJSON(json)
+            if (parsed.isNotEmpty()) return parsed
+        } catch (error: SingBoxJsonImportException) {
+            // Do not fall through to link/base64 parsers after a recognized JSON
+            // document fails validation; that would hide a broken dependency graph.
+            throw error
         } catch (ignored: Exception) {
         }
 
@@ -1160,7 +1178,7 @@ object RawUpdater : GroupUpdater() {
         if (localAddresses.isNullOrEmpty()) error("Empty address in 'Interface' selection")
         bean.localAddress = localAddresses.flatMap { it.split(",") }.joinToString("\n")
         bean.privateKey = iface["PrivateKey"]
-        bean.mtu = iface["MTU"]?.toIntOrNull()
+        bean.mtu = iface["MTU"]?.toIntOrNull() ?: bean.mtu
         val peers = ini.getAll("Peer")
         if (peers.isNullOrEmpty()) error("Missing 'Peer' selections")
         val beans = mutableListOf<WireGuardBean>()
@@ -1183,6 +1201,22 @@ object RawUpdater : GroupUpdater() {
 
     fun parseJSON(json: Any): List<AbstractBean> {
         val proxies = ArrayList<AbstractBean>()
+        if (json is JSONObject || json is JSONArray) {
+            val imported = try {
+                SingBoxJsonImport.parse(json.toString())
+            } catch (_: Exception) {
+                // Never include a JSON snippet, tag, hostname or credential in errors.
+                throw SingBoxJsonImportException()
+            }
+            if (imported != null) return imported.map { profile ->
+                ConfigBean().applyDefaultValues().apply {
+                    type = if (profile.full) 0 else 1
+                    config = JSONObject(profile.config).toStringPretty()
+                    outboundContext = profile.context
+                    name = profile.name
+                }
+            }
+        }
 
         if (json is JSONObject) {
             when {
@@ -1202,41 +1236,6 @@ object RawUpdater : GroupUpdater() {
                     return listOf(json.parseTrojanGo())
                 }
 
-                // Endpoint protocols carry DNS, certificates and route dependencies.
-                // Import them as a complete config, never split them into outbounds
-                // and silently discard OpenVPN/OpenConnect/Tailscale/WireGuard.
-                json.has("endpoints") || json.has("services") || json.optJSONArray("inbounds")?.let { entries ->
-                    (0 until entries.length()).any { entries.optJSONObject(it)?.optString("type") == "cloudflared" }
-                } == true -> {
-                    return listOf(ConfigBean().applyDefaultValues().apply {
-                        type = 0
-                        config = json.toStringPretty()
-                        name = json.optString("tag", "sing-box 1.14 config")
-                    })
-                }
-
-                json.has("outbounds") -> {
-                    return json.getJSONArray("outbounds")
-                        .filterIsInstance<JSONObject>()
-                        .mapNotNull {
-                            val ty = it.getStr("type")
-                            if (ty == null || ty == "" ||
-                                ty == "dns" || ty == "block" || ty == "direct" || ty == "selector" || ty == "urltest"
-                            ) {
-                                null
-                            } else {
-                                it
-                            }
-                        }.map {
-                            ConfigBean().apply {
-                                applyDefaultValues()
-                                type = 1
-                                config = it.toStringPretty()
-                                name = it.getStr("tag")
-                            }
-                        }
-                }
-
                 json.has("server") && json.has("server_port") -> {
                     return listOf(ConfigBean().applyDefaultValues().apply {
                         type = 1
@@ -1244,11 +1243,13 @@ object RawUpdater : GroupUpdater() {
                     })
                 }
             }
-        } else {
-            json as JSONArray
+        } else if (json is JSONArray) {
             json.forEach { _, it ->
-                if (isJsonObjectValid(it)) {
-                    proxies.addAll(parseJSON(it))
+                when (it) {
+                    is JSONObject, is JSONArray -> proxies.addAll(parseJSON(it))
+                    is String -> runCatching { JSONTokener(it).nextValue() }.getOrNull()?.let { value ->
+                        proxies.addAll(parseJSON(value))
+                    }
                 }
             }
         }

@@ -310,16 +310,45 @@ func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err err
 	return probeHTTP(context.Background(), boxapi.CreateProxyHttpClient(nil, nil), link, timeout)
 }
 
+// UrlTestOutbound probes an explicitly tagged outbound without changing a
+// selector's process-wide selected state. Batch URLTest can therefore test
+// multiple nodes concurrently on one warm disposable core.
+func UrlTestOutbound(i *BoxInstance, tag, link string, timeout int32) (latency int32, err error) {
+	defer device.DeferPanicToError("box.UrlTestOutbound", func(err_ error) { err = err_ })
+	if i == nil || i.Box == nil || strings.TrimSpace(tag) == "" {
+		return 0, errors.New("missing probe outbound")
+	}
+	if timeout <= 0 {
+		return 0, errors.New("invalid probe timeout")
+	}
+	outbound, ok := i.Outbound().Outbound(tag)
+	if !ok || outbound == nil {
+		return 0, fmt.Errorf("probe outbound not found")
+	}
+	parent := context.Background()
+	if i.probeContext != nil {
+		parent = i.probeContext.ctx
+	}
+	return officialURLTestDetour(parent, i.Box, link, timeout, outbound)
+}
+
 func officialURLTest(parent context.Context, instance *box.Box, link string, timeout int32) (int32, error) {
 	if instance == nil || instance.Outbound() == nil || instance.Outbound().Default() == nil {
 		return 0, errors.New("missing default outbound")
+	}
+	return officialURLTestDetour(parent, instance, link, timeout, instance.Outbound().Default())
+}
+
+func officialURLTestDetour(parent context.Context, instance *box.Box, link string, timeout int32, target adapter.Outbound) (int32, error) {
+	if instance == nil || target == nil {
+		return 0, errors.New("missing probe outbound")
 	}
 	ctx, cancel := context.WithTimeout(
 		context.WithValue(parent, "nb4a_no_concurrent_dial", true),
 		time.Duration(timeout)*time.Millisecond,
 	)
 	defer cancel()
-	delay, err := urltest.URLTest(ctx, link, instance.Outbound().Default())
+	delay, err := urltest.URLTest(ctx, link, target)
 	if err != nil {
 		return 0, err
 	}
