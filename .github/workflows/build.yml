@@ -70,10 +70,10 @@ jobs:
           for root in [Path(os.environ.get('ANDROID_HOME', '')) / 'ndk', Path(os.environ.get('RUNNER_TOOL_CACHE', '')) / 'ndk']:
               if root.is_dir():
                   for props in root.glob('*/source.properties'):
-                      if 'Pkg.Revision = 28.0.' in props.read_text(errors='ignore'):
+                      if 'Pkg.Revision = 28.' in props.read_text(errors='ignore'):
                           print(props.parent)
                           raise SystemExit
-          raise SystemExit('NDK r25c source.properties not found')
+          raise SystemExit('NDK r28b source.properties not found')
           PY
           )"
           echo "ANDROID_NDK_HOME=$ndk25" >> "$GITHUB_ENV"
@@ -172,10 +172,10 @@ jobs:
           for root in [Path(os.environ.get('ANDROID_HOME', '')) / 'ndk', Path(os.environ.get('RUNNER_TOOL_CACHE', '')) / 'ndk']:
               if root.is_dir():
                   for props in root.glob('*/source.properties'):
-                      if 'Pkg.Revision = 28.0.' in props.read_text(errors='ignore'):
+                      if 'Pkg.Revision = 28.' in props.read_text(errors='ignore'):
                           print(props.parent)
                           raise SystemExit
-          raise SystemExit('NDK r25c source.properties not found')
+          raise SystemExit('NDK r28b source.properties not found')
           PY
           )"
           echo "ANDROID_NDK_HOME=$ndk25" >> "$GITHUB_ENV"
