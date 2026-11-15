@@ -82,7 +82,10 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
         currentStage = ProbeFailure.Stage.CORE_CREATE
         // don't call destroyAllJsi here; and never dump the full config (it has
         // UUIDs, endpoints and transport credentials) even in debug builds.
-        val native = Libcore.newProbeContext(maxOf(timeout, 5000))
+        // Setup is part of this node's URLTest budget. The old 5000 ms
+        // floor made a 3000 ms setting silently wait another two seconds
+        // before the actual HTTP deadline even started.
+        val native = Libcore.newProbeContext(timeout.coerceAtLeast(500))
         probeContext = native
         coroutineContext.ensureActive()
         box = Libcore.newSingBoxProbe(config.config, LocalResolverImpl, native)
