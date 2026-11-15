@@ -60,6 +60,24 @@ jobs:
           # Cronet archives in the sing-box Naive module use NDK r25c.
           ndk-version: r25c
           link-to-sdk: true
+      - name: Select the installed Cronet-compatible NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ndk25="$(python3 - <<'PY'
+          import os
+          from pathlib import Path
+          for root in [Path(os.environ.get('ANDROID_HOME', '')) / 'ndk', Path(os.environ.get('RUNNER_TOOL_CACHE', '')) / 'ndk']:
+              if root.is_dir():
+                  for props in root.glob('*/source.properties'):
+                      if 'Pkg.Revision = 25.2.' in props.read_text(errors='ignore'):
+                          print(props.parent)
+                          raise SystemExit
+          raise SystemExit('NDK r25c source.properties not found')
+          PY
+          )"
+          echo "ANDROID_NDK_HOME=$ndk25" >> "$GITHUB_ENV"
+          echo "NDK=$ndk25" >> "$GITHUB_ENV"
       - name: Stage pinned protocol modules at go.mod replacement paths
         run: |
           set -euo pipefail
@@ -144,6 +162,24 @@ jobs:
           # Cronet archives in the sing-box Naive module use NDK r25c.
           ndk-version: r25c
           link-to-sdk: true
+      - name: Select the installed Cronet-compatible NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ndk25="$(python3 - <<'PY'
+          import os
+          from pathlib import Path
+          for root in [Path(os.environ.get('ANDROID_HOME', '')) / 'ndk', Path(os.environ.get('RUNNER_TOOL_CACHE', '')) / 'ndk']:
+              if root.is_dir():
+                  for props in root.glob('*/source.properties'):
+                      if 'Pkg.Revision = 25.2.' in props.read_text(errors='ignore'):
+                          print(props.parent)
+                          raise SystemExit
+          raise SystemExit('NDK r25c source.properties not found')
+          PY
+          )"
+          echo "ANDROID_NDK_HOME=$ndk25" >> "$GITHUB_ENV"
+          echo "NDK=$ndk25" >> "$GITHUB_ENV"
       - name: Retrieve legacy signing key only for an explicitly signed build
         if: ${{ inputs.signed }}
         uses: actions/checkout@v4
