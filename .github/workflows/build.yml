@@ -112,7 +112,7 @@ jobs:
           go test -race -count=1 ./adapter -run RuntimeRouting
           go test -race -count=1 . -run RuntimeRouting
           go test -race -count=1 ./route/rule -run 'TestLocalRuleSet(Geo|Ordinary)'
-          go test -list '^TestBoxNewStartsAndClosesGeoAliasRuleSets$' . | rg '^TestBoxNewStartsAndClosesGeoAliasRuleSets$'
+          go test -list '^TestBoxNewStartsAndClosesGeoAliasRuleSets$' . | python3 -c 'import sys; assert "TestBoxNewStartsAndClosesGeoAliasRuleSets" in sys.stdin.read().splitlines(), "required Geo startup test absent"'
           go test -race -count=1 . -run TestBoxNewStartsAndClosesGeoAliasRuleSets
           GOFLAGS='-ldflags=-checklinkname=0' go test -count=1 ./experimental/libbox -run 'TestMarshalTunOptions|TestExchangeContext|TestDuplicateTunDescriptor'
       - name: Build libcore
