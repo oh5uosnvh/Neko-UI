@@ -15,12 +15,11 @@ import (
 //   - one HEAD request, not a page download or a hidden warm-up request;
 //   - one hard, end-to-end user deadline;
 //   - measure until the first response byte;
-//   - include DNS/TCP/TLS and early-handshake cost, but exclude a lazy
-//     protocol handshake that is intentionally performed on the first write.
-//
-// The last rule is the same NeedHandshakeForWrite rule used by sing-box's
-// common/urltest implementation and prevents Trojan/VMess lazy writes from
-// inflating the displayed network delay.
+//   - include DNS/TCP/TLS and the protocol handshake performed on the first
+//     write, matching sing-box's official URLTest timing;
+//   - when the protocol marks the connection as NeedHandshakeForWrite, reset
+//     the start after DialContext, exactly as sing-box does. This separates
+//     outbound dial setup from the measured request/handshake response cost.
 func probeHTTP(parent context.Context, client *http.Client, link string, timeout int32) (int32, error) {
 	if timeout <= 0 {
 		return 0, errors.New("invalid probe timeout")
