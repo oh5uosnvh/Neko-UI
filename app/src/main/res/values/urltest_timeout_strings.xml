@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="connection_test_timeout_hint">Integer milliseconds (ms), minimum %1$d ms</string>
+    <string name="connection_test_timeout_invalid">Enter an integer timeout in milliseconds (ms), at least %1$d ms. Decimal seconds are not supported.</string>
+</resources>

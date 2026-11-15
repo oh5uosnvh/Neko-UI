@@ -37,6 +37,17 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
     override fun onCreateAdapter(preferenceScreen: PreferenceScreen) =
         createSettingsCardAdapter(preferenceScreen)
 
+    override fun onDisplayPreferenceDialog(preference: Preference) {
+        if (preference is UrlTestPreference) {
+            if (parentFragmentManager.findFragmentByTag(UrlTestPreferenceDialog.TAG) == null) {
+                UrlTestPreferenceDialog.newInstance(preference.key, this)
+                    .show(parentFragmentManager, UrlTestPreferenceDialog.TAG)
+            }
+            return
+        }
+        super.onDisplayPreferenceDialog(preference)
+    }
+
     private lateinit var isProxyApps: SwitchPreference
 
     private lateinit var globalCustomConfig: EditConfigPreference

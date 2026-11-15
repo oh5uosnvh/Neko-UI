@@ -1,19 +1,14 @@
 package io.nekohasekai.sagernet.bg.proto
 
 import io.nekohasekai.sagernet.bg.ProbeDeadline
+import io.nekohasekai.sagernet.bg.runBatchProbe
 import io.nekohasekai.sagernet.bg.runCancellableProbe
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyEntity.Companion.TYPE_CHAIN
 import io.nekohasekai.sagernet.database.ProxyEntity.Companion.TYPE_CONFIG
 import io.nekohasekai.sagernet.fmt.KryoConverters
 import io.nekohasekai.sagernet.fmt.buildConfig
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import java.lang.reflect.Method
 import libcore.Libcore
 import moe.matsuri.nb4a.net.LocalResolverImpl
@@ -24,8 +19,9 @@ import kotlin.coroutines.coroutineContext
 internal class BatchTestInstance(
     profiles: List<ProxyEntity>,
     private val link: String,
-    private val timeout: Int,
+    timeoutMillis: Int,
 ) : BoxInstance(profiles.first()) {
+    private val timeout = io.nekohasekai.sagernet.bg.UrlTestTimeout.normalizeMillis(timeoutMillis)
     private val probeProfiles = profiles.map {
         KryoConverters.deserialize(ProxyEntity(), KryoConverters.serialize(it))
     }
@@ -56,8 +52,14 @@ internal class BatchTestInstance(
         super.launch()
     }
 
-    suspend fun doTest(context: CoroutineContext): List<Result> {
-        return runCancellableProbe(
+    /**
+     * Probe and publish each leaf as soon as its native call completes.  The
+     * callback is deliberately part of the structured probe owner, rather
+     * than replaying a List after awaitAll: a slow first leaf must not hide
+     * later completions from the progress UI or persistence queue.
+     */
+    suspend fun doTest(context: CoroutineContext, onResult: suspend (Result) -> Unit) {
+        runCancellableProbe(
             context = context,
             prepare = {
                 coroutineContext.ensureActive()
@@ -80,26 +82,15 @@ internal class BatchTestInstance(
                 // official batch implementation; queueing behind the ten-slot
                 // gate must not make later nodes inherit a nearly expired timer.
                 deadline.remainingMillis()
-                val gate = Semaphore(10) // sing-box URLTest batch concurrency
-                coroutineScope {
-                    probeProfiles.map { profile ->
-                        async(Dispatchers.IO) {
-                            gate.withPermit {
-                                val tag = config.profileTagMap[profile.id]
-                                    ?: error("probe outbound tag missing")
-                                try {
-                                    // Core setup is guarded separately. Each leaf
-                                    // receives the configured request timeout, so
-                                    // waiting behind the ten-slot batch gate does
-                                    // not turn queue time into a fake timeout.
-                                    val value = outboundProbeMethod.invoke(null, box, tag, link, timeout) as Int
-                                    Result(profile, value, null)
-                                } catch (error: Exception) {
-                                    Result(profile, null, error)
-                                }
-                            }
-                        }
-                    }.awaitAll()
+                runBatchProbe(probeProfiles, concurrency = 10, probe = { profile ->
+                    val tag = config.profileTagMap[profile.id]
+                        ?: error("probe outbound tag missing")
+                    // Core setup is guarded separately. Each leaf receives the
+                    // configured request timeout, so waiting behind the batch
+                    // gate does not turn queue time into a fake timeout.
+                    outboundProbeMethod.invoke(null, box, tag, link, timeout) as Int
+                }) { result ->
+                    onResult(Result(result.profile, result.latency, result.error))
                 }
             },
         )

@@ -22,10 +22,12 @@ import (
 	"github.com/sagernet/sing-box/protocol/direct"
 	"github.com/sagernet/sing-box/protocol/group"
 	httpInbound "github.com/sagernet/sing-box/protocol/http"
+	"github.com/sagernet/sing-box/protocol/hysteria2"
 	mixed "github.com/sagernet/sing-box/protocol/mixed"
 	redirect "github.com/sagernet/sing-box/protocol/redirect"
 	"github.com/sagernet/sing-box/protocol/socks"
 	tunInbound "github.com/sagernet/sing-box/protocol/tun"
+	"github.com/sagernet/sing-box/protocol/vless"
 	"github.com/sagernet/sing/service"
 )
 
@@ -42,6 +44,9 @@ func schema14Context() context.Context {
 	or := outbound.NewRegistry()
 	direct.RegisterOutbound(or)
 	group.RegisterSelector(or)
+	group.RegisterURLTest(or)
+	vless.RegisterOutbound(or)
+	hysteria2.RegisterOutbound(or)
 	socks.RegisterOutbound(or)
 	ir := inbound.NewRegistry()
 	mixed.RegisterInbound(ir)

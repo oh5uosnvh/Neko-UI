@@ -136,6 +136,76 @@ class SingBoxRawImportTest {
         override fun close() { restore.asReversed().forEach { it() }; cache.close(); pref.close(); db.close() }
     }
 
+    private fun assertDnsClosed(root: JSONObject) {
+        val servers = root.getJSONObject("dns").getJSONArray("servers")
+        val tags = (0 until servers.length()).map { servers.getJSONObject(it).getString("tag") }.toSet()
+        fun walk(value: Any?) {
+            when (value) {
+                is JSONObject -> value.keys().forEach { key ->
+                    val child = value.get(key)
+                    if (key == "domain_resolver" || key == "default_domain_resolver") {
+                        val tag = if (child is JSONObject) child.getString("server") else child.toString()
+                        assertTrue("missing DNS resolver", tag in tags)
+                    }
+                    walk(child)
+                }
+                is JSONArray -> for (i in 0 until value.length()) walk(value.get(i))
+            }
+        }
+        walk(root)
+        for (i in 0 until servers.length()) {
+            val server = servers.getJSONObject(i)
+            assertNotEquals("batch", server.optString("type"))
+            if (server.optString("type") == "neko-policy") {
+                assertFalse(server.has("servers")); assertFalse(server.has("strategy")); assertFalse(server.has("idle_timeout"))
+                val fallback = server.getJSONArray("fallback")
+                for (j in 0 until fallback.length()) assertTrue(fallback.getString(j) in tags)
+            }
+        }
+    }
+
+    /** Exact ConfigBuilder documents can be fed to the pinned Go decoder/startup gate. */
+    @Test fun coreCompatibleBatchFixturesAreClosedInRuntimeTestExportAndBatchModes() = runBlocking {
+        Environment().use { e ->
+            val source = SingBoxImportFixture.coreProfile()
+            val rootNode = source.getAsJsonArray("outbounds")[0].asJsonObject
+            rootNode.getAsJsonObject("domain_resolver").addProperty("server", "general")
+            val beans = RawUpdater.parseRaw(source.toString())!!.map { it as ConfigBean }
+            e.groups[1] = ProxyGroup(id = 1, name = "core-fixture")
+            beans.forEachIndexed { index, bean -> e.profiles[index + 1L] = ProxyEntity(id = index + 1L, groupId = 1).putBean(bean) }
+            val directory = System.getProperty("neko.dns.fixtureDir")?.let { java.io.File(it).apply { mkdirs() } }
+            fun check(name: String, config: String) {
+                assertDnsClosed(JSONObject(config))
+                directory?.resolve("$name.json")?.writeText(config)
+            }
+            for ((id, profile) in e.profiles) {
+                val before = KryoConverters.serialize(profile)
+                check("node-$id-test", buildConfig(profile, forTest = true).config)
+                check("node-$id-runtime", buildConfig(profile).config)
+                check("node-$id-export", buildConfig(profile, forExport = true).config)
+                assertArrayEquals(before, KryoConverters.serialize(profile))
+            }
+            check("batch-test", buildConfig(e.profiles.getValue(1), forTest = true, probeProfiles = e.profiles.values.toList()).config)
+            e.groups.getValue(1).isSelector = true
+            check("group-selector", buildConfig(e.profiles.getValue(1)).config)
+        }
+    }
+
+    @Test fun all44ImportedProfilesGenerateCoreDecodableConfigs() = runBlocking {
+        Environment().use { e ->
+            val beans = RawUpdater.parseRaw(SingBoxImportFixture.coreSharedProfile().toString())!!.map { it as ConfigBean }
+            assertEquals(44, beans.size)
+            e.groups[1] = ProxyGroup(id = 1, name = "all-core-fixtures")
+            beans.forEachIndexed { i, bean -> e.profiles[i + 1L] = ProxyEntity(id = i + 1L, groupId = 1).putBean(bean) }
+            val directory = System.getProperty("neko.dns.fixtureDir")?.let { java.io.File(it).apply { mkdirs() } }
+            for ((id, profile) in e.profiles) {
+                val config = buildConfig(profile, forTest = true).config
+                assertDnsClosed(JSONObject(config))
+                directory?.resolve("all-$id.json")?.writeText(config)
+            }
+        }
+    }
+
     @Test fun realBuilderKeepsDnsTransportPortHoppingAndSelectorDependencies() = runBlocking {
         Environment().use { e ->
             val beans = RawUpdater.parseRaw(SingBoxImportFixture.sharedProfile().toString())!!.map { it as ConfigBean }
@@ -159,7 +229,15 @@ class SingBoxRawImportTest {
                 val dnsTags = (0 until dns.length()).map { dns.getJSONObject(it).optString("tag") }.toSet()
                 val node = if (id == 44L) all.first { it.optString("type") == "vless" } else selected
                 assertTrue(dnsTags.contains(node.getString("domain_resolver")))
-                assertTrue((0 until dns.length()).any { dns.getJSONObject(it).optString("type") == "batch" })
+                assertTrue((0 until dns.length()).none { dns.getJSONObject(it).optString("type") == "batch" })
+                assertTrue((0 until dns.length()).any { dns.getJSONObject(it).optString("type") == "neko-policy" })
+                for (i in 0 until dns.length()) {
+                    val server = dns.getJSONObject(i)
+                    if (server.optString("type") == "neko-policy") {
+                        assertFalse(server.has("servers"))
+                        assertTrue(server.has("fallback"))
+                    }
+                }
                 assertArrayEquals(before, KryoConverters.serialize(proxy))
                 val exported = JSONObject(buildConfig(proxy, forExport = true).config)
                 val exportedOutbounds = exported.getJSONArray("outbounds")

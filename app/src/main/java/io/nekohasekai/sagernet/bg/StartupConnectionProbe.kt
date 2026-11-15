@@ -15,7 +15,7 @@ internal object StartupConnectionProbe {
         // Never multiply it with a hidden cold-start retry: a 3000 ms setting
         // must not leave the control bar spinning for 6250 ms (or longer while
         // a blocking native cleanup is being joined).
-        val budget = timeoutMillis.coerceIn(500, 120_000).toLong()
+        val budget = UrlTestTimeout.normalizeMillis(timeoutMillis).toLong()
         return try {
             val elapsed = withTimeout(budget) {
                 withContext(Dispatchers.IO) { test() }

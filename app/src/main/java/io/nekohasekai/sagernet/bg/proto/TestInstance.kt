@@ -16,8 +16,10 @@ import libcore.Libcore
 import moe.matsuri.nb4a.net.LocalResolverImpl
 import kotlin.coroutines.CoroutineContext
 
-class TestInstance(profile: ProxyEntity, val link: String, private val timeout: Int) :
+class TestInstance(profile: ProxyEntity, val link: String, timeoutMillis: Int) :
     BoxInstance(profile) {
+
+    private val timeout = io.nekohasekai.sagernet.bg.UrlTestTimeout.normalizeMillis(timeoutMillis)
 
     @Volatile private var probeContext: libcore.ProbeContext? = null
     @Volatile private var currentStage = ProbeFailure.Stage.CONFIG

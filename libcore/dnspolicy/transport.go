@@ -15,6 +15,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	boxdns "github.com/sagernet/sing-box/dns"
 	"github.com/sagernet/sing-box/log"
+	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/json/badoption"
 	"github.com/sagernet/sing/service"
 )
@@ -33,6 +34,11 @@ type Options struct {
 	ServerRules []Rule              `json:"server_rules,omitempty"`
 	Hosts       map[string][]string `json:"hosts,omitempty"`
 	Timeout     badoption.Duration  `json:"timeout,omitempty"`
+	// Composite policies do not dial sockets. Keep imported dialer metadata
+	// decodable and validate its references; each upstream retains its own
+	// resolver/detour and remains responsible for actual socket protection.
+	DomainResolver *option.DomainResolveOptions `json:"domain_resolver,omitempty"`
+	Detour         string                       `json:"detour,omitempty"`
 }
 type Transport struct {
 	boxdns.TransportAdapter
@@ -176,6 +182,20 @@ func (t *Transport) Start(stage adapter.StartStage, scope *adapter.Scope) error 
 	if t.manager == nil {
 		return errors.New("missing DNS transport manager")
 	}
+	if resolver := t.options.DomainResolver; resolver != nil {
+		if _, ok := t.manager.Transport(resolver.Server); !ok {
+			return errors.New("policy DNS domain resolver not found")
+		}
+	}
+	if t.options.Detour != "" {
+		outbounds := service.FromContext[adapter.OutboundManager](scope.Context())
+		if outbounds == nil {
+			return errors.New("missing policy DNS outbound manager")
+		}
+		if _, ok := outbounds.Outbound(t.options.Detour); !ok {
+			return errors.New("policy DNS detour not found")
+		}
+	}
 	upstreams := make(map[string]adapter.DNSTransport, len(t.Dependencies()))
 	for _, tag := range t.Dependencies() {
 		upstream, ok := t.manager.Transport(tag)
@@ -188,6 +208,13 @@ func (t *Transport) Start(stage adapter.StartStage, scope *adapter.Scope) error 
 	return nil
 }
 func (t *Transport) Close() error { return nil }
+
+func (t *Transport) References() []string {
+	if t.options.Detour == "" {
+		return nil
+	}
+	return []string{t.options.Detour}
+}
 
 var labelPattern = regexp.MustCompile(`^[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?$`)
 

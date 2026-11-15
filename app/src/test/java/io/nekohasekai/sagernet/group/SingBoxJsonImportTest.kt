@@ -8,6 +8,47 @@ import org.junit.Test
 
 /** Synthetic only: mirrors the shared profile's counts and field shapes, not its secrets. */
 internal object SingBoxImportFixture {
+    /** Real attachment's dependency shape, with only documentation addresses and synthetic credentials. */
+    fun coreProfile(): JsonObject = JsonParser.parseString("""{
+      "endpoints":[],"inbounds":[],
+      "outbounds":[
+        {"type":"socks","tag":"node","server":"node.example.invalid","server_port":1080,
+         "username":"synthetic-user","password":"synthetic-password","domain_resolver":{"server":"node-dns","strategy":"ipv4_only"}},
+        {"type":"selector","tag":"auto","outbounds":["node"],"default":"node"},
+        {"type":"direct","tag":"direct","domain_resolver":{"server":"node-dns","strategy":"ipv4_only"}}
+      ],
+      "dns":{"servers":[
+        {"type":"local","tag":"local","domain_resolver":{"server":"bootstrap","strategy":"ipv4_only"}},
+        {"type":"udp","tag":"udp","server":"192.0.2.53","server_port":53,"domain_resolver":{"server":"bootstrap","strategy":"ipv4_only"}},
+        {"type":"https","tag":"https-ip","server":"192.0.2.54","server_port":443,"path":"/dns-query","domain_resolver":{"server":"bootstrap","strategy":"ipv4_only"}},
+        {"type":"https","tag":"https-domain","server":"resolver.example.invalid","path":"/dns-query","domain_resolver":{"server":"bootstrap","strategy":"ipv4_only"}},
+        {"type":"https","tag":"https-proxy","server":"192.0.2.55","path":"/custom","detour":"auto","domain_resolver":{"server":"bootstrap","strategy":"ipv4_only"}},
+        {"type":"batch","tag":"node-dns","servers":["local","udp"],"strategy":"prefer_ipv4","idle_timeout":"1m"},
+        {"type":"batch","tag":"bootstrap","servers":["local","https-ip","udp"]},
+        {"type":"batch","tag":"general","servers":["node-dns","https-domain","https-proxy"],"timeout":"1s"}
+      ],"final":"general"},
+      "route":{"default_domain_resolver":{"server":"node-dns","strategy":"ipv4_only"}}
+    }""").asJsonObject
+
+    /** Same 28 VLESS + 15 Hysteria2 + URLTest graph, with valid synthetic wire fields for core decode. */
+    fun coreSharedProfile(): JsonObject = sharedProfile().apply {
+        val dnsGraph = coreProfile().getAsJsonObject("dns")
+        add("dns", dnsGraph)
+        add("route", coreProfile().getAsJsonObject("route"))
+        getAsJsonArray("outbounds").forEach { value ->
+            val node = value.asJsonObject
+            node.remove("future_extension")
+            if (node.has("server")) {
+                node.add("domain_resolver", JsonParser.parseString("""{"server":"node-dns","strategy":"ipv4_only"}"""))
+                // TLS identity and all other protocol fields are tested by the
+                // lossless fixture above. Core startup needs no remote TLS keys.
+                node.getAsJsonObject("tls")?.apply {
+                    remove("utls"); remove("reality"); remove("certificate_public_key_sha256")
+                }
+            }
+        }
+    }
+
     fun sharedProfile(): JsonObject {
         val outbounds = JsonArray()
         repeat(43) { index ->
@@ -108,9 +149,71 @@ class SingBoxJsonImportTest {
         val node = prepared.outbounds.map(::obj).first()
         assertEquals("node-0", node["future_extension"].asJsonObject["opaque"].asJsonArray[2].asString)
         assertEquals("p44_d_bootstrap", node["domain_resolver"].asString)
-        val batch = prepared.dnsServers.map(::obj).single { it["type"].asString == "batch" }
-        assertTrue(batch.has("future_dns_option"))
-        assertTrue(batch.getAsJsonArray("servers").all { it.asString.startsWith("p44_d_") })
+        val policy = prepared.dnsServers.map(::obj).single { it["tag"].asString == "p44_d_bootstrap" }
+        assertEquals("neko-policy", policy["type"].asString)
+        assertFalse(policy.has("servers"))
+        assertFalse(policy.has("strategy"))
+        assertTrue(policy.getAsJsonArray("fallback").all { it.asString.startsWith("p44_d_") })
+    }
+
+    @Test fun everyImportedDnsBatchBecomesRunnablePolicyAndReferencesRemainClosed() {
+        val profile = parse(SingBoxImportFixture.sharedProfile().toString()).first()
+        val prepared = SingBoxJsonImport.prepare(profile.config, profile.context, "node_", "selected")
+        val servers = prepared.dnsServers.map(::obj)
+        assertTrue(servers.isNotEmpty())
+        assertTrue(servers.all { it["type"].asString != "batch" })
+        val tags = servers.map { it["tag"].asString }.toSet()
+        servers.forEach { server ->
+            server["domain_resolver"]?.let { resolver ->
+                val tag = if (resolver.isJsonObject) resolver.asJsonObject["server"].asString else resolver.asString
+                assertTrue("missing domain_resolver $tag", tag in tags)
+            }
+            server["fallback"]?.asJsonArray?.forEach { assertTrue(it.asString in tags) }
+        }
+        val root = obj(prepared.outbound)
+        val rootResolver = root["domain_resolver"]?.asString
+        if (rootResolver != null) assertTrue(rootResolver in tags)
+    }
+
+    @Test fun oldStoredBatchContextsNormalizeIdempotentlyAndKeepNodeFields() {
+        val source = SingBoxImportFixture.coreProfile()
+        val original = source.deepCopy()
+        val root = source.getAsJsonArray("outbounds")[0].asJsonObject
+        val first = SingBoxJsonImport.prepare(root.toString(), source.toString(), "first_", "node")
+        assertEquals(original, source)
+        val node = obj(first.outbound)
+        assertEquals("synthetic-user", node["username"].asString)
+        assertEquals("synthetic-password", node["password"].asString)
+        assertEquals("ipv4_only", node["domain_resolver"].asJsonObject["strategy"].asString)
+        assertEquals(listOf("first_d_local", "first_d_udp"), first.dnsServers.map(::obj)
+            .single { it["tag"].asString == "first_d_node-dns" }.getAsJsonArray("fallback").map { it.asString })
+        val local = first.dnsServers.map(::obj).single { it["type"].asString == "local" }
+        assertFalse(local.has("domain_resolver"))
+        val profile = parse(source.toString()).first()
+        val rebuilt = SingBoxJsonImport.prepare(profile.config, profile.context, "first_", "node")
+        assertEquals(first, rebuilt)
+    }
+
+    @Test fun batchMetadataAndPolicyRulesKeepTheirOwnPrivateReferences() {
+        val source = """{"outbounds":[{"type":"socks","tag":"node","domain_resolver":{"server":"batch","strategy":"prefer_ipv6"}},{"type":"direct","tag":"front"}],"dns":{"servers":[{"type":"local","tag":"a"},{"type":"local","tag":"b"},{"type":"batch","tag":"batch","servers":["a"],"domain_resolver":"b","detour":"front","timeout":"1s","strategy":"prefer_ipv4","idle_timeout":"1m","unknown_batch_field":true,"rules":[{"pattern":"private.example.invalid","servers":["b"]}],"server_rules":[{"pattern":"node.example.invalid","servers":["b"]}]}]}}"""
+        val p = parse(source).first()
+        val prepared = SingBoxJsonImport.prepare(p.config, p.context, "p_", "selected")
+        val policy = prepared.dnsServers.map(::obj).single { it["type"].asString == "neko-policy" }
+        assertEquals(setOf("tag", "type", "fallback", "domain_resolver", "detour", "timeout", "rules", "server_rules"), policy.keySet())
+        assertEquals("p_d_b", policy["domain_resolver"].asString)
+        assertEquals("p_o_front", policy["detour"].asString)
+        assertEquals("1s", policy["timeout"].asString)
+        for (key in listOf("rules", "server_rules")) {
+            assertEquals("p_d_b", policy.getAsJsonArray(key)[0].asJsonObject.getAsJsonArray("servers")[0].asString)
+        }
+        assertEquals("prefer_ipv6", obj(prepared.outbound)["domain_resolver"].asJsonObject["strategy"].asString)
+    }
+
+    @Test fun malformedBatchUpstreamsFailAtomically() {
+        for (servers in listOf("[]", "[1]", "[\"\"]", "[\"missing\"]", "[\"dns\"]")) {
+            val source = """{"outbounds":[{"type":"socks","tag":"node","domain_resolver":"dns"}],"dns":{"servers":[{"type":"batch","tag":"dns","servers":$servers}]}}"""
+            try { parse(source); fail("malformed batch must not produce cards") } catch (_: IllegalArgumentException) { }
+        }
     }
 
     @Test fun selectorDetourDnsAndRootBackReferencesAreRemappedWithoutCyclesInTraversal() {

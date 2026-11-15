@@ -22,6 +22,37 @@ class StartupConnectionProbeTest {
         catch(_:CancellationException){}
         assertEquals(1,calls)
     }
+    @Test fun valid3000MillisAllowsOneProbeWithoutRetryOrUnitConversion() = runBlocking {
+        var calls = 0
+        val result = StartupConnectionProbe.measure(3000) {
+            calls++
+            Thread.sleep(600) // More than the input floor, much less than 3000 ms.
+            83
+        }
+        assertEquals(83, result.elapsed)
+        assertNull(result.error)
+        assertEquals(1, calls)
+    }
+    @Test fun legacy100MillisUsesTheCommon500MillisFloorAndExpiresOnce() = runBlocking {
+        var calls = 0
+        val result = StartupConnectionProbe.measure(100) {
+            calls++
+            Thread.sleep(650)
+            83
+        }
+        assertEquals(-1, result.elapsed)
+        assertEquals("Connection timed out", result.error)
+        assertEquals(1, calls)
+    }
+    @Test fun ordinaryFailureIsNotRetried() = runBlocking {
+        var calls = 0
+        val result = StartupConnectionProbe.measure(3000) {
+            calls++
+            throw java.io.IOException("synthetic timeout")
+        }
+        assertEquals("synthetic timeout", result.error)
+        assertEquals(1, calls)
+    }
     @Test fun serviceStartupPublishesConnectedBeforeNonFatalProbeAndUiOnlyReceivesSnapshot() {
         val app=sequenceOf(File("."),File("app")).first{File(it,"src/main/java").isDirectory}
         val service=File(app,"src/main/java/io/nekohasekai/sagernet/bg/BaseService.kt").readText()

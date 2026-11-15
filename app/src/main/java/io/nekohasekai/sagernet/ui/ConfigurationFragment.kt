@@ -1598,6 +1598,9 @@ class ConfigurationFragment @JvmOverloads constructor(
         val targetIds: MutableSet<Long> = ConcurrentHashMap.newKeySet()
         private val flushScheduled = AtomicBoolean(false)
         private val resultsLock = Any()
+        // Unlike the pending persistence set, this survives every flush. A
+        // duplicate or late callback must never count the same target twice.
+        private val completedIds = HashSet<Long>()
         val finishedN = AtomicInteger(0)
         val successN = AtomicInteger(0)
         val failedN = AtomicInteger(0)
@@ -1638,6 +1641,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         fun update(profile: ProxyEntity) {
             synchronized(resultsLock) {
                 if (dialogStatus.get() == 2 || !ownsSession() || terminal.get()) return
+                if (profile.id !in targetIds || !completedIds.add(profile.id)) return
                 results.add(profile)
                 cardLatencySession.complete(profile, generation)
                 if (profile.status == 1) successN.incrementAndGet() else failedN.incrementAndGet()
@@ -1651,6 +1655,10 @@ class ConfigurationFragment @JvmOverloads constructor(
                 if (!ownsSession() || terminal.get() || dialogStatus.get() == 2) return@runOnMainDispatcher
                 val progress = finishedN.get()
                 if (dialogStatus.get() == 0) latencyOverlay()?.running(progress, proxyN, failedN.get())
+                // CardLatencySession already contains this completion. Rebind the
+                // visible holders in the same throttled frame so each result is
+                // revealed while the batch is running, not only at finish.
+                refreshVisibleCardLatency()
                 notification?.updateNotification(progress, proxyN, progress >= proxyN)
             }
         }
@@ -1869,8 +1877,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                     // fallback because they need their own process/config graph.
                     val batch = io.nekohasekai.sagernet.bg.proto.BatchTestInstance(profilesList, link, timeout)
                     val byId = profilesList.associateBy { it.id }
-                    batch.doTest(testPool!!).forEach { result ->
-                        val profile = byId[result.profile.id] ?: return@forEach
+                    batch.doTest(testPool!!) { result ->
+                        val profile = byId[result.profile.id] ?: return@doTest
                         if (result.latency != null) {
                             profile.ping = result.latency
                             profile.status = 1

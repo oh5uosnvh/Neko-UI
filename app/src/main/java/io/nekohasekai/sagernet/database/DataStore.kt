@@ -222,7 +222,14 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var strictRoute by configurationStore.boolean(Key.STRICT_ROUTE) { true }
     var connectionTestURL by configurationStore.string(Key.CONNECTION_TEST_URL) { CONNECTION_TEST_URL }
     var connectionTestConcurrent by configurationStore.int("connectionTestConcurrent") { 5 }
-    var connectionTestTimeout by configurationStore.int(Key.CONNECTION_TEST_TIMEOUT) { 3000 }
+    private var storedConnectionTestTimeout by configurationStore.int(Key.CONNECTION_TEST_TIMEOUT) {
+        io.nekohasekai.sagernet.bg.UrlTestTimeout.DEFAULT_MILLIS
+    }
+    var connectionTestTimeout: Int
+        get() = io.nekohasekai.sagernet.bg.UrlTestTimeout.normalizeMillis(storedConnectionTestTimeout)
+        set(value) {
+            storedConnectionTestTimeout = io.nekohasekai.sagernet.bg.UrlTestTimeout.normalizeMillis(value)
+        }
     var alwaysShowAddress by configurationStore.boolean(Key.ALWAYS_SHOW_ADDRESS)
 
     var tunImplementation by configurationStore.stringToInt(Key.TUN_IMPLEMENTATION) { TunImplementation.GVISOR }

@@ -4,6 +4,7 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import io.nekohasekai.sagernet.ktx.isIpAddress
 
 /** Lossless outbound extraction, separate from importing an application's full configuration. */
 internal class SingBoxJsonImportException : IllegalArgumentException(
@@ -18,6 +19,43 @@ internal object SingBoxJsonImport {
     private fun JsonObject.string(key: String): String? = get(key)?.takeIf {
         it.isJsonPrimitive && it.asJsonPrimitive.isString
     }?.asString?.takeIf { it.isNotBlank() }
+
+    /**
+     * sing-box 1.14 does not register the source profile's `batch` DNS
+     * transport. Neko's policy transport preserves the allowed upstream list
+     * with bounded hedged fallback, so translate at the import boundary.
+     * Keep only fields understood by neko-policy (plus common server fields),
+     * rather than leaking batch-only options into the core decoder.
+     */
+    private fun normalizeDnsBatches(root: JsonObject) {
+        val servers = root.getAsJsonObject("dns")?.getAsJsonArray("servers") ?: return
+        val supported = setOf(
+            "type", "tag", "fallback", "rules", "server_rules", "hosts", "timeout",
+            "domain_resolver", "detour"
+        )
+        for (index in 0 until servers.size()) {
+            val value = servers[index]
+            if (!value.isJsonObject || value.asJsonObject.string("type") != "batch") continue
+            val source = value.asJsonObject
+            val upstreams = source["servers"]
+            require(upstreams?.isJsonArray == true && upstreams.asJsonArray.size() in 1..16) {
+                "Invalid sing-box DNS batch upstream list"
+            }
+            require(upstreams.asJsonArray.all {
+                it.isJsonPrimitive && it.asJsonPrimitive.isString && it.asString.isNotBlank() &&
+                    it.asString != source.string("tag")
+            }) { "Invalid sing-box DNS batch upstream tag" }
+            val normalized = JsonObject()
+            source.entrySet().forEach { (key, item) ->
+                if (key in supported && key != "type" && key != "fallback") {
+                    normalized.add(key, item.deepCopy())
+                }
+            }
+            normalized.addProperty("type", "neko-policy")
+            normalized.add("fallback", upstreams.deepCopy())
+            servers.set(index, normalized)
+        }
+    }
 
     /** null means a legacy JSON format, not a sing-box document. */
     fun parse(text: String): List<Profile>? {
@@ -95,7 +133,7 @@ internal object SingBoxJsonImport {
     fun prepare(raw: String, context: String, namespace: String, rootTag: String): Prepared {
         val root = JsonParser.parseString(raw).asJsonObject.deepCopy()
         if (context.isBlank()) return Prepared(root.toString(), emptyList(), emptyList())
-        val source = JsonParser.parseString(context).asJsonObject
+        val source = JsonParser.parseString(context).asJsonObject.deepCopy().also(::normalizeDnsBatches)
         val defaultResolver = source.getAsJsonObject("route")?.get("default_domain_resolver")
         fun dialingOptions(entry: JsonObject): JsonObject = entry.deepCopy().apply {
             if (!has("domain_resolver") && has("server") && defaultResolver != null) {
@@ -146,8 +184,16 @@ internal object SingBoxJsonImport {
             entry.string("detour")?.let { ref(false, it) }
             resolver(entry["domain_resolver"]) { ref(true, it) }
             if (isDns) {
-                // DNS batch servers (and future composites) use DNS tags, not outbound tags.
+                // Composite DNS transports use DNS tags, not outbound tags.
                 entry.getAsJsonArray("servers")?.forEach { ref(true, it.asString) }
+                entry.getAsJsonArray("fallback")?.forEach { ref(true, it.asString) }
+                if (entry.string("type") == "neko-policy") {
+                    for (key in listOf("rules", "server_rules")) {
+                        entry.getAsJsonArray(key)?.forEach { rule ->
+                            rule.asJsonObject.getAsJsonArray("servers")?.forEach { ref(true, it.asString) }
+                        }
+                    }
+                }
                 // Legacy DNS server address_resolver also refers to a DNS server.
                 entry.string("address_resolver")?.let { ref(true, it) }
             } else {
@@ -179,7 +225,29 @@ internal object SingBoxJsonImport {
                 result.getAsJsonArray("servers")?.let { list -> result.add("servers", JsonArray().apply {
                     list.forEach { add(dnsTag(it.asString)) }
                 }) }
+                result.getAsJsonArray("fallback")?.let { list -> result.add("fallback", JsonArray().apply {
+                    list.forEach { add(dnsTag(it.asString)) }
+                }) }
+                if (result.string("type") == "neko-policy") {
+                    for (key in listOf("rules", "server_rules")) {
+                        result.getAsJsonArray(key)?.forEach { rule ->
+                            val options = rule.asJsonObject
+                            options.getAsJsonArray("servers")?.let { list ->
+                                options.add("servers", JsonArray().apply { list.forEach { add(dnsTag(it.asString)) } })
+                            }
+                        }
+                    }
+                }
                 result.string("address_resolver")?.let { result.addProperty("address_resolver", dnsTag(it)) }
+                // Source generators attach the bootstrap resolver even to local
+                // and IP-address DNS servers. Core 1.14 treats that redundant
+                // field as a startup dependency, creating local -> policy ->
+                // local cycles. No hostname is dialed on these transports;
+                // remove only the ineffective edge in generated runtime output.
+                if (namespace.isNotEmpty() && (result.string("type") == "local" ||
+                    result.string("server")?.isIpAddress() == true)) {
+                    result.remove("domain_resolver")
+                }
             } else {
                 result.getAsJsonArray("outbounds")?.let { list -> result.add("outbounds", JsonArray().apply {
                     list.forEach { add(outTag(it.asString)) }

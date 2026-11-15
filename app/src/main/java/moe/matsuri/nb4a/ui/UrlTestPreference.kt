@@ -6,6 +6,8 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import androidx.core.content.res.TypedArrayUtils
 import androidx.core.view.isVisible
+import androidx.core.widget.doAfterTextChanged
+import io.nekohasekai.sagernet.bg.UrlTestTimeout
 import androidx.preference.EditTextPreference
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
@@ -25,6 +27,16 @@ constructor(
     var concurrent: EditText? = null
     var timeout: EditText? = null
 
+    /** Also called by the dialog before dismissal, so invalid input stays editable. */
+    internal fun validateTimeout(): Boolean {
+        val field = timeout ?: return false
+        val valid = UrlTestTimeout.parseMillis(field.text?.toString().orEmpty()) != null
+        field.error = if (valid) null else context.getString(
+            R.string.connection_test_timeout_invalid, UrlTestTimeout.MIN_MILLIS,
+        )
+        return valid
+    }
+
     init {
         dialogLayoutResource = R.layout.layout_urltest_preference_dialog
 
@@ -35,13 +47,20 @@ constructor(
             }
             timeout = it.rootView.findViewById(R.id.edit_timeout)
             timeout?.apply {
+                hint = context.getString(R.string.connection_test_timeout_hint, UrlTestTimeout.MIN_MILLIS)
                 setText(DataStore.connectionTestTimeout.toString())
+                doAfterTextChanged { validateTimeout() }
             }
             it.rootView.findViewById<LinearLayout>(R.id.concurrent_layout)?.isVisible = true
             it.rootView.findViewById<LinearLayout>(R.id.timeout_layout)?.isVisible = true
         }
 
         setOnPreferenceChangeListener { _, _ ->
+            // Reject the whole edit before writing concurrency or the URL as well.
+            // Never reinterpret decimal seconds or silently reset malformed input.
+            if (!validateTimeout()) return@setOnPreferenceChangeListener false
+            val newTimeout = UrlTestTimeout.parseMillis(timeout?.text?.toString().orEmpty())
+                ?: return@setOnPreferenceChangeListener false
             concurrent?.apply {
                 var newConcurrent = text?.toString()?.toIntOrNull()
                 if (newConcurrent == null || newConcurrent <= 0) {
@@ -49,13 +68,7 @@ constructor(
                 }
                 DataStore.connectionTestConcurrent = newConcurrent
             }
-            timeout?.apply {
-                var newTimeout = text?.toString()?.toIntOrNull()
-                if (newTimeout == null || newTimeout <= 0) {
-                    newTimeout = 3000
-                }
-                DataStore.connectionTestTimeout = newTimeout
-            }
+            DataStore.connectionTestTimeout = newTimeout
             true
         }
     }

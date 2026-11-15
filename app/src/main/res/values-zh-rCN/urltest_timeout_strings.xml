@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="connection_test_timeout_hint">整数毫秒（ms），最小 %1$d ms</string>
+    <string name="connection_test_timeout_invalid">请输入不小于 %1$d ms 的整数毫秒值；不支持小数秒。</string>
+</resources>

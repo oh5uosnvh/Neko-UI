@@ -9,8 +9,12 @@ import kotlin.coroutines.CoroutineContext
 class UrlTest(
     private val context: CoroutineContext,
     val link: String = DataStore.connectionTestURL,
-    private val timeout: Int = DataStore.connectionTestTimeout,
+    timeoutMillis: Int = DataStore.connectionTestTimeout,
 ) {
+    // Keep explicit callers (including direct-node tests) on the same input policy
+    // as the preference, rather than allowing a legacy 100 ms value to reach native.
+    private val timeout = io.nekohasekai.sagernet.bg.UrlTestTimeout.normalizeMillis(timeoutMillis)
+
 
     suspend fun doTest(profile: ProxyEntity): Int {
         // The core is started before HTTP measurement. Retrying every timeout
