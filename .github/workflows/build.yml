@@ -70,7 +70,7 @@ jobs:
           for root in [Path(os.environ.get('ANDROID_HOME', '')) / 'ndk', Path(os.environ.get('RUNNER_TOOL_CACHE', '')) / 'ndk']:
               if root.is_dir():
                   for props in root.glob('*/source.properties'):
-                      if 'Pkg.Revision = 25.2.' in props.read_text(errors='ignore'):
+                      if 'Pkg.Revision = 28.0.' in props.read_text(errors='ignore'):
                           print(props.parent)
                           raise SystemExit
           raise SystemExit('NDK r25c source.properties not found')
@@ -172,7 +172,7 @@ jobs:
           for root in [Path(os.environ.get('ANDROID_HOME', '')) / 'ndk', Path(os.environ.get('RUNNER_TOOL_CACHE', '')) / 'ndk']:
               if root.is_dir():
                   for props in root.glob('*/source.properties'):
-                      if 'Pkg.Revision = 25.2.' in props.read_text(errors='ignore'):
+                      if 'Pkg.Revision = 28.0.' in props.read_text(errors='ignore'):
                           print(props.parent)
                           raise SystemExit
           raise SystemExit('NDK r25c source.properties not found')
