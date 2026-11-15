@@ -23,6 +23,8 @@ import (
 var boxPlatformInterfaceInstance libbox.PlatformInterface = &boxPlatformInterfaceWrapper{}
 
 type boxPlatformInterfaceWrapper struct {
+	// Only disposable URL-test cores may dial without the app's VPN protector.
+	probe         bool
 	localDNS      LocalDNSTransport
 	monitorAccess sync.Mutex
 	monitorDone   chan struct{}
@@ -54,9 +56,19 @@ func (w *boxPlatformInterfaceWrapper) UsePlatformAutoDetectInterfaceControl() bo
 	return true
 }
 
+func useSystemNetworkForProbe(probe, vpnActive bool) bool {
+	return probe && !vpnActive
+}
+
 func (w *boxPlatformInterfaceWrapper) AutoDetectInterfaceControl(fd int32) error {
 	if intfBox == nil {
 		return fmt.Errorf("android: box platform interface unavailable")
+	}
+	if useSystemNetworkForProbe(w.probe, intfBox.VpnActive()) {
+		// URL-test is also available while VPN is stopped. In that state there
+		// is no protect_path server and the socket must use the system network.
+		// The temporary core is not a TUN owner, so no VPN bypass is needed.
+		return nil
 	}
 	if !isBgProcess {
 		return sendFdToProtect(int(fd), "protect_path")

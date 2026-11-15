@@ -23,6 +23,13 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
 
     //  libbox interface
 
+    override fun vpnActive(): Boolean {
+        // The Binder-fed state is shared by the UI and :bg processes. Only a
+        // fully Connected VPN owns protect_path; Connecting/Stopping must use
+        // the normal system path for disposable URL-test cores.
+        return DataStore.serviceState.connected
+    }
+
     override fun autoDetectInterfaceControl(fd: Int) {
         val service = DataStore.vpnService
             ?: throw IllegalStateException("socket protect: VPN service unavailable")

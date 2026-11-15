@@ -12,6 +12,10 @@ type NB4AInterface interface {
 }
 
 type BoxPlatformInterface interface {
+	// VpnActive reports whether the Android VPN core is actually connected.
+	// Disposable URL-test cores use this to avoid sending sockets to the
+	// background protect_path when the VPN is stopped.
+	VpnActive() bool
 	AutoDetectInterfaceControl(fd int32) error
 	OpenTun(singTunOptionsJson, tunPlatformOptionsJson string) (int, error)
 	UseProcFS() bool

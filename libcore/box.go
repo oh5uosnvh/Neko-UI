@@ -101,7 +101,7 @@ func NewSingBoxProbe(config string, localTransport LocalDNSTransport, p *ProbeCo
 func newSingBoxInstance(config string, localTransport LocalDNSTransport, parent context.Context, disposable bool) (b *BoxInstance, err error) {
 	defer device.DeferPanicToError("NewSingBoxInstance", func(err_ error) { err = err_ })
 
-	platformInterface := &boxPlatformInterfaceWrapper{localDNS: localTransport}
+	platformInterface := &boxPlatformInterfaceWrapper{localDNS: localTransport, probe: disposable}
 	// Publish the probe cancellation context before construction/startup.
 	ctx, cancel := context.WithCancel(parent)
 	ctx = box.Context(ctx,

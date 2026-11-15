@@ -45,3 +45,15 @@ func TestSplitLinesNormalizesPlatformNetworkData(t *testing.T) {
 		t.Fatalf("splitLines = %#v", got)
 	}
 }
+
+func TestProbeProtectionUsesSystemNetworkWhenVPNIsStopped(t *testing.T) {
+	if !useSystemNetworkForProbe(true, false) {
+		t.Fatal("offline probe must not require protect_path")
+	}
+	if useSystemNetworkForProbe(true, true) {
+		t.Fatal("connected VPN probe must keep protect_path")
+	}
+	if useSystemNetworkForProbe(false, false) {
+		t.Fatal("normal VPN core bypassed protection")
+	}
+}
