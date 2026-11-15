@@ -1130,7 +1130,9 @@ object RawUpdater : GroupUpdater() {
                 })
                 return proxies
             } catch (e: Exception) {
-                Logs.w(e)
+                // Optional WireGuard syntax probing must not initialize the
+                // native logger when the input is not a valid WG document.
+                android.util.Log.w("RawUpdater", e.javaClass.simpleName)
             }
         }
 
@@ -1150,7 +1152,9 @@ object RawUpdater : GroupUpdater() {
                 .takeIf { it.isNotEmpty() }
                 ?: error("Not found")
         } catch (e: Exception) {
-            Logs.w(e)
+            // A failed Base64 probe is an ordinary parser miss. Do not touch
+            // the native logger from JVM/Robolectric import tests.
+            android.util.Log.w("RawUpdater", e.javaClass.simpleName)
         }
 
         try {
