@@ -88,7 +88,11 @@ internal class BatchTestInstance(
                                 val tag = config.profileTagMap[profile.id]
                                     ?: error("probe outbound tag missing")
                                 try {
-                                    val value = outboundProbeMethod.invoke(null, box, tag, link, deadline.remainingMillis()) as Int
+                                    // Core setup is guarded separately. Each leaf
+                                    // receives the configured request timeout, so
+                                    // waiting behind the ten-slot batch gate does
+                                    // not turn queue time into a fake timeout.
+                                    val value = outboundProbeMethod.invoke(null, box, tag, link, timeout) as Int
                                     Result(profile, value, null)
                                 } catch (error: Exception) {
                                     Result(profile, null, error)
