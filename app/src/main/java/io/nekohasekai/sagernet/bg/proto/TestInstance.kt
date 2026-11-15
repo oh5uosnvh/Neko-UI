@@ -1,6 +1,8 @@
 package io.nekohasekai.sagernet.bg.proto
 
 import io.nekohasekai.sagernet.bg.runCancellableProbe
+import io.nekohasekai.sagernet.bg.ProbeDeadline
+import io.nekohasekai.sagernet.bg.awaitProbeListeners
 import io.nekohasekai.sagernet.bg.GuardedProcessPool
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.fmt.KryoConverters
@@ -8,7 +10,6 @@ import io.nekohasekai.sagernet.fmt.buildConfig
 import io.nekohasekai.sagernet.ktx.Logs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.coroutineContext
 import libcore.Libcore
@@ -20,6 +21,7 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
 
     @Volatile private var probeContext: libcore.ProbeContext? = null
     @Volatile private var currentStage = ProbeFailure.Stage.CONFIG
+    private lateinit var deadline: ProbeDeadline
 
     private fun profileSnapshot(): ProxyEntity =
         KryoConverters.deserialize(ProxyEntity(), KryoConverters.serialize(profile))
@@ -40,6 +42,10 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
                 context = context,
                 prepare = {
                     coroutineContext.ensureActive()
+                    // The deadline starts HERE, not when the profile was queued
+                    // or the coroutine was submitted to the blocking executor.
+                    deadline = ProbeDeadline(timeout)
+                    probeContext = Libcore.newProbeContext(deadline.remainingMillis())
                     processes = GuardedProcessPool { failure ->
                         pluginFailure.compareAndSet(null, failure)
                         probeContext?.cancel()
@@ -55,11 +61,17 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
                     probeProcesses?.coroutineContext?.get(Job)?.join()
                 },
                 probe = {
-                    if (processes.processCount > 0) delay(500)
+                    if (processes.processCount > 0) {
+                        awaitProbeListeners(config.externalIndex.flatMap { it.chain.keys }, deadline) {
+                            pluginFailure.get()?.let { throw it }
+                        }
+                    }
                     coroutineContext.ensureActive()
                     pluginFailure.get()?.let { throw it }
+                    val remaining = deadline.remainingMillis()
+                    probeContext?.ready()
                     currentStage = ProbeFailure.Stage.HTTP_REQUEST
-                    Libcore.urlTest(box, link, timeout)
+                    Libcore.urlTest(box, link, remaining)
                 },
             )
         } catch (cancelled: CancellationException) {
@@ -82,20 +94,20 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
         currentStage = ProbeFailure.Stage.CORE_CREATE
         // don't call destroyAllJsi here; and never dump the full config (it has
         // UUIDs, endpoints and transport credentials) even in debug builds.
-        // Setup is part of this node's URLTest budget. The old 5000 ms
-        // floor made a 3000 ms setting silently wait another two seconds
-        // before the actual HTTP deadline even started.
-        val native = Libcore.newProbeContext(timeout.coerceAtLeast(500))
-        probeContext = native
+        // Configuration and plugin preparation already spent part of the same
+        // deadline; don't construct a new context or silently apply a 500ms floor.
+        deadline.remainingMillis()
+        val native = checkNotNull(probeContext)
         coroutineContext.ensureActive()
         box = Libcore.newSingBoxProbe(config.config, LocalResolverImpl, native)
     }
 
     override fun launch() {
         currentStage = ProbeFailure.Stage.CORE_START
+        deadline.remainingMillis()
         super.launch()
-        // Gobind exposes Go error returns as a throwing Java method.
-        probeContext?.ready()
+        deadline.remainingMillis()
+        // Keep the setup watchdog active until plugin readiness/HTTP hand-off.
     }
 
 }

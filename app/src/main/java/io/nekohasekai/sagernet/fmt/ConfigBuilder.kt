@@ -204,7 +204,9 @@ fun buildConfig(
     val useFakeDns = DataStore.enableFakeDns && !forTest
     val needSniff = DataStore.trafficSniffing > 0
     val externalIndexMap = ArrayList<IndexEntity>()
-    val ipv6Mode = if (forTest) IPv6Mode.ENABLE else DataStore.ipv6Mode
+    // A probe must dial the same address families as the connected core.
+    // Forcing ENABLE here made ipv4-only/ipv6-only nodes use a different path.
+    val ipv6Mode = DataStore.ipv6Mode
 
     fun genDomainStrategy(noAsIs: Boolean): String {
         return when {
@@ -530,8 +532,7 @@ fun buildConfig(
                             domainListDNSDirectForce.add("full:$serverAddress")
                         }
                     }
-                    _hack_config_map["domain_strategy"] =
-                        if (forTest) "" else defaultServerDomainStrategy
+                    _hack_config_map["domain_strategy"] = defaultServerDomainStrategy
                     if (nodeResolver != null && !proxyEntity.needExternal()) {
                         _hack_config_map["domain_resolver"] = mapOf(
                             "server" to nodeResolver,
@@ -1010,7 +1011,22 @@ fun buildConfig(
         }
 
         if (forTest) {
-            dns.rules = listOf()
+            // Probe cores deliberately omit FakeIP/inbound/application routing,
+            // not resolver-scoped hosts and subscription policy. Dropping those
+            // rules made the same hostname resolve differently when connected.
+            if (dnsHosts.isNotEmpty()) {
+                dns.rules.add(0, DNSRule_DefaultOptions().apply {
+                    server = TAG_DNS_HOSTS
+                    domain = dnsHosts.keys.toList()
+                })
+            }
+            if (domainListDNSDirectForce.isNotEmpty()) {
+                dns.rules.add(0, DNSRule_DefaultOptions().apply {
+                    makeSingBoxRule(domainListDNSDirectForce.toHashSet().toList())
+                    server = "dns-direct"
+                })
+            }
+            dns.rules.addAll(0, subscriptionDns.general(proxy.requireBean(), activeSubscription, "dns-direct"))
         } else {
             // built-in DNS rules
             route.rules.add(0, Rule_DefaultOptions().apply {

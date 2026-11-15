@@ -1821,10 +1821,12 @@ class ConfigurationFragment @JvmOverloads constructor(
         if (!reserved) DataStore.runningTest = true
         val generation = latencyGeneration.incrementAndGet()
         activeLatencyGeneration = generation
-        val testJobs = mutableListOf<Job>()
         var testPool: kotlinx.coroutines.ExecutorCoroutineDispatcher? = null
         val groupId = request.groupId
         val test = TestDialog(request, 0, generation)
+        // Freeze URL/timeout once for the entire batch, not lazily per worker.
+        val link = DataStore.connectionTestURL
+        val timeout = DataStore.connectionTestTimeout
         // Lazy start guarantees the UI cancel/minimize hooks exist before even
         // an empty/fast target set can finish. Unexpected worker/DB failures are
         // logged and still run the completion cleanup; no uncaught main crash.
@@ -1832,67 +1834,67 @@ class ConfigurationFragment @JvmOverloads constructor(
             Dispatchers.Default + kotlinx.coroutines.CoroutineExceptionHandler { _, error -> Logs.w(error) },
             start = kotlinx.coroutines.CoroutineStart.LAZY,
         ) {
-            val all = SagerDatabase.proxyDao.getByGroup(groupId)
-            val profilesList = LatencyTestSelector.select(all, request, activeLatencyIds) { true }
-            if (profilesList.isEmpty()) {
-                runOnMainDispatcher { if (test.ownsSession()) latencyOverlay()?.empty(emptyLatencyMessage(request.scope)) }
-                return@launch
-            }
-            val workers = io.nekohasekai.sagernet.bg.urlTestWorkerCount(
-                DataStore.connectionTestConcurrent, profilesList.size,
-            )
-            testPool = Executors.newFixedThreadPool(workers).asCoroutineDispatcher()
-            test.proxyN = profilesList.size
-            test.targetIds.addAll(profilesList.map { it.id })
-            val profiles = ConcurrentLinkedQueue(profilesList)
-            activeLatencyIds.addAll(profilesList.map { it.id }); profilesList.forEach { it.status = 0 }
-            cardLatencySession.begin(profilesList.map { it.id }, generation)
-            onMainDispatcher {
-                if (test.ownsSession()) {
-                    refreshVisibleCardLatency()
-                    latencyOverlay()?.running(0, profilesList.size, 0)
+            try {
+                val all = SagerDatabase.proxyDao.getByGroup(groupId)
+                val profilesList = LatencyTestSelector.select(all, request, activeLatencyIds) { true }
+                if (profilesList.isEmpty()) {
+                    runOnMainDispatcher { if (test.ownsSession()) latencyOverlay()?.empty(emptyLatencyMessage(request.scope)) }
+                    return@launch
                 }
-            }
-            repeat(workers) {
-                testJobs.add(launch(Dispatchers.IO) {
-                    val urlTest = UrlTest(testPool!!)
-                    while (isActive) {
-                        val profile = profiles.poll() ?: break
-                        if (!isActive) break
-                        try {
-                            profile.ping = urlTest.doTest(profile)
-                            profile.status = 1
-                            profile.error = ""
-                        }
-                        catch (cancelled: CancellationException) { throw cancelled }
-                        catch (e: PluginManager.PluginNotFoundException) { profile.status = 2; profile.error = e.readableMessage }
-                        catch (e: Exception) { profile.status = 3; profile.error = e.readableMessage }
-                        ensureActive()
-                        test.update(profile)
+                val workers = io.nekohasekai.sagernet.bg.urlTestWorkerCount(
+                    DataStore.connectionTestConcurrent, profilesList.size,
+                )
+                testPool = Executors.newFixedThreadPool(workers).asCoroutineDispatcher()
+                test.proxyN = profilesList.size
+                test.targetIds.addAll(profilesList.map { it.id })
+                activeLatencyIds.addAll(profilesList.map { it.id }); profilesList.forEach { it.status = 0 }
+                cardLatencySession.begin(profilesList.map { it.id }, generation)
+                onMainDispatcher {
+                    if (test.ownsSession()) {
+                        refreshVisibleCardLatency()
+                        latencyOverlay()?.running(0, profilesList.size, 0)
                     }
-                })
-            }
-            testJobs.joinAll(); testPool?.close(); test.finish(false); test.flushPending()
-            if (test.ownsSession()) {
-                activeLatencyIds.removeAll(profilesList.map { it.id }.toSet()); DataStore.runningTest = false; activeLatencyCancel = null; activeLatencyMinimize = null
-                GroupManager.postReload(groupId)
+                }
+                val urlTest = UrlTest(testPool!!, link, timeout)
+                io.nekohasekai.sagernet.bg.runUrlTestBatch(profilesList, workers) { profile ->
+                    try {
+                        profile.ping = urlTest.doTest(profile)
+                        profile.status = 1
+                        profile.error = ""
+                    }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (e: PluginManager.PluginNotFoundException) { profile.status = 2; profile.error = e.readableMessage }
+                    catch (e: Exception) { profile.status = 3; profile.error = e.readableMessage }
+                    ensureActive()
+                    test.update(profile)
+                }
+                test.finish(false)
+            } finally {
+                // Structured batch scope has joined every JNI worker and its
+                // cleanup, even when a worker/DB error cancelled its siblings.
+                // Flush accepted results BEFORE making another batch eligible.
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    runCatching { testPool?.close() }
+                    try { test.flushPending() }
+                    finally {
+                        if (test.ownsSession()) {
+                            activeLatencyIds.removeAll(test.targetIds)
+                            activeLatencyCancel = null
+                            activeLatencyResume = null
+                            activeLatencyMinimize = null
+                            DataStore.runningTest = false
+                            GroupManager.postReload(groupId)
+                        }
+                    }
+                }
             }
         }
         activeLatencyCancel = {
             if (test.dialogStatus.getAndSet(2) != 2) {
-            test.finish(true)
-            // Keep the executor alive until its owned native workers have closed.
-            // Closing first can reject the very continuation needed for cleanup.
-            mainJob.cancel()
-            runOnDefaultDispatcher {
-                mainJob.join()
-                runCatching { testPool?.close() }
-                test.flushPending()
-                if (test.ownsSession()) {
-                    activeLatencyIds.removeAll(test.targetIds); activeLatencyCancel = null; activeLatencyMinimize = null; DataStore.runningTest = false
-                    GroupManager.postReload(groupId)
-                }
-            }
+                test.finish(true)
+                // UI only sends cancellation. Structured workers/finally own
+                // joining, flushing and executor teardown off the main thread.
+                mainJob.cancel()
             }
         }
         activeLatencyMinimize = {

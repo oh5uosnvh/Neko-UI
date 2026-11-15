@@ -1,6 +1,5 @@
 package io.nekohasekai.sagernet.bg.proto
 
-import android.os.SystemClock
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.bg.AbstractInstance
 import io.nekohasekai.sagernet.bg.GuardedProcessPool
@@ -34,6 +33,13 @@ abstract class BoxInstance(
     val externalInstances = hashMapOf<Int, AbstractInstance>()
     open lateinit var processes: GuardedProcessPool
     private var cacheFiles = ArrayList<File>()
+
+    /** Millisecond timestamps collide when many disposable cores start together. */
+    protected fun createCacheFile(directory: File, prefix: String, suffix: String): File {
+        directory.mkdirs()
+        return File.createTempFile(prefix, suffix, directory).also { cacheFiles.add(it) }
+    }
+
     fun isInitialized(): Boolean {
         return ::config.isInitialized && ::box.isInitialized
     }
@@ -70,12 +76,7 @@ abstract class BoxInstance(
                     is HysteriaBean -> {
                         initPlugin("hysteria-plugin")
                         pluginConfigs[port] = profile.type to bean.buildHysteria1Config(port) {
-                            File(
-                                app.cacheDir, "hysteria_" + SystemClock.elapsedRealtime() + ".ca"
-                            ).apply {
-                                parentFile?.mkdirs()
-                                cacheFiles.add(this)
-                            }
+                            createCacheFile(app.cacheDir, "hysteria_", ".ca")
                         }
                     }
                 }
@@ -101,12 +102,8 @@ abstract class BoxInstance(
                     }
 
                     bean is TrojanGoBean -> {
-                        val configFile = File(
-                            cacheDir, "trojan_go_" + SystemClock.elapsedRealtime() + ".json"
-                        )
-                        configFile.parentFile?.mkdirs()
+                        val configFile = createCacheFile(cacheDir, "trojan_go_", ".json")
                         configFile.writeText(config)
-                        cacheFiles.add(configFile)
 
                         val commands = mutableListOf(
                             initPlugin("trojan-go-plugin").path, "-config", configFile.absolutePath
@@ -116,13 +113,8 @@ abstract class BoxInstance(
                     }
 
                     bean is MieruBean -> {
-                        val configFile = File(
-                            cacheDir, "mieru_" + SystemClock.elapsedRealtime() + ".json"
-                        )
-
-                        configFile.parentFile?.mkdirs()
+                        val configFile = createCacheFile(cacheDir, "mieru_", ".json")
                         configFile.writeText(config)
-                        cacheFiles.add(configFile)
 
                         val envMap = mutableMapOf<String, String>()
                         envMap["MIERU_CONFIG_JSON_FILE"] = configFile.absolutePath
@@ -136,13 +128,8 @@ abstract class BoxInstance(
                     }
 
                     bean is HysteriaBean -> {
-                        val configFile = File(
-                            cacheDir, "hysteria_" + SystemClock.elapsedRealtime() + ".json"
-                        )
-
-                        configFile.parentFile?.mkdirs()
+                        val configFile = createCacheFile(cacheDir, "hysteria_", ".json")
                         configFile.writeText(config)
-                        cacheFiles.add(configFile)
 
                         val commands = mutableListOf(
                             initPlugin("hysteria-plugin").path,
