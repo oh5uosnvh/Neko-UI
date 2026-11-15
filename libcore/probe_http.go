@@ -7,15 +7,20 @@ import (
 	"net/http/httptrace"
 	"sync"
 	"time"
+
+	N "github.com/sagernet/sing/common/network"
 )
 
-// probeHTTP makes one real GET under one user-configured end-to-end deadline.
-// RTT keeps the existing WroteHeaders-to-first-byte metric (which may include
-// lazy transport writes). A completed sample must never be discarded by a
-// second, hidden warm-up request.
-// Only disposable cores use this path; normal VPN/control-bar probes are unchanged.
-var probeNoRedirect = errors.New("probe redirect")
-
+// probeHTTP follows sing-box's URLTest semantics:
+//   - one HEAD request, not a page download or a hidden warm-up request;
+//   - one hard, end-to-end user deadline;
+//   - measure until the first response byte;
+//   - include DNS/TCP/TLS and early-handshake cost, but exclude a lazy
+//     protocol handshake that is intentionally performed on the first write.
+//
+// The last rule is the same NeedHandshakeForWrite rule used by sing-box's
+// common/urltest implementation and prevents Trojan/VMess lazy writes from
+// inflating the displayed network delay.
 func probeHTTP(parent context.Context, client *http.Client, link string, timeout int32) (int32, error) {
 	if timeout <= 0 {
 		return 0, errors.New("invalid probe timeout")
@@ -23,47 +28,71 @@ func probeHTTP(parent context.Context, client *http.Client, link string, timeout
 	if client == nil {
 		return 0, errors.New("missing probe client")
 	}
-	// boxapi's generic client has fixed 3s TLS/header timers. A disposable
-	// probe must use the user's ONE total deadline, not a hidden stage cap.
+
+	// Do not mutate the shared proxy client. boxapi installs fixed 3s stage
+	// timers; the probe has exactly one user-selected end-to-end budget instead.
+	probeClient := *client
 	if transport, ok := client.Transport.(*http.Transport); ok {
 		transport = transport.Clone()
 		transport.TLSHandshakeTimeout = 0
 		transport.ResponseHeaderTimeout = 0
-		client.Transport = transport
+		probeClient.Transport = transport
 	}
-	ctx, cancel := context.WithTimeout(context.WithValue(parent, "nb4a_no_concurrent_dial", true), time.Duration(timeout)*time.Millisecond)
+	budget := time.Duration(timeout) * time.Millisecond
+	probeClient.Timeout = budget // hard cap even for a non-standard Transport.
+	// Match sing-box: do not follow redirects, but a redirect response itself
+	// is a valid HTTP response and therefore a successful probe.
+	probeClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	defer probeClient.CloseIdleConnections()
+
+	ctx, cancel := context.WithTimeout(
+		context.WithValue(parent, "nb4a_no_concurrent_dial", true), budget,
+	)
 	defer cancel()
-	defer client.CloseIdleConnections()
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return probeNoRedirect }
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, link, nil)
 	if err != nil {
 		return 0, err
 	}
+
 	var lock sync.Mutex
-	var written, firstByte time.Time
-	trace := &httptrace.ClientTrace{
-		WroteHeaders:         func() { lock.Lock(); written = time.Now(); lock.Unlock() },
-		GotFirstResponseByte: func() { lock.Lock(); firstByte = time.Now(); lock.Unlock() },
-	}
 	started := time.Now()
-	resp, err := client.Do(req.WithContext(httptrace.WithClientTrace(ctx, trace)))
-	if err != nil && !errors.Is(err, probeNoRedirect) {
+	measurementStart := started
+	firstByte := time.Time{}
+	trace := &httptrace.ClientTrace{
+		// sing-box starts before DialContext for normal connections, but resets
+		// the clock after DialContext when the protocol defers its handshake to
+		// the first Write. This is exactly NeedHandshakeForWrite semantics.
+		GotConn: func(info httptrace.GotConnInfo) {
+			if !N.NeedHandshakeForWrite(info.Conn) {
+				return
+			}
+			lock.Lock()
+			measurementStart = time.Now()
+			lock.Unlock()
+		},
+		GotFirstResponseByte: func() {
+			lock.Lock()
+			firstByte = time.Now()
+			lock.Unlock()
+		},
+	}
+	resp, err := probeClient.Do(req.WithContext(httptrace.WithClientTrace(ctx, trace)))
+	if err != nil {
 		return 0, err
 	}
 	if resp == nil {
 		return 0, errors.New("probe returned no response")
 	}
-	// A URL latency test measures the response, not a page download. Closing
-	// without draining also keeps arbitrary URLs with large bodies bounded.
+	// HEAD has no useful body. Closing immediately bounds arbitrary test URLs.
 	resp.Body.Close()
+
 	lock.Lock()
-	if written.IsZero() {
-		written = started
-	}
 	if firstByte.IsZero() {
 		firstByte = time.Now()
 	}
-	measured := firstByte.Sub(written)
+	measured := firstByte.Sub(measurementStart)
 	lock.Unlock()
 	return int32(max(0, measured.Milliseconds())), nil
 }

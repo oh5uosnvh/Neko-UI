@@ -11,9 +11,9 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/matsuridayo/libneko/protect_server"
-	"github.com/matsuridayo/libneko/speedtest"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/boxapi"
 	libbox "github.com/sagernet/sing-box/experimental/libbox"
@@ -22,6 +22,7 @@ import (
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/common/conntrack"
 	"github.com/sagernet/sing-box/common/dialer"
+	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/service"
@@ -288,26 +289,41 @@ func (b *BoxInstance) SelectorState() string {
 
 func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err error) {
 	defer device.DeferPanicToError("box.UrlTest", func(err_ error) { err = err_ })
-	var connectionTracker adapter.ConnectionTracker
-	// test i
+	if timeout <= 0 {
+		return 0, errors.New("invalid probe timeout")
+	}
+	// Use the same URLTest implementation as official sing-box: one HEAD,
+	// one detour DialContext, and NeedHandshakeForWrite-aware timing. The
+	// caller's timeout is carried in the context because sing-box's normal
+	// URLTest uses its global 15s TCPTimeout.
 	if i != nil {
-		if i.v2api != nil {
-			connectionTracker = i.v2api.StatsService()
-		}
+		parent := context.Background()
 		if i.probeContext != nil {
-			return probeHTTP(i.probeContext.ctx, boxapi.CreateProxyHttpClient(i.Box, connectionTracker), link, timeout)
+			parent = i.probeContext.ctx
 		}
-		return speedtest.UrlTest(boxapi.CreateProxyHttpClient(i.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
+		return officialURLTest(parent, i.Box, link, timeout)
 	}
-	// test direct
-	if mainInstance == nil {
-		return speedtest.UrlTest(boxapi.CreateProxyHttpClient(nil, nil), link, timeout, speedtest.UrlTestStandard_RTT)
+	if mainInstance != nil {
+		return officialURLTest(context.Background(), mainInstance.Box, link, timeout)
 	}
-	// test mainInstance
-	if mainInstance.v2api != nil {
-		connectionTracker = mainInstance.v2api.StatsService()
+	// No core means a direct, disposable HTTP probe is the only valid path.
+	return probeHTTP(context.Background(), boxapi.CreateProxyHttpClient(nil, nil), link, timeout)
+}
+
+func officialURLTest(parent context.Context, instance *box.Box, link string, timeout int32) (int32, error) {
+	if instance == nil || instance.Outbound() == nil || instance.Outbound().Default() == nil {
+		return 0, errors.New("missing default outbound")
 	}
-	return speedtest.UrlTest(boxapi.CreateProxyHttpClient(mainInstance.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
+	ctx, cancel := context.WithTimeout(
+		context.WithValue(parent, "nb4a_no_concurrent_dial", true),
+		time.Duration(timeout)*time.Millisecond,
+	)
+	defer cancel()
+	delay, err := urltest.URLTest(ctx, link, instance.Outbound().Default())
+	if err != nil {
+		return 0, err
+	}
+	return int32(delay), nil
 }
 
 var protectCloser io.Closer

@@ -12,8 +12,9 @@ import (
 	"time"
 )
 
-// One valid URL response must not be discarded by an invisible second GET.
-// Scaled timings model a slow cold connection + low RTT inside the user budget.
+// One valid URL response must not be discarded by an invisible second request.
+// The official sing-box URLTest includes cold DNS/TCP/TLS setup in the sample;
+// only a protocol handshake deferred until the first write is excluded.
 func TestProbeHTTPDoesNotChargeSecondRequestToCompletedSample(t *testing.T) {
 	var calls atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,8 +41,8 @@ func TestProbeHTTPDoesNotChargeSecondRequestToCompletedSample(t *testing.T) {
 	if n := calls.Load(); n != 1 {
 		t.Fatalf("got %d requests for one sample", n)
 	}
-	if latency < 60 || latency > 160 {
-		t.Fatalf("RTT must exclude cold dial: %dms", latency)
+	if latency < 160 || latency > 320 {
+		t.Fatalf("RTT must include cold dial but not a second request: %dms", latency)
 	}
 }
 

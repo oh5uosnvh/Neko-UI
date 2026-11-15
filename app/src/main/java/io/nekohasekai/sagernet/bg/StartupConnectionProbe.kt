@@ -11,18 +11,14 @@ internal object StartupConnectionProbe {
     data class Result(val elapsed: Int = -1, val error: String? = null)
 
     suspend fun measure(timeoutMillis: Int, test: () -> Int): Result {
-        val perAttempt = timeoutMillis.coerceIn(500, 120_000).toLong()
-        // The first URL round trip can race core/plugin, DNS, or TLS lazy setup.
-        // Give it one fresh attempt, while keeping one overall finite budget.
-        val overall = perAttempt * 2L + 250L
+        // URLTest/native probe already owns this same end-to-end deadline.
+        // Never multiply it with a hidden cold-start retry: a 3000 ms setting
+        // must not leave the control bar spinning for 6250 ms (or longer while
+        // a blocking native cleanup is being joined).
+        val budget = timeoutMillis.coerceIn(500, 120_000).toLong()
         return try {
-            val elapsed = withTimeout(overall) {
-                retryColdStartProbe(isSuccess = { it >= 0 }) {
-                    // Libcore.urlTest already enforces perAttempt. Do not nest a
-                    // coroutine timeout here: an outer cancellation must remain
-                    // CancellationException and must never trigger a retry.
-                    withContext(Dispatchers.IO) { test() }
-                }
+            val elapsed = withTimeout(budget) {
+                withContext(Dispatchers.IO) { test() }
             }
             if (elapsed < 0) Result(error = "Connection unavailable") else Result(elapsed = elapsed)
         } catch (_: TimeoutCancellationException) {

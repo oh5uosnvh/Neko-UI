@@ -45,7 +45,6 @@ import io.nekohasekai.sagernet.aidl.SpeedDisplayData
 import io.nekohasekai.sagernet.aidl.TrafficDataBatch
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.SagerConnection
-import io.nekohasekai.sagernet.bg.retryColdStartProbe
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupManager
 import io.nekohasekai.sagernet.database.ProfileManager
@@ -729,9 +728,11 @@ class MainActivity : ThemedActivity(),
         controlErrorDetail = null
         controlLatencyJob = lifecycleScope.launch {
             try {
-                val elapsed = retryColdStartProbe(isSuccess = { it >= 0 }) {
-                    withContext(Dispatchers.IO) { urlTest() }
-                }
+                // The native URLTest already owns one hard end-to-end user
+                // deadline.  Do not run a second cold attempt here: two 3000ms
+                // requests plus backoff are the reason the control bar can keep
+                // spinning for 6–10 seconds while the setting says 3000ms.
+                val elapsed = withContext(Dispatchers.IO) { urlTest() }
                 if (controlLatencyGate.finish(request, DataStore.serviceState.connected,
                         DataStore.selectedProxy, DataStore.currentProfile)) {
                     startupProbe = startupProbe?.copy(elapsed = elapsed, phase = "connected", error = "")
