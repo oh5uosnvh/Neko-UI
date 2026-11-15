@@ -6,11 +6,11 @@ on:
       build_version:
         description: 'Non-release build version; prexx names are reserved for published releases'
         required: true
-        default: '1.4.2-mg-2611151843'
+        default: '1.4.2-mg-2611152340'
       version_code:
         description: 'Base version code (>=49; Android code is base x 5)'
         required: true
-        default: '2066'
+        default: '2068'
       signed:
         description: 'Sign with the verified legacy key (requires secrets)'
         type: boolean
@@ -106,7 +106,7 @@ jobs:
           # Test every host-compatible registry and private constructor; Naive
           # uses Cronet and remains gated by the full Android AAR build.
           go test -tags 'with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_openvpn,with_openconnect,with_tailscale,with_cloudflared' -count=1 . -run 'TestNekoBoxHost|TestStringIterator|TestRealHost|TestSplitLines'
-          go test -tags with_utls -count=1 . -run 'TestProbeContext|TestProbeCores|TestProbeFactory|TestProbeHTTP'
+          go test -tags with_utls -count=1 . -run 'TestProbe'
       - name: Verify atomic routing snapshot and failure rollback
         run: |
           cd ../sing-box
@@ -264,6 +264,20 @@ jobs:
             -o "$compiler_cache/kotlin-compiler-embeddable-2.0.21.pom"
           echo "bd4656a46ec418252e5bc5e1c20eb2029fb2a8e0e3cc94eeddfac7e87c8cd5b6  $compiler_cache/kotlin-compiler-embeddable-2.0.21.pom" | sha256sum -c -
           ./gradlew --no-daemon --stacktrace --info app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.group.*' --tests 'io.nekohasekai.sagernet.ui.*' --tests 'io.nekohasekai.sagernet.database.*' --tests 'io.nekohasekai.sagernet.fmt.*'
+          # Prove the concurrency/cancellation tests actually ran, before the
+          # following DNS-only invocation replaces the test-result directory.
+          python3 - <<'PY'
+          import pathlib, xml.etree.ElementTree as ET
+          root = pathlib.Path('app/build/test-results/testPreviewDebugUnitTest')
+          for name, minimum in [('UrlTestPolicyTest', 5), ('CancellableProbeTest', 5)]:
+              report = root / ('TEST-io.nekohasekai.sagernet.group.' + name + '.xml')
+              suite = ET.parse(report).getroot()
+              assert int(suite.get('tests', '0')) >= minimum, name + ' did not run'
+              assert int(suite.get('failures', '0')) == 0 and int(suite.get('errors', '0')) == 0, name + ' failed'
+          PY
+          mkdir -p app/build/reports/urltest-performance
+          cp app/build/test-results/testPreviewDebugUnitTest/TEST-io.nekohasekai.sagernet.group.*ProbeTest.xml app/build/reports/urltest-performance/ || true
+          cp app/build/test-results/testPreviewDebugUnitTest/TEST-io.nekohasekai.sagernet.group.UrlTestPolicyTest.xml app/build/reports/urltest-performance/
           bash buildScript/lib/core/get_source.sh
           bash buildScript/check-dns14.sh
           ./gradlew --no-daemon app:assemblePreviewRelease
@@ -289,6 +303,7 @@ jobs:
             **/test-worker*.log
             app/build/test-results/testPreviewDebugUnitTest/
             app/build/reports/tests/testPreviewDebugUnitTest/
+            app/build/reports/urltest-performance/
             app/build/reports/ui-pre4/
             app/build/reports/ui-pre12/
             app/build/reports/ui-pre13/

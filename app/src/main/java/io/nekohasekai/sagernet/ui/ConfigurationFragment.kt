@@ -1838,7 +1838,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                 runOnMainDispatcher { if (test.ownsSession()) latencyOverlay()?.empty(emptyLatencyMessage(request.scope)) }
                 return@launch
             }
-            val workers = DataStore.connectionTestConcurrent.coerceIn(1, 16).coerceAtMost(profilesList.size)
+            val workers = io.nekohasekai.sagernet.bg.urlTestWorkerCount(
+                DataStore.connectionTestConcurrent, profilesList.size,
+            )
             testPool = Executors.newFixedThreadPool(workers).asCoroutineDispatcher()
             test.proxyN = profilesList.size
             test.targetIds.addAll(profilesList.map { it.id })
