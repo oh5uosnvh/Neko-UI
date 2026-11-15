@@ -10,7 +10,7 @@ trap 'rm -rf "$fixtures"' EXIT
 ./gradlew :app:testPreviewDebugUnitTest \
   --tests io.nekohasekai.sagernet.group.GlobalSelectorBuildTest \
   --tests io.nekohasekai.sagernet.group.SubscriptionDnsBuilderTest \
-  --tests io.nekohasekai.sagernet.fmt.SelectorDnsPolicyTest \
+  --tests io.nekohasekai.sagernet.group.Kernel14ProtocolConfigTest \
   -Dneko.dns.fixtureDir="$fixtures" \
   --rerun-tasks --no-daemon --max-workers=1 -x :app:buildHevTun
 # Missing exports fail, rather than silently passing a skipped decoder test.

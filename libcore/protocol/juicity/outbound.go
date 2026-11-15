@@ -42,7 +42,10 @@ func RegisterOutbound(registry *outbound.Registry) {
 	outbound.Register[JuicityOutboundOptions](registry, TypeJuicity, NewOutbound)
 }
 
-var _ adapter.Outbound = (*Outbound)(nil)
+var (
+	_ adapter.Outbound  = (*Outbound)(nil)
+	_ adapter.Lifecycle = (*Outbound)(nil)
+)
 
 type Outbound struct {
 	outbound.Adapter
@@ -104,6 +107,13 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		logger:  logger,
 		client:  client,
 	}, nil
+}
+
+func (o *Outbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage == adapter.StartStateInitialize {
+		scope.Add(o.Close)
+	}
+	return nil
 }
 
 func (o *Outbound) Close() error {

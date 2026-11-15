@@ -12,6 +12,20 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 )
 
+type lifecycleVLESS struct{ *standard.Outbound }
+
+var _ adapter.Lifecycle = (*lifecycleVLESS)(nil)
+var _ adapter.InterfaceUpdateListener = (*lifecycleVLESS)(nil)
+
+func (o *lifecycleVLESS) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage == adapter.StartStateInitialize {
+		scope.Add(o.Outbound.Close)
+	}
+	return nil
+}
+
+func (o *lifecycleVLESS) InterfaceUpdated(ctx context.Context) { o.Outbound.InterfaceUpdated() }
+
 func ParseMarker(value string) (string, bool) {
 	if len(value) >= 5 && strings.EqualFold(value[len(value)-5:], "#x365") {
 		return value[:len(value)-5], true
@@ -26,7 +40,17 @@ func RegisterVLESSOutbound(registry *outbound.Registry) {
 func newVLESSOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.VLESSOutboundOptions) (adapter.Outbound, error) {
 	clean, modified := ParseMarker(options.UUID)
 	if !modified {
-		return standard.NewOutbound(ctx, router, logger, tag, options)
+		inner, err := standard.NewOutbound(ctx, router, logger, tag, options)
+		if err != nil {
+			return nil, err
+		}
+		// The fork's VLESS encryption/transport extension still exposes the
+		// pre-1.14 Close/InterfaceUpdated ABI. Preserve its wire implementation
+		// while adapting only ownership and network notifications.
+		if legacy, ok := inner.(*standard.Outbound); ok {
+			return &lifecycleVLESS{Outbound: legacy}, nil
+		}
+		return inner, nil
 	}
 	if clean == "" {
 		return nil, E.New("x365: empty credential")

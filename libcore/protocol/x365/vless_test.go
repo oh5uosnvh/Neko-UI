@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
-	standard "github.com/sagernet/sing-box/protocol/vless"
 	M "github.com/sagernet/sing/common/metadata"
 )
 
@@ -75,8 +75,14 @@ func TestVLESSMarkerDispatchWire(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer plain.(interface{ Close() error }).Close()
-	if _, ok := plain.(*standard.Outbound); !ok {
-		t.Fatal("ordinary VLESS intercepted")
+	if wrapped, ok := plain.(*lifecycleVLESS); !ok || wrapped.Outbound == nil {
+		t.Fatal("ordinary VLESS wire implementation not preserved")
+	}
+	if _, ok := plain.(adapter.Lifecycle); !ok {
+		t.Fatal("ordinary VLESS lacks Scope cleanup")
+	}
+	if _, ok := plain.(adapter.InterfaceUpdateListener); !ok {
+		t.Fatal("ordinary VLESS lacks network update listener")
 	}
 }
 func TestMarkerOnlyAtEnd(t *testing.T) {

@@ -64,7 +64,7 @@ fun buildSingBoxOutboundNaiveBean(bean: NaiveBean): SingBoxOption {
             }
             if (headers.length() > 0) put("extra_headers", headers)
         }
-        if (proto.equals("quic", ignoreCase = true)) put("quic", true)
+        if (bean.proto.equals("quic", ignoreCase = true)) put("quic", true)
         // Naive requires TLS. NodeHostMapping fills sni with the original
         // hostname when the dial address is replaced by a subscription host.
         put("tls", JSONObject().apply {

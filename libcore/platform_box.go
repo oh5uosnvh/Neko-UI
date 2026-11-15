@@ -65,24 +65,21 @@ func (w *boxPlatformInterfaceWrapper) AutoDetectInterfaceControl(fd int32) error
 	return intfBox.AutoDetectInterfaceControl(fd)
 }
 
-// 1.14: OpenTun returns the tun file descriptor; the tunnel object is created
-// by the core from it.
-// The libbox adapter wrapper materializes tun options before calling this
-// bridge. The Android VPN service supplies the actual tun fd through its
-// legacy empty-payload entry point.
+// Pass the concrete tun/platform settings to Android. The fd is borrowed
+// from ParcelFileDescriptor; libbox duplicates it once when taking ownership.
 func (w *boxPlatformInterfaceWrapper) OpenTun(options libbox.TunOptions) (int32, error) {
-	if options == nil {
-		return 0, fmt.Errorf("missing tun options")
+	if options == nil || intfBox == nil {
+		return 0, fmt.Errorf("missing tun options or Android platform")
 	}
-	tunFd, err := intfBox.OpenTun("", "")
+	tunJSON, platformJSON, err := libbox.MarshalTunOptions(options)
+	if err != nil {
+		return 0, fmt.Errorf("marshal tun options: %w", err)
+	}
+	tunFd, err := intfBox.OpenTun(string(tunJSON), string(platformJSON))
 	if err != nil {
 		return 0, fmt.Errorf("intfBox.OpenTun: %w", err)
 	}
-	dupFd, err := syscall.Dup(tunFd)
-	if err != nil {
-		return 0, fmt.Errorf("syscall.Dup: %w", err)
-	}
-	return int32(dupFd), nil
+	return int32(tunFd), nil
 }
 
 func (w *boxPlatformInterfaceWrapper) FindConnectionOwner(ipProtocol int32, sourceAddress string, sourcePort int32, destinationAddress string, destinationPort int32) (*libbox.ConnectionOwner, error) {

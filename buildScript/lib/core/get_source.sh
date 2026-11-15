@@ -22,22 +22,7 @@ checkout_dep() {
     echo "Not a Git checkout: $dir" >&2; exit 1
   fi
   if [ -n "$(git -C "$dir" status --porcelain)" ]; then
-    if [ "$name" = sing-box ] && [ -f "$dir/.git/neko-runtime-routing.json" ]; then
-      # Runtime-patched tree. If the pinned commit moved, reset to the new base
-      # (the patch is baked into the 1.14.x-neko branch commits) and re-apply.
-      manifest_commit=$(python3 -c "import json;print(json.load(open('$dir/.git/neko-runtime-routing.json'))['commit'])" 2>/dev/null || echo "")
-      if [ "$manifest_commit" != "$commit" ]; then
-        git -C "$dir" checkout -- . || true
-        git -C "$dir" clean -fd || true
-        git_cmd -C "$dir" cat-file -e "$commit^{commit}" 2>/dev/null || git_cmd -C "$dir" fetch "$url" "$commit"
-        git -C "$dir" checkout --detach "$commit"
-      else
-        python3 "$ROOT/libcore/runtimepatch/apply.py" --verify-existing "$dir" "$commit"
-        return
-      fi
-    else
-      echo "Refusing to overwrite dirty dependency: $dir" >&2; exit 1
-    fi
+    echo "Refusing to overwrite dirty dependency: $dir" >&2; exit 1
   fi
   git_cmd -C "$dir" cat-file -e "$commit^{commit}" 2>/dev/null || git_cmd -C "$dir" fetch "$url" "$commit"
   git -C "$dir" checkout --detach "$commit"
@@ -57,5 +42,9 @@ done
 # calls and make the gvisor fix appear to be the failing change.
 python3 "$ROOT/buildScript/lib/core/patch_protocol_modules.py" "$DEPS/oppa-mod"
 
-# Extend the pinned router with a tested, atomic route+DNS snapshot API.
-python3 "$ROOT/libcore/runtimepatch/apply.py" "$DEPS/sing-box"
+# All compatibility changes are committed in the pinned fork. Never rewrite
+# its router or platform sources with an older runtime patch snapshot.
+test "$(git -C "$DEPS/sing-box" rev-parse HEAD)" = "$COMMIT_SING_BOX"
+if [ -n "$(git -C "$DEPS/sing-box" status --porcelain)" ]; then
+  echo "Pinned sing-box source must be clean" >&2; exit 1
+fi

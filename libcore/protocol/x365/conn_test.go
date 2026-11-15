@@ -3,11 +3,14 @@ package x365
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
+	"io"
 	"net"
 	"testing"
+	"time"
 
-	M "github.com/sagernet/sing/common/metadata"
 	"github.com/gofrs/uuid/v5"
+	M "github.com/sagernet/sing/common/metadata"
 )
 
 // Wire format (from 365VPN libgojni.so reverse engineering):
@@ -108,44 +111,119 @@ func TestResponseValidation(t *testing.T) {
 	}
 }
 
+// net.Pipe is unbuffered: the server must consume the complete request AND
+// payload before writing the response. The old test read an oversized header
+// with Read (not ReadFull), then replied while the client was still writing.
 func TestConnRoundTrip(t *testing.T) {
-	t.Skip("flaky under go 1.26 net.Pipe scheduling; wire format covered by TestRequestWireFormat*")
-
-	key := [16]byte{9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9}
+	key := [16]byte{9, 9, 9, 9}
 	dest := M.ParseSocksaddr("example.com:80")
-
 	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
-
-	c := NewConn(client, key, CommandTCP, dest)
-	go func() {
-		// read the request the client sends
-		head := make([]byte, 26+11+1) // magic..domain(len 11)+padding
-		if _, err := server.Read(head); err != nil {
-			return
-		}
-		if !bytes.Equal(head[0:4], []byte("X365")) {
-			server.Write([]byte{'B', 'A', 'D', '9', 0x00})
-			return
-		}
-		// reply: X365 + 1 consumed byte + payload
-		server.Write([]byte{'X', '3', '6', '5', 0x01, 'H', 'I'})
-	}()
-
-	if _, err := c.Write([]byte{}); err != nil {
+	server.SetDeadline(time.Now().Add(3 * time.Second))
+	client.SetDeadline(time.Now().Add(3 * time.Second))
+	var expected bytes.Buffer
+	if err := WriteRequest(&expected, key, CommandTCP, dest, []byte("payload")); err != nil {
 		t.Fatal(err)
 	}
-	// write real payload after header
+	done := make(chan error, 1)
+	go func() {
+		got := make([]byte, expected.Len())
+		if _, err := io.ReadFull(server, got); err != nil {
+			done <- err
+			return
+		}
+		if !bytes.Equal(got, expected.Bytes()) {
+			done <- fmt.Errorf("request = %x", got)
+			return
+		}
+		_, err := server.Write([]byte{'X', '3', '6', '5', 1, 'H', 'I'})
+		done <- err
+	}()
+	c := NewConn(client, key, CommandTCP, dest)
+	if _, err := c.Write(nil); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := c.Write([]byte("payload")); err != nil {
 		t.Fatal(err)
 	}
 	out := make([]byte, 2)
-	if _, err := c.Read(out); err != nil {
+	if _, err := io.ReadFull(c, out); err != nil {
 		t.Fatal(err)
 	}
 	if string(out) != "HI" {
-		t.Fatalf("payload = %q, want HI", out)
+		t.Fatalf("payload = %q", out)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Exercise a header-only handshake, multiple UDP frames, address reporting,
+// and rejection of empty datagrams after the handshake, without skipping.
+func TestPacketConnRoundTrip(t *testing.T) {
+	key := [16]byte{1, 2, 3, 4}
+	dest := M.ParseSocksaddr("8.8.8.8:53")
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	server.SetDeadline(time.Now().Add(3 * time.Second))
+	client.SetDeadline(time.Now().Add(3 * time.Second))
+	var head bytes.Buffer
+	if err := WriteRequest(&head, key, CommandUDP, dest, nil); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		got := make([]byte, head.Len())
+		if _, err := io.ReadFull(server, got); err != nil {
+			done <- err
+			return
+		}
+		if !bytes.Equal(got, head.Bytes()) {
+			done <- fmt.Errorf("header = %x", got)
+			return
+		}
+		for i, payload := range []string{"abc", "second"} {
+			frame := make([]byte, 2+len(payload))
+			if _, err := io.ReadFull(server, frame); err != nil {
+				done <- err
+				return
+			}
+			if int(frame[0])<<8|int(frame[1]) != len(payload) || string(frame[2:]) != payload {
+				done <- fmt.Errorf("frame = %x", frame)
+				return
+			}
+			response := append([]byte{0, byte(len(payload))}, []byte(payload)...)
+			if i == 0 {
+				response = append([]byte{'X', '3', '6', '5', 0}, response...)
+			}
+			if _, err := server.Write(response); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	pc := &PacketConn{Conn: client, key: key, destination: dest}
+	if _, err := pc.Write(nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, payload := range []string{"abc", "second"} {
+		if n, err := pc.Write([]byte(payload)); err != nil || n != len(payload) {
+			t.Fatalf("write %d: %v", n, err)
+		}
+		out := make([]byte, 64)
+		n, addr, err := pc.ReadFrom(out)
+		if err != nil || string(out[:n]) != payload || addr.String() != dest.String() {
+			t.Fatalf("read %q %v: %v", out[:n], addr, err)
+		}
+	}
+	if _, err := pc.Write(nil); err == nil {
+		t.Fatal("post-handshake empty datagram accepted")
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 

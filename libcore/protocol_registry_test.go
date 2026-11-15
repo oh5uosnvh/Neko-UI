@@ -6,7 +6,7 @@ import "testing"
 
 func TestNekoBoxProtocolRegistriesKeepCustomAndOfficialProtocols(t *testing.T) {
 	outbound := nekoboxAndroidOutboundRegistry().OptionTypes()
-	wantOutbound := []string{"bridge", "fastup", "juicity", "oppa", "x365", "xhttp", "naive"}
+	wantOutbound := []string{"direct", "bridge", "block", "dns", "selector", "urltest", "socks", "http", "naive", "shadowsocks", "shadowsocksr", "vmess", "trojan", "tor", "ssh", "shadowtls", "vless", "anytls", "snell", "x365", "xhttp", "fastup", "oppa", "hysteria", "tuic", "hysteria2", "juicity"}
 	for _, typ := range wantOutbound {
 		found := false
 		for _, got := range outbound {

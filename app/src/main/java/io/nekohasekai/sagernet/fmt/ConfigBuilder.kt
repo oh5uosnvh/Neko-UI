@@ -36,6 +36,7 @@ import io.nekohasekai.sagernet.fmt.snell.SnellBean
 import io.nekohasekai.sagernet.fmt.snell.buildSingBoxOutboundSnellBean
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
 import io.nekohasekai.sagernet.fmt.wireguard.buildSingBoxOutboundWireguardBean
+import io.nekohasekai.sagernet.fmt.wireguard.migrateWireGuardEndpoints
 import io.nekohasekai.sagernet.group.SubscriptionDns
 import io.nekohasekai.sagernet.group.SubscriptionDnsBuilder
 import io.nekohasekai.sagernet.group.NodeHostMapping
@@ -117,8 +118,11 @@ fun buildConfig(
         val bean = proxy.requireBean() as ConfigBean
         if (bean.type == 0) {
             val tagProxy = proxy.displayName()
+            @Suppress("UNCHECKED_CAST")
+            val fullConfig = gson.fromJson(bean.config, MutableMap::class.java) as MutableMap<String, Any>
+            migrateWireGuardEndpoints(fullConfig)
             return ConfigBuildResult(
-                bean.config,
+                gson.toJson(fullConfig),
                 listOf(),
                 proxy.id, //
                 mapOf(tagProxy to listOf(proxy)), //
@@ -952,14 +956,7 @@ fun buildConfig(
             tag = "dns-local"
         })
 
-        if (buildSelector) {
-            // Node bootstrap graphs precede the dispatcher. No node bootstrap
-            // depends on the dynamic dns-direct tag.
-            dns.servers.addAll(selectorDns.servers)
-            dns.servers.addAll(subscriptionDns.servers)
-            subscriptionDns.servers.clear()
-            dns.servers.add(selectorDns.dispatch("dns-direct", selectorDirectChoices))
-        } else if (subscriptionDirectDns.isNotEmpty()) {
+        if (subscriptionDirectDns.isNotEmpty()) {
             subscriptionDns.direct(subscriptionDirectDns)
             // Materialize the direct policy before remote domain bootstrap uses it.
             dns.servers.addAll(subscriptionDns.servers)
@@ -1076,6 +1073,7 @@ fun buildConfig(
     }.let {
         val configMap = it.asMap()
         Util.mergeJSON(configMap, proxy.requireBean().customConfigJson)
+        migrateWireGuardEndpoints(configMap)
         ConfigBuildResult(
             gson.toJson(configMap),
             externalIndexMap,

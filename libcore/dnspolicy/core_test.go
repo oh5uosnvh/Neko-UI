@@ -91,11 +91,16 @@ func TestPinnedCoreConfigResolverAndIndependentCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
+	port := uint16(listener.Addr().(*net.TCPAddr).Port)
 	go func() {
 		conn, err := listener.Accept()
 		if err == nil {
-			_, _ = conn.Write([]byte("OK"))
-			_ = conn.Close()
+			defer conn.Close()
+			_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+			var request [1]byte
+			if _, err = io.ReadFull(conn, request[:]); err == nil {
+				_, _ = conn.Write([]byte("OK"))
+			}
 		}
 	}()
 	outManager := service.FromContext[adapter.OutboundManager](ctx)
@@ -105,12 +110,17 @@ func TestPinnedCoreConfigResolverAndIndependentCache(t *testing.T) {
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	conn, err := directOutbound.DialContext(dialCtx, "tcp", M.ParseSocksaddrHostPort("dial.example", uint16(listener.Addr().(*net.TCPAddr).Port)))
+	conn, err := directOutbound.DialContext(dialCtx, "tcp", M.ParseSocksaddrHostPort("dial.example", port))
 	if err != nil {
 		t.Fatal("outbound ignored domain_resolver:", err)
 	}
 	defer conn.Close()
-	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	// A normal request must drive a deferred/TFO dial before awaiting the
+	// server greeting; this still proves the selected DNS transport mapped it.
+	if _, err = conn.Write([]byte("?")); err != nil {
+		t.Fatal("mapped request failed", err)
+	}
 	buf := make([]byte, 2)
 	if _, err = io.ReadFull(conn, buf); err != nil || string(buf) != "OK" {
 		t.Fatal("mapped connection failed", err)

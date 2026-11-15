@@ -10,19 +10,18 @@ if [ -z "${ANDROID_HOME:-}" ]; then
   fi
 fi
 
-_NDK=""
-# Cronet's Android archives are built with NDK r25c. Prefer that exact
-# revision even when the runner image exposes a newer default NDK first.
-if [ -d "${ANDROID_HOME:-}/ndk" ]; then
+# Respect an explicit NDK first. Current Cronet archives require the newer
+# AArch64 relocation support in r28; never silently prefer an installed r25.
+_NDK="${ANDROID_NDK_HOME:-}"
+[ -f "$_NDK/source.properties" ] || _NDK="${NDK:-}"
+if [ ! -f "$_NDK/source.properties" ] && [ -d "${ANDROID_HOME:-}/ndk" ]; then
   for candidate in "${ANDROID_HOME}/ndk"/*; do
-    if [ -f "$candidate/source.properties" ] && rg -q 'Pkg.Revision = 25\.2\.' "$candidate/source.properties"; then
+    if [ -f "$candidate/source.properties" ] && rg -q 'Pkg.Revision = 28\.' "$candidate/source.properties"; then
       _NDK="$candidate"
       break
     fi
   done
 fi
-[ -f "$_NDK/source.properties" ] || _NDK="${ANDROID_NDK_HOME:-}"
-[ -f "$_NDK/source.properties" ] || _NDK="${NDK:-}"
 [ -f "$_NDK/source.properties" ] || _NDK="${ANDROID_HOME:-}/ndk-bundle"
 
 if [ ! -f "$_NDK/source.properties" ]; then

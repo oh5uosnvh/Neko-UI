@@ -21,6 +21,8 @@ require (
 	github.com/oh5uosnvh/fastup-mod v0.0.0-00010101000000-000000000000
 	github.com/oh5uosnvh/oppa-mod v0.0.0-00010101000000-000000000000
 	github.com/sagernet/sing-vmess v0.2.9-0.20261019223527-a0c58542bd9d
+	github.com/stretchr/testify v1.12.1
+	golang.org/x/crypto v0.54.0
 )
 
 require (
@@ -180,9 +182,9 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.1 // indirect
 	go.uber.org/zap/exp v0.3.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	go4.org/netipx v0.0.0-20260823151212-3075585bcbeb // indirect
-	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.57.0 // indirect

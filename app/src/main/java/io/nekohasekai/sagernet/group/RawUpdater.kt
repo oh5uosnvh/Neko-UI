@@ -1202,6 +1202,19 @@ object RawUpdater : GroupUpdater() {
                     return listOf(json.parseTrojanGo())
                 }
 
+                // Endpoint protocols carry DNS, certificates and route dependencies.
+                // Import them as a complete config, never split them into outbounds
+                // and silently discard OpenVPN/OpenConnect/Tailscale/WireGuard.
+                json.has("endpoints") || json.has("services") || json.optJSONArray("inbounds")?.let { entries ->
+                    (0 until entries.length()).any { entries.optJSONObject(it)?.optString("type") == "cloudflared" }
+                } == true -> {
+                    return listOf(ConfigBean().applyDefaultValues().apply {
+                        type = 0
+                        config = json.toStringPretty()
+                        name = json.optString("tag", "sing-box 1.14 config")
+                    })
+                }
+
                 json.has("outbounds") -> {
                     return json.getJSONArray("outbounds")
                         .filterIsInstance<JSONObject>()
