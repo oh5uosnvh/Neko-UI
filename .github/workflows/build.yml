@@ -57,8 +57,8 @@ jobs:
           java-version: '21'
       - uses: nttld/setup-ndk@v1
         with:
-          # Cronet archives in the sing-box Naive module use NDK r25c.
-          ndk-version: r25c
+          # Current Cronet archives use AArch64 relocations handled by NDK r28b.
+          ndk-version: r28b
           link-to-sdk: true
       - name: Select the installed Cronet-compatible NDK
         shell: bash
@@ -159,8 +159,8 @@ jobs:
           java-version: '21'
       - uses: nttld/setup-ndk@v1
         with:
-          # Cronet archives in the sing-box Naive module use NDK r25c.
-          ndk-version: r25c
+          # Current Cronet archives use AArch64 relocations handled by NDK r28b.
+          ndk-version: r28b
           link-to-sdk: true
       - name: Select the installed Cronet-compatible NDK
         shell: bash
