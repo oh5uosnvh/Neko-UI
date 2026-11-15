@@ -71,20 +71,39 @@ type BoxInstance struct {
 	access sync.Mutex
 
 	*box.Box
-	cancel context.CancelFunc
-	state  int
+	probeContext *ProbeContext
+	cancel       context.CancelFunc
+	state        int
 
 	v2api        *boxapi.SbV2rayServer
 	selector     *group.Selector
 	pauseManager pause.Manager
 }
 
-func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *BoxInstance, err error) {
+func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (*BoxInstance, error) {
+	return newSingBoxInstance(config, localTransport, context.Background(), false)
+}
+
+// NewSingBoxProbe creates a disposable core without platform-persistent state.
+// In 1.14 a PlatformLogWriter implicitly enables cache.db, even when cache_file
+// is omitted. Parallel URL tests must not contend on that shared database.
+func NewSingBoxProbe(config string, localTransport LocalDNSTransport, p *ProbeContext) (*BoxInstance, error) {
+	if p == nil {
+		return nil, errors.New("missing probe context")
+	}
+	b, err := newSingBoxInstance(config, localTransport, p.ctx, true)
+	if b != nil {
+		b.probeContext = p
+	}
+	return b, err
+}
+
+func newSingBoxInstance(config string, localTransport LocalDNSTransport, parent context.Context, disposable bool) (b *BoxInstance, err error) {
 	defer device.DeferPanicToError("NewSingBoxInstance", func(err_ error) { err = err_ })
 
 	platformInterface := &boxPlatformInterfaceWrapper{localDNS: localTransport}
-	// create box context
-	ctx, cancel := context.WithCancel(context.Background())
+	// Publish the probe cancellation context before construction/startup.
+	ctx, cancel := context.WithCancel(parent)
 	ctx = box.Context(ctx,
 		nekoboxAndroidInboundRegistry(), nekoboxAndroidOutboundRegistry(), nekoboxAndroidEndpointRegistry(),
 		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(),
@@ -102,12 +121,21 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 		return nil, fmt.Errorf("decode config: %v", err)
 	}
 
-	// create box
-	instance, err := box.New(box.Options{
-		Options:           options,
-		Context:           ctx,
-		PlatformLogWriter: boxPlatformLogWriter,
-	})
+	// Keep normal VPN configuration and logging unchanged. Probe cores have no
+	// shared cache/API listeners; they report sanitized errors via TestInstance.
+	boxOptions := box.Options{Options: options, Context: ctx, PlatformLogWriter: boxPlatformLogWriter}
+	if disposable {
+		if options.Experimental != nil {
+			experimental := *options.Experimental
+			experimental.CacheFile = nil
+			experimental.ClashAPI = nil
+			experimental.V2RayAPI = nil
+			options.Experimental = &experimental
+		}
+		boxOptions.Options = options
+		boxOptions.PlatformLogWriter = nil
+	}
+	instance, err := box.New(boxOptions)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("create service: %v", err)
@@ -147,6 +175,14 @@ func (b *BoxInstance) Start() (err error) {
 }
 
 func (b *BoxInstance) Close() (err error) {
+	// A probe may be blocked in Start while holding access. Interrupt its
+	// context before waiting for the lifecycle lock; ordinary VPN is unchanged.
+	if b.probeContext != nil {
+		b.probeContext.Cancel()
+		if b.cancel != nil {
+			b.cancel()
+		}
+	}
 	b.access.Lock()
 	defer b.access.Unlock()
 
@@ -257,6 +293,9 @@ func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err err
 	if i != nil {
 		if i.v2api != nil {
 			connectionTracker = i.v2api.StatsService()
+		}
+		if i.probeContext != nil {
+			return probeHTTP(i.probeContext.ctx, boxapi.CreateProxyHttpClient(i.Box, connectionTracker), link, timeout)
 		}
 		return speedtest.UrlTest(boxapi.CreateProxyHttpClient(i.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
 	}

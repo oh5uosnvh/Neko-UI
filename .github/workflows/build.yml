@@ -3,14 +3,14 @@ name: Build debug candidate
 on:
   workflow_dispatch:
     inputs:
-      release_tag:
-        description: 'Debug candidate name only; does not create a release or tag'
+      build_version:
+        description: 'Non-release build version; prexx names are reserved for published releases'
         required: true
-        default: '1.4.2-mg-pre1-debug-dns09'
+        default: '1.4.2-mg-2611151843'
       version_code:
         description: 'Base version code (>=49; Android code is base x 5)'
         required: true
-        default: '58'
+        default: '2066'
       signed:
         description: 'Sign with the verified legacy key (requires secrets)'
         type: boolean
@@ -106,6 +106,7 @@ jobs:
           # Test every host-compatible registry and private constructor; Naive
           # uses Cronet and remains gated by the full Android AAR build.
           go test -tags 'with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_openvpn,with_openconnect,with_tailscale,with_cloudflared' -count=1 . -run 'TestNekoBoxHost|TestStringIterator|TestRealHost|TestSplitLines'
+          go test -tags with_utls -count=1 . -run 'TestProbeContext|TestProbeCores|TestProbeFactory|TestProbeHTTP'
       - name: Verify atomic routing snapshot and failure rollback
         run: |
           cd ../sing-box
@@ -209,8 +210,8 @@ jobs:
       - name: Build candidate APKs
         env:
           SING_BOX_CLONE_TOKEN: ${{ secrets.GH_PAT }}
-          APP_VERSION_NAME: ${{ inputs.release_tag }}
-          APP_PRE_VERSION_NAME: ${{ inputs.release_tag }}
+          APP_VERSION_NAME: ${{ inputs.build_version }}
+          APP_PRE_VERSION_NAME: ${{ inputs.build_version }}
           APP_VERSION_CODE: ${{ inputs.version_code }}
           SIGNED: ${{ inputs.signed }}
           KEYSTORE_PASS: ${{ inputs.signed && secrets.KEYSTORE_PASS || '' }}
@@ -222,7 +223,8 @@ jobs:
           set -euo pipefail
           trap 'rm -f release.keystore; rm -rf mg-sign' EXIT
           # Candidate builds may use a numeric version name; never publish a tag here.
-          [[ "$APP_VERSION_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$ ]] || { echo 'Invalid candidate version' >&2; exit 1; }
+          [[ "$APP_VERSION_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$ ]] || { echo 'Invalid build version' >&2; exit 1; }
+          [[ ! "$APP_VERSION_NAME" =~ (^|-)pre[0-9]+([-.]|$) ]] || { echo 'prexx build names are reserved for published releases' >&2; exit 1; }
           [[ "$APP_VERSION_CODE" =~ ^[1-9][0-9]{0,8}$ ]] && (( 10#$APP_VERSION_CODE >= 49 && 10#$APP_VERSION_CODE <= 420000000 )) || { echo 'Base version code must be 49..420000000' >&2; exit 1; }
           if [[ "$SIGNED" == true ]]; then
             [[ -n "$KEYSTORE_PASS" && -n "$ALIAS_NAME" && -n "$ALIAS_PASS" && -f mg-sign/keystore/release.keystore ]] || { echo 'Signing credentials or keystore missing' >&2; exit 1; }

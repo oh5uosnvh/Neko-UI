@@ -216,31 +216,28 @@ internal class FlMenuPopup(
         PopupEntrance.animate(surface, aboveAnchor, anchor)
     }
 
-    /** Width across EVERY page's rows so a page switch never resizes horizontally. */
+    /** Natural row width across visible pages; paging still keeps one fixed width. */
     private fun measureWidth(): Int {
-        val probe = LinearLayout(anchor.context)
         var widest = 0
-        val pages = ArrayList<Pair<Menu, CharSequence?>>()
+        fun measureRow(view: View) {
+            // Measuring the whole ScrollView with AT_MOST lets MATCH_PARENT and
+            // the title's weight consume the screen cap, not its content width.
+            // UNSPECIFIED on the row measures actual text, icon, arrow and gaps.
+            view.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            widest = max(widest, view.measuredWidth)
+        }
         fun collect(level: Menu, title: CharSequence?) {
-            pages += level to title
-            for (i in 0 until level.size()) level.getItem(i).subMenu?.let {
-                collect(it, level.getItem(i).title)
+            if (title != null) measureRow(backRow(title))
+            for (i in 0 until level.size()) {
+                val item = level.getItem(i)
+                if (!item.isVisible) continue
+                measureRow(row(item))
+                item.subMenu?.let { collect(it, item.title) }
             }
         }
         collect(menu, null)
-        for ((m, title) in pages) {
-            val page = buildPage(m, title)
-            pager.addView(page.view, FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            page.view.measure(
-                View.MeasureSpec.makeMeasureSpec((anchor.resources.displayMetrics.widthPixels - dp(16)),
-                    View.MeasureSpec.AT_MOST),
-                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
-            widest = max(widest, page.view.measuredWidth)
-            pager.removeView(page.view)
-        }
-        probe.background = null
-        return widest.coerceAtLeast(dp(144))
+        return (widest + surface.paddingLeft + surface.paddingRight).coerceAtLeast(dp(144))
     }
 
     private fun pageHeight(page: Page, width: Int, screen: Rect): Int {
@@ -388,7 +385,8 @@ internal class FlMenuPopup(
                 textSize = 15f
                 maxLines = 1
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT))
 
             if (hasChildren) addView(TextView(context).apply {
                 text = "▶"

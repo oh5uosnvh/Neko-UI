@@ -105,6 +105,23 @@ class FlMenuRealBehaviorTest {
         return null
     }
 
+    @Test fun menuWidthFollowsVisibleContentInsteadOfScreenWidth() {
+        Fixture().use { f ->
+            val root = f.inflate(R.menu.add_profile_menu)
+            val menu = root.findItem(R.id.action_misc).subMenu!!
+            menu.findItem(R.id.action_global_mode).isVisible = false
+            menu.findItem(R.id.action_always_show_address).isVisible = false
+            val popup = f.open(menu)
+            // The old page measurement used AT_MOST(screen), so weighted rows
+            // expanded to the 304dp fixture width. Natural content must leave
+            // room around the surface while remaining large enough to read.
+            assertTrue("popup unexpectedly fills the screen: ${popup.width}", popup.width < 304)
+            assertTrue(popup.width >= 144)
+            popup.dismiss()
+            frames()
+        }
+    }
+
     @Test fun inflatedAddProfileNestedPageBackAndLeafCallbackOnce() {
         Fixture().use { f ->
             val menu = f.inflate(R.menu.add_profile_menu)

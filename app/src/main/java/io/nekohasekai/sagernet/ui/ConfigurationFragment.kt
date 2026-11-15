@@ -1838,7 +1838,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                 runOnMainDispatcher { if (test.ownsSession()) latencyOverlay()?.empty(emptyLatencyMessage(request.scope)) }
                 return@launch
             }
-            testPool = Executors.newFixedThreadPool(DataStore.connectionTestConcurrent.coerceIn(1, 16)).asCoroutineDispatcher()
+            val workers = DataStore.connectionTestConcurrent.coerceIn(1, 16).coerceAtMost(profilesList.size)
+            testPool = Executors.newFixedThreadPool(workers).asCoroutineDispatcher()
             test.proxyN = profilesList.size
             test.targetIds.addAll(profilesList.map { it.id })
             val profiles = ConcurrentLinkedQueue(profilesList)
@@ -1850,15 +1851,21 @@ class ConfigurationFragment @JvmOverloads constructor(
                     latencyOverlay()?.running(0, profilesList.size, 0)
                 }
             }
-            repeat(DataStore.connectionTestConcurrent) {
+            repeat(workers) {
                 testJobs.add(launch(Dispatchers.IO) {
                     val urlTest = UrlTest(testPool!!)
                     while (isActive) {
                         val profile = profiles.poll() ?: break
                         if (!isActive) break
-                        try { profile.status = 1; profile.ping = urlTest.doTest(profile) }
+                        try {
+                            profile.ping = urlTest.doTest(profile)
+                            profile.status = 1
+                            profile.error = ""
+                        }
+                        catch (cancelled: CancellationException) { throw cancelled }
                         catch (e: PluginManager.PluginNotFoundException) { profile.status = 2; profile.error = e.readableMessage }
                         catch (e: Exception) { profile.status = 3; profile.error = e.readableMessage }
+                        ensureActive()
                         test.update(profile)
                     }
                 })
@@ -1872,10 +1879,12 @@ class ConfigurationFragment @JvmOverloads constructor(
         activeLatencyCancel = {
             if (test.dialogStatus.getAndSet(2) != 2) {
             test.finish(true)
-            runCatching { testPool?.close() }
+            // Keep the executor alive until its owned native workers have closed.
+            // Closing first can reject the very continuation needed for cleanup.
+            mainJob.cancel()
             runOnDefaultDispatcher {
-                mainJob.cancelAndJoin()
-                testJobs.forEach { it.cancelAndJoin() }
+                mainJob.join()
+                runCatching { testPool?.close() }
                 test.flushPending()
                 if (test.ownsSession()) {
                     activeLatencyIds.removeAll(test.targetIds); activeLatencyCancel = null; activeLatencyMinimize = null; DataStore.runningTest = false
