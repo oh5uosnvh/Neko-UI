@@ -1731,6 +1731,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         val generation = latencyGeneration.incrementAndGet()
         activeLatencyGeneration = generation
         val testJobs = mutableListOf<Job>()
+        val effectiveConcurrency = DataStore.connectionTestConcurrent.coerceIn(1, 16)
         var testPool: kotlinx.coroutines.ExecutorCoroutineDispatcher? = null
         val groupId = request.groupId
         val test = TestDialog(request, 0, generation)
@@ -1747,7 +1748,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 runOnMainDispatcher { if (test.ownsSession()) latencyOverlay()?.empty(emptyLatencyMessage(request.scope)) }
                 return@launch
             }
-            testPool = Executors.newFixedThreadPool(DataStore.connectionTestConcurrent.coerceIn(1, 16)).asCoroutineDispatcher()
+            testPool = Executors.newFixedThreadPool(effectiveConcurrency).asCoroutineDispatcher()
             test.proxyN = profilesList.size
             test.targetIds.addAll(profilesList.map { it.id })
             val profiles = ConcurrentLinkedQueue(profilesList)
@@ -1759,20 +1760,23 @@ class ConfigurationFragment @JvmOverloads constructor(
                     latencyOverlay()?.running(0, profilesList.size, 0)
                 }
             }
-            repeat(DataStore.connectionTestConcurrent) {
+            repeat(effectiveConcurrency) {
                 testJobs.add(launch(Dispatchers.IO) {
                     val urlTest = UrlTest(testPool!!)
                     while (isActive) {
                         val profile = profiles.poll() ?: break
                         if (!isActive) break
                         try { profile.status = 1; profile.ping = urlTest.doTest(profile) }
+                        catch (e: kotlinx.coroutines.CancellationException) { throw e }
                         catch (e: PluginManager.PluginNotFoundException) { profile.status = 2; profile.error = e.readableMessage }
                         catch (e: Exception) { profile.status = 3; profile.error = e.readableMessage }
+                        ensureActive()
                         test.update(profile)
                     }
                 })
             }
-            testJobs.joinAll(); testPool?.close(); test.finish(false); test.flushPending()
+            // Each doTest owns and joins its cleanup before a worker advances.
+            testJobs.joinAll(); test.finish(false); test.flushPending()
             if (test.ownsSession()) {
                 activeLatencyIds.removeAll(profilesList.map { it.id }.toSet()); DataStore.runningTest = false; activeLatencyCancel = null; activeLatencyMinimize = null
                 GroupManager.postReload(groupId)
@@ -1781,9 +1785,10 @@ class ConfigurationFragment @JvmOverloads constructor(
         activeLatencyCancel = {
             if (test.dialogStatus.getAndSet(2) != 2) {
             test.finish(true)
-            runCatching { testPool?.close() }
+            // Keep the executor alive until cancelled children finish cleanup.
+            mainJob.cancel()
             runOnDefaultDispatcher {
-                mainJob.cancelAndJoin()
+                mainJob.join()
                 testJobs.forEach { it.cancelAndJoin() }
                 test.flushPending()
                 if (test.ownsSession()) {

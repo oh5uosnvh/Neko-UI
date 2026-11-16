@@ -1,6 +1,5 @@
 package io.nekohasekai.sagernet.bg.proto
 
-import android.os.SystemClock
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.bg.AbstractInstance
 import io.nekohasekai.sagernet.bg.GuardedProcessPool
@@ -35,7 +34,7 @@ abstract class BoxInstance(
     val pluginConfigs = hashMapOf<Int, Pair<Int, String>>()
     val externalInstances = hashMapOf<Int, AbstractInstance>()
     open lateinit var processes: GuardedProcessPool
-    private var cacheFiles = ArrayList<File>()
+    private val cacheFiles = UrlTestTempFiles()
     fun isInitialized(): Boolean {
         return ::config.isInitialized && ::box.isInitialized
     }
@@ -76,12 +75,7 @@ abstract class BoxInstance(
                     is HysteriaBean -> {
                         initPlugin("hysteria-plugin")
                         pluginConfigs[port] = profile.type to bean.buildHysteria1Config(port) {
-                            File(
-                                app.cacheDir, "hysteria_" + SystemClock.elapsedRealtime() + ".ca"
-                            ).apply {
-                                parentFile?.mkdirs()
-                                cacheFiles.add(this)
-                            }
+                            cacheFiles.create(app.cacheDir, "hysteria_", ".ca")
                         }
                     }
                 }
@@ -107,12 +101,8 @@ abstract class BoxInstance(
                     }
 
                     bean is TrojanGoBean -> {
-                        val configFile = File(
-                            cacheDir, "trojan_go_" + SystemClock.elapsedRealtime() + ".json"
-                        )
-                        configFile.parentFile?.mkdirs()
+                        val configFile = cacheFiles.create(cacheDir, "trojan_go_", ".json")
                         configFile.writeText(config)
-                        cacheFiles.add(configFile)
 
                         val commands = mutableListOf(
                             initPlugin("trojan-go-plugin").path, "-config", configFile.absolutePath
@@ -122,13 +112,8 @@ abstract class BoxInstance(
                     }
 
                     bean is MieruBean -> {
-                        val configFile = File(
-                            cacheDir, "mieru_" + SystemClock.elapsedRealtime() + ".json"
-                        )
-
-                        configFile.parentFile?.mkdirs()
+                        val configFile = cacheFiles.create(cacheDir, "mieru_", ".json")
                         configFile.writeText(config)
-                        cacheFiles.add(configFile)
 
                         val envMap = mutableMapOf<String, String>()
                         envMap["MIERU_CONFIG_JSON_FILE"] = configFile.absolutePath
@@ -142,24 +127,14 @@ abstract class BoxInstance(
                     }
 
                     bean is NaiveBean -> {
-                        val configFile = File(
-                            cacheDir, "naive_" + SystemClock.elapsedRealtime() + ".json"
-                        )
-
-                        configFile.parentFile?.mkdirs()
+                        val configFile = cacheFiles.create(cacheDir, "naive_", ".json")
                         configFile.writeText(config)
-                        cacheFiles.add(configFile)
 
                         val envMap = mutableMapOf<String, String>()
 
                         if (bean.certificates.isNotBlank()) {
-                            val certFile = File(
-                                cacheDir, "naive_" + SystemClock.elapsedRealtime() + ".crt"
-                            )
-
-                            certFile.parentFile?.mkdirs()
+                            val certFile = cacheFiles.create(cacheDir, "naive_", ".crt")
                             certFile.writeText(bean.certificates)
-                            cacheFiles.add(certFile)
 
                             envMap["SSL_CERT_FILE"] = certFile.absolutePath
                         }
@@ -172,13 +147,8 @@ abstract class BoxInstance(
                     }
 
                     bean is HysteriaBean -> {
-                        val configFile = File(
-                            cacheDir, "hysteria_" + SystemClock.elapsedRealtime() + ".json"
-                        )
-
-                        configFile.parentFile?.mkdirs()
+                        val configFile = cacheFiles.create(cacheDir, "hysteria_", ".json")
                         configFile.writeText(config)
-                        cacheFiles.add(configFile)
 
                         val commands = mutableListOf(
                             initPlugin("hysteria-plugin").path,
@@ -211,7 +181,7 @@ abstract class BoxInstance(
             }
         }
 
-        cacheFiles.removeAll { it.delete(); true }
+        cacheFiles.deleteOwned()
 
         if (::processes.isInitialized) processes.close(GlobalScope + Dispatchers.IO)
 
