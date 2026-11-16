@@ -14,8 +14,17 @@ download_asset() {
     # official asset API serves the SAME pinned blob. Hashes below remain gates.
     if ! curl -fLSs --connect-timeout 20 --max-time 120 --retry 2 --retry-delay 2 -o "$output" "$primary"; then
         echo "Release endpoint unavailable; trying official asset API for $output" >&2
-        python3 "$ROOT/buildScript/download-github-asset.py" \
-            "https://api.github.com/repos/SagerNet/$repo/releases/assets/$asset_id" "$output"
+        if ! python3 "$ROOT/buildScript/download-github-asset.py" \
+            "https://api.github.com/repos/SagerNet/$repo/releases/assets/$asset_id" "$output"; then
+            # Upstream retired the pinned release. Recover the IDENTICAL database
+            # from our verified pre19 APK; the original DB hash below still gates it.
+            if [ ! -f pre19-original.apk ]; then
+                python3 "$ROOT/buildScript/download-github-asset.py" \
+                    "https://api.github.com/repos/oh5uosnvh/Neko-UI/releases/assets/730590493" pre19-original.apk
+                printf '%s\n' '1a1e101c53b4c7bf2e1eeb9cedffb23b7e5e7849044586e7c9f52832d77f4d56  pre19-original.apk' | sha256sum -c -
+            fi
+            unzip -p pre19-original.apk "assets/sing-box/$output.xz" | xz -dc > "$output"
+        fi
     fi
 }
 download_asset geoip.db "https://github.com/SagerNet/sing-geoip/releases/download/$VERSION_GEOIP/geoip.db" 511349217 sing-geoip
