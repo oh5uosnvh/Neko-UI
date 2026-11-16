@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="group_classification_all">一键归类</string>
+    <string name="group_classification_total">全部 %1$d 个分组</string>
+    <string name="group_classification_matches">匹配 %1$d 个分组</string>
+    <string name="group_classification_selected">已选 %1$d 个分组</string>
+    <string name="group_classification_empty">没有匹配的分组</string>
+    <string name="group_classification_saving">正在保存归类…</string>
+    <string name="group_classification_confirm_all">对全部 %1$d 个分组应用现有归类规则？所选分组从首次出现的位置连续排列，保留原有相对顺序；全选时现有顺序不变。不更改名称、配置或订阅来源。</string>
+    <string name="group_classification_confirm_matches">将这 %1$d 个匹配分组从首次匹配的位置连续排列？匹配分组与其他分组各自保留原有相对顺序。不更改名称、配置或订阅来源。</string>
+    <string name="group_classification_confirm_selected">将这 %1$d 个所选分组从首次选中的位置连续排列？所选分组与未选分组各自保留原有相对顺序。不更改名称、配置或订阅来源。</string>
+    <string name="group_classification_saved">归类已保存</string>
+    <string name="group_classification_failed">归类未能完成，已恢复数据库中的顺序，请重试。</string>
+</resources>

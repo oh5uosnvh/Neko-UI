@@ -40,6 +40,34 @@ import io.nekohasekai.sagernet.widget.UserAgentPreference
 @Suppress("EXPERIMENTAL_API_USAGE")
 object RawUpdater : GroupUpdater() {
 
+    /** Legacy Clash ws-path and mixed-case ws-opts.Path are both used by providers. */
+    private fun importWebSocketOptions(bean: StandardV2RayBean, proxy: Map<String, Any?>) {
+        bean.type = "ws"
+        bean.path = proxy["ws-path"]?.toString() ?: proxy["path"]?.toString()
+        fun headers(value: Any?) {
+            (value as? Map<*, *>)?.forEach { (name, header) ->
+                if (name?.toString()?.equals("host", ignoreCase = true) == true) {
+                    bean.host = header?.toString()
+                }
+            }
+        }
+        headers(proxy["ws-headers"])
+        val opts = proxy["ws-opts"] as? Map<*, *> ?: return
+        // Deterministic precedence: exact modern `path`, then mixed-case alias,
+        // then legacy ws-path. An explicitly empty modern path still wins.
+        val path = if (opts.containsKey("path")) opts.entries.first { it.key == "path" }
+            else opts.entries.firstOrNull { it.key?.toString()?.equals("path", true) == true }
+        if (path != null) bean.path = path.value?.toString()
+        opts.forEach { (name, value) ->
+            when (name?.toString()?.lowercase()) {
+                "headers" -> headers(value)
+                "max-early-data" -> bean.wsMaxEarlyData = value?.toString()?.toIntOrNull()
+                "early-data-header-name" -> bean.earlyDataHeaderName = value?.toString()
+                "v2ray-http-upgrade" -> if (value as? Boolean == true) bean.type = "httpupgrade"
+            }
+        }
+    }
+
     @SuppressLint("Recycle")
     override suspend fun doUpdate(
         proxyGroup: ProxyGroup,
@@ -530,8 +558,12 @@ object RawUpdater : GroupUpdater() {
 
                             bean.serverAddress = proxy["server"]?.toString() ?: continue
                             bean.serverPort = proxy["port"]?.toString()?.toIntOrNull() ?: continue
+                            val usesWebSocket = proxy["network"] == "ws"
 
                             for (opt in proxy) {
+                                // Ignore inactive transport blocks; YAML field order must
+                                // not replace the selected WS path with a foreign path.
+                                if (usesWebSocket && opt.key in setOf("ws-opts", "h2-opts", "http-opts", "grpc-opts")) continue
                                 when (opt.key) {
                                     "name" -> bean.name = opt.value?.toString()
                                     "password" -> if (bean is TrojanBean) {
@@ -809,6 +841,7 @@ object RawUpdater : GroupUpdater() {
                                     }
                                 }
                             }
+                            if (usesWebSocket) importWebSocketOptions(bean, proxy)
                             proxies.add(bean)
                         }
 

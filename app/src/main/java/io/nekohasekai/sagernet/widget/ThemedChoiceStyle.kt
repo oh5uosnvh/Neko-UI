@@ -34,9 +34,13 @@ object ThemedChoiceStyle {
             return@apply
         }
         val primary = color(context, R.attr.colorPrimary)
-        setColor(ColorUtils.setAlphaComponent(primary, (Color.alpha(primary) * FILL_ALPHA).toInt()))
+        val selectedFill = ColorUtils.setAlphaComponent(primary, (Color.alpha(primary) * FILL_ALPHA).toInt())
+        // Keep the selected card construction in one helper so ChoiceMenuPopup, FlMenu,
+        // and the navigation popup cannot drift in stroke width or theme color.
+        setColor(selectedFill)
         setStroke(
-            context.resources.getDimensionPixelSize(R.dimen.card_stroke_width_selected), primary,
+            context.resources.getDimensionPixelSize(R.dimen.card_stroke_width_selected),
+            primary,
         )
     }
 

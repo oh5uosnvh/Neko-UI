@@ -25,6 +25,18 @@ data class RuleEntity(
     var protocol: String = "",
     @ColumnInfo(name = "ruleset", defaultValue = "")
     var ruleset: String = "",
+    @ColumnInfo(name = "builtinKey", defaultValue = "")
+    var builtinKey: String = "",
+    @ColumnInfo(name = "sourceUrl", defaultValue = "")
+    var sourceUrl: String = "",
+    @ColumnInfo(name = "subscriptionState", defaultValue = "")
+    var subscriptionState: String = "",
+    @ColumnInfo(name = "lastUpdateError", defaultValue = "")
+    var lastUpdateError: String = "",
+    @ColumnInfo(name = "cachedRuleCount", defaultValue = "0")
+    var cachedRuleCount: Int = 0,
+    @ColumnInfo(name = "skippedRuleCount", defaultValue = "0")
+    var skippedRuleCount: Int = 0,
     var outbound: Long = 0,
     var packages: Set<String> = emptySet(),
 ) : Parcelable {
@@ -33,7 +45,33 @@ data class RuleEntity(
         return name.takeIf { it.isNotBlank() } ?: "Rule $id"
     }
 
+    /** Remote built-ins are not valid routing criteria until a usable cache exists. */
+    fun hasEffectiveCriteria(): Boolean {
+        return config.isNotBlank() || domains.isNotBlank() || ip.isNotBlank() ||
+            port.isNotBlank() || sourcePort.isNotBlank() || network.isNotBlank() ||
+            source.isNotBlank() || protocol.isNotBlank() || ruleset.isNotBlank() ||
+            packages.isNotEmpty()
+    }
+
+    fun shouldCompile(): Boolean {
+        return !(builtinKey.startsWith("remote_") &&
+            (cachedRuleCount <= 0 || !hasEffectiveCriteria()))
+    }
+
+    /** Clash payload records are alternatives, not a domain AND IP intersection. */
+    fun compiledAlternatives(): List<RuleEntity> {
+        if (!shouldCompile()) return emptyList()
+        if (builtinKey.startsWith("remote_") && domains.isNotBlank() && ip.isNotBlank()) {
+            return listOf(copy(ip = ""), copy(domains = ""))
+        }
+        return listOf(this)
+    }
+
     fun mkSummary(): String {
+        if (builtinKey.startsWith("remote_")) {
+            return if (cachedRuleCount > 0) app.getString(R.string.route_configured_rules, cachedRuleCount)
+            else app.getString(R.string.route_waiting_update)
+        }
         var summary = ""
         if (config.isNotBlank()) summary += "[config]\n"
         if (domains.isNotBlank()) summary += "$domains\n"
@@ -71,8 +109,17 @@ data class RuleEntity(
         @Query("SELECT * from rules WHERE (packages != '') AND enabled = 1")
         fun checkVpnNeeded(): List<RuleEntity>
 
-        @Query("SELECT * FROM rules ORDER BY userOrder")
+        @Query("SELECT * FROM rules ORDER BY userOrder, id")
         fun allRules(): List<RuleEntity>
+
+        @Query("SELECT * FROM rules WHERE builtinKey != '' ORDER BY userOrder, id")
+        fun builtinRules(): List<RuleEntity>
+
+        @Query("SELECT * FROM rules WHERE builtinKey = :key LIMIT 1")
+        fun builtin(key: String): RuleEntity?
+
+        @Query("UPDATE rules SET userOrder = :order WHERE id = :id")
+        fun updateBuiltinOrder(id: Long, order: Long): Int
 
         @Query("SELECT * FROM rules WHERE enabled = :enabled ORDER BY userOrder")
         fun enabledRules(enabled: Boolean = true): List<RuleEntity>
@@ -103,6 +150,12 @@ data class RuleEntity(
 
         @Query("UPDATE rules SET enabled = :enabled WHERE id = :ruleId")
         fun updateEnabled(ruleId: Long, enabled: Boolean): Int
+
+        @Query("UPDATE rules SET domains = :domains, ip = :ips, cachedRuleCount = :count, skippedRuleCount = :skipped, subscriptionState = 'ready', lastUpdateError = :diagnostic WHERE id = :id AND builtinKey = :key")
+        fun updateRemoteCache(id: Long, key: String, domains: String, ips: String, count: Int, skipped: Int, diagnostic: String): Int
+
+        @Query("UPDATE rules SET subscriptionState = CASE WHEN cachedRuleCount > 0 THEN 'stale' ELSE 'waiting' END, lastUpdateError = :diagnostic WHERE id = :id AND builtinKey = :key")
+        fun updateRemoteError(id: Long, key: String, diagnostic: String): Int
 
         @Query("UPDATE rules SET userOrder = :order WHERE id = :ruleId")
         fun updateOrder(ruleId: Long, order: Long): Int

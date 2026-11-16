@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="action_group_classification_all" type="id" />
+    <string name="group_classification_all">One-click classify</string>
+    <string name="group_classification_total">All %1$d groups</string>
+    <string name="group_classification_matches">%1$d matching groups</string>
+    <string name="group_classification_selected">%1$d selected</string>
+    <string name="group_classification_empty">No matching groups</string>
+    <string name="group_classification_saving">Saving classification…</string>
+    <string name="group_classification_confirm_all">Apply the existing classification to all %1$d groups? Selected groups stay together from their first position, retaining their original relative order. With all groups selected, the existing order stays unchanged. Names, profiles and subscription sources are not changed.</string>
+    <string name="group_classification_confirm_matches">Bring these %1$d matching groups together at the first matched position? Matching groups and all other groups each keep their original relative order. Names, profiles and subscription sources are not changed.</string>
+    <string name="group_classification_confirm_selected">Bring these %1$d selected groups together at the first selected position? Selected and unselected groups each keep their original relative order. Names, profiles and subscription sources are not changed.</string>
+    <string name="group_classification_saved">Classification saved</string>
+    <string name="group_classification_failed">Could not complete classification. The saved order has been restored; please retry.</string>
+</resources>

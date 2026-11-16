@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 
 @Database(
     entities = [ProxyGroup::class, ProxyEntity::class, RuleEntity::class],
-    version = 10,
+    version = 13,
     autoMigrations = [
         AutoMigration(from = 3, to = 4),
         AutoMigration(from = 4, to = 5),
@@ -48,17 +48,49 @@ abstract class SagerDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `groupOrderId` ON `proxy_entities` (`groupId`, `userOrder`, `id`)")
             }
         }
+
+        /** Direct, idempotent upgrade for pre19 DB10/11/12 to route-capable DB13. */
+        private fun routeMetadataMigration(from: Int) = object : Migration(from, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val columns = mutableSetOf<String>()
+                db.query("PRAGMA table_info(`rules`)").use { cursor ->
+                    val index = cursor.getColumnIndex("name")
+                    while (cursor.moveToNext()) if (index >= 0) columns += cursor.getString(index)
+                }
+                fun add(name: String, type: String = "TEXT") {
+                    if (name !in columns) {
+                        val defaultValue = if (type == "INTEGER") "0" else "''"
+                        db.execSQL("ALTER TABLE `rules` ADD COLUMN `$name` $type NOT NULL DEFAULT $defaultValue")
+                    }
+                }
+                add("builtinKey")
+                add("sourceUrl")
+                add("subscriptionState")
+                add("lastUpdateError")
+                add("cachedRuleCount", "INTEGER")
+                add("skippedRuleCount", "INTEGER")
+            }
+        }
+
+        private val MIGRATION_10_13_ROUTE_METADATA = routeMetadataMigration(10)
+        private val MIGRATION_11_13_ROUTE_METADATA = routeMetadataMigration(11)
+        private val MIGRATION_12_13_ROUTE_METADATA = routeMetadataMigration(12)
         @OptIn(DelicateCoroutinesApi::class)
         @Suppress("EXPERIMENTAL_API_USAGE")
         val instance by lazy {
             SagerNet.application.getDatabasePath(Key.DB_PROFILE).parentFile?.mkdirs()
             Room.databaseBuilder(SagerNet.application, SagerDatabase::class.java, Key.DB_PROFILE)
-                .addMigrations(MIGRATION_8_9_SAFE, MIGRATION_9_10_ORDER_INDEX)
+                .addMigrations(
+                    MIGRATION_8_9_SAFE,
+                    MIGRATION_9_10_ORDER_INDEX,
+                    MIGRATION_10_13_ROUTE_METADATA,
+                    MIGRATION_11_13_ROUTE_METADATA,
+                    MIGRATION_12_13_ROUTE_METADATA,
+                )
 //                .addMigrations(*SagerDatabase_Migrations.build())
                 .setJournalMode(JournalMode.TRUNCATE)
                 .allowMainThreadQueries()
                 .enableMultiInstanceInvalidation()
-                .fallbackToDestructiveMigration()
                 .setQueryExecutor { GlobalScope.launch { it.run() } }
                 .build()
         }

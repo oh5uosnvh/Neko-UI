@@ -2,12 +2,23 @@ package io.nekohasekai.sagernet.ui
 
 /** Stable partition used by group search classification. Selected items keep their order. */
 internal object GroupClassification {
+    /** Empty search means all groups, not a new name/type-based classification rule. */
+    fun <T> matches(source: List<T>, query: String, name: (T) -> String): List<T> {
+        val normalized = query.trim()
+        return if (normalized.isEmpty()) source.toList()
+        else source.filter { name(it).contains(normalized, ignoreCase = true) }
+    }
+
     fun <T> stackSelected(source: List<T>, selected: (T) -> Boolean): List<T> {
-        val first = source.indexOfFirst(selected)
+        // Evaluate each predicate once; both selected and unselected retain their relative order.
+        val flags = source.map(selected)
+        val first = flags.indexOfFirst { it }
         if (first < 0) return source.toList()
-        val prefix = source.take(first)
-        val chosen = source.drop(first).filter(selected)
-        val rest = source.drop(first).filterNot(selected)
-        return prefix + chosen + rest
+        val chosen = ArrayList<T>()
+        val rest = ArrayList<T>()
+        for (index in first until source.size) {
+            if (flags[index]) chosen.add(source[index]) else rest.add(source[index])
+        }
+        return source.take(first) + chosen + rest
     }
 }

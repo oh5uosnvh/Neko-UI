@@ -361,11 +361,18 @@ internal class FlMenuPopup(
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
             alpha = if (item.isEnabled) 1f else .45f
             background = StateListDrawable().apply {
+                if (item.isChecked) {
+                    addState(intArrayOf(android.R.attr.state_selected, android.R.attr.state_pressed),
+                        SelectedMenuBackground.fromColor(context, pressedColor, dp(12).toFloat()))
+                    addState(intArrayOf(android.R.attr.state_selected, android.R.attr.state_focused),
+                        SelectedMenuBackground.fromColor(context, pressedColor, dp(12).toFloat()))
+                    addState(intArrayOf(android.R.attr.state_selected),
+                        SelectedMenuBackground.fromSurface(context, surfaceColor, dp(12).toFloat(), .10f))
+                }
                 addState(intArrayOf(android.R.attr.state_pressed), round(pressedColor))
                 addState(intArrayOf(android.R.attr.state_focused), round(pressedColor))
                 addState(intArrayOf(), round(Color.TRANSPARENT))
             }
-            if (item.isChecked) background = round(selectedColor)
 
             item.icon?.constantState?.newDrawable()?.mutate()?.let {
                 DrawableCompat.setTint(it, if (item.isChecked) accentColor else titleColor)

@@ -21,6 +21,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProfileManager
+import io.nekohasekai.sagernet.database.RemoteRouteUpdater
 import io.nekohasekai.sagernet.database.RuleEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.databinding.LayoutEmptyRouteBinding
@@ -40,6 +41,12 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
     private var outboundPopup: ChoiceMenuPopup? = null
     private var pendingProfileRuleId = 0L
     private val savingOutbounds = hashSetOf<Long>()
+    private var updatingBuiltinRules = false
+
+    override fun onResume() {
+        super.onResume()
+        if (::ruleAdapter.isInitialized && view != null) viewLifecycleOwner.lifecycleScope.launch { ruleAdapter.reload() }
+    }
 
     private val chooseRuleProfile = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val ruleId = pendingProfileRuleId
@@ -204,17 +211,44 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 startActivity(Intent(context, RouteSettingsActivity::class.java))
             }
             R.id.action_reset_route -> {
-                MaterialAlertDialogBuilder(activity).setTitle(R.string.confirm)
-                    .setMessage(R.string.clear_profiles_message)
-                    .setPositiveButton(R.string.yes) { _, _ ->
+                MaterialAlertDialogBuilder(activity).setTitle(R.string.route_reset_title)
+                    .setMessage(R.string.route_reset_message)
+                    .setPositiveButton(R.string.route_reset) { _, _ ->
                         runOnDefaultDispatcher {
-                            SagerDatabase.rulesDao.reset()
-                            DataStore.rulesFirstCreate = false
+                            // Restore only the catalog entries; custom routes and manual rules survive.
+                            ProfileManager.ensureDefaultRoutes(reset = true)
                             ruleAdapter.reload()
                         }
                     }
-                    .setNegativeButton(R.string.no, null)
+                    .setNegativeButton(android.R.string.cancel, null)
                     .show()
+            }
+            R.id.action_update_builtin_routes -> {
+                if (updatingBuiltinRules) return true
+                updatingBuiltinRules = true
+                item.isEnabled = false
+                snackbar(R.string.route_updating).show()
+                viewLifecycleOwner.lifecycleScope.launch {
+                    try {
+                    val result = RemoteRouteUpdater.updateAllDetailed()
+                    ruleAdapter.reload()
+                    if (isAdded) {
+                        val count = result.succeeded.sumOf { it.second }
+                        val message = if (result.failed.isEmpty()) {
+                            getString(R.string.route_update_success, result.succeeded.size, count)
+                        } else getString(R.string.route_update_partial, result.succeeded.size, count,
+                            result.failed.size, result.failed.joinToString(", ") { it.first })
+                        MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.route_update_result)
+                            .setMessage(message).setPositiveButton(android.R.string.ok, null).show()
+                    }
+                    } finally {
+                        updatingBuiltinRules = false
+                        item.isEnabled = true
+                    }
+                }
+            }
+            R.id.action_route_rule_settings -> {
+                startActivity(Intent(requireContext(), RouteRulesSettingsActivity::class.java))
             }
             R.id.action_manage_assets -> {
                 startActivity(Intent(requireContext(), AssetsActivity::class.java))
@@ -416,6 +450,20 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 ))
                 routeOutbound.setOnClickListener { anchor ->
                     showQuickOutbound(anchor, rule.id, rule.outbound)
+                }
+                // A failed/empty fixed subscription keeps its card and offers a direct retry.
+                if (rule.builtinKey.startsWith("remote_") && rule.subscriptionState == "waiting") {
+                    routeOutbound.text = getString(R.string.route_retry_update)
+                    routeOutbound.setOnClickListener {
+                        lifecycleScope.launch {
+                            try {
+                                RemoteRouteUpdater.update(rule.builtinKey)
+                                ruleAdapter.reload()
+                            } catch (_: Exception) {
+                                if (isAdded) snackbar(getString(R.string.route_update_failed, rule.displayName())).show()
+                            }
+                        }
+                    }
                 }
 
                 itemView.setOnClickListener(null)

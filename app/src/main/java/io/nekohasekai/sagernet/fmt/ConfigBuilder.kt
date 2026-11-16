@@ -171,7 +171,11 @@ fun buildConfig(
         return list
     }
 
-    val extraRules = if (forTest) listOf() else SagerDatabase.rulesDao.enabledRules()
+    val extraRules = if (forTest) listOf() else SagerDatabase.rulesDao.enabledRules().flatMap { rule ->
+        // Ignore uncached sources and preserve Clash's domain OR IP semantics.
+        // Existing manually-created pre19 rules retain their exact old behavior.
+        rule.compiledAlternatives()
+    }
     val extraProxies =
         if (forTest) mapOf() else SagerDatabase.proxyDao.getEntities(extraRules.mapNotNull { rule ->
             rule.outbound.takeIf { it > 0 && it != proxy.id }

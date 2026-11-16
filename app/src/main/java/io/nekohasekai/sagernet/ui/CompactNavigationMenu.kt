@@ -17,6 +17,7 @@ import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import io.nekohasekai.sagernet.widget.AnimatedPopupWindow
 import io.nekohasekai.sagernet.widget.PopupEntrance
+import io.nekohasekai.sagernet.widget.SelectedMenuBackground
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupWindow
@@ -142,9 +143,15 @@ internal class CompactNavigationMenu(
                 isFocusable = true
                 alpha = if (item.isEnabled) 1f else .45f
                 background = StateListDrawable().apply {
+                    val selected = intArrayOf(android.R.attr.state_selected)
+                    fun outlined(fraction: Float) = SelectedMenuBackground.fromSurface(
+                        context, surfaceColor, dp(10).toFloat(), fraction,
+                    )
+                    addState(intArrayOf(android.R.attr.state_selected, android.R.attr.state_pressed), outlined(.18f))
+                    addState(intArrayOf(android.R.attr.state_selected, android.R.attr.state_focused), outlined(.14f))
+                    addState(selected, outlined(.10f))
                     addState(intArrayOf(android.R.attr.state_pressed), round(ColorUtils.blendARGB(surfaceColor, accent, .18f), 10))
                     addState(intArrayOf(android.R.attr.state_focused), round(ColorUtils.blendARGB(surfaceColor, accent, .14f), 10))
-                    addState(intArrayOf(android.R.attr.state_selected), round(ColorUtils.blendARGB(surfaceColor, accent, .10f), 10))
                     addState(intArrayOf(), round(Color.TRANSPARENT, 10))
                 }
                 setOnClickListener {

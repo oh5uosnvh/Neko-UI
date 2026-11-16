@@ -255,6 +255,10 @@ public abstract class StandardV2RayBean extends AbstractBean {
                 path = input.readString();
                 wsMaxEarlyData = input.readInt();
                 earlyDataHeaderName = input.readString();
+                // Read-only compatibility with WS beans saved by later builds.
+                // Keep pre19's format/behavior, but do not misread this extra
+                // string as the following TLS security field on an upgrade.
+                if (version >= 11) input.readString();
                 break;
             }
             case "http": {
