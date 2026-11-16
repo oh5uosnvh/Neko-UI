@@ -19,8 +19,7 @@ object DefaultRouteCatalog {
         val remoteUrl: String? = null,
     ) {
         val name: String get() = app.getString(nameRes)
-        // Preserve pre19's opt-in defaults for blocking and bypass rules.
-        val enabled: Boolean get() = remoteUrl != null
+        val enabled: Boolean get() = true
         // Remote YAML is parsed into domains/IPs by RemoteRouteUpdater; never feed it
         // to sing-box as a binary rule-set merely because it has a URL.
         val ruleset: String get() = ""

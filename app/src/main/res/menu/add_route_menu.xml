@@ -15,10 +15,6 @@
         android:title="@string/route_update_builtin"
         app:showAsAction="never" />
     <item
-        android:id="@+id/action_route_rule_settings"
-        android:title="@string/route_rules_settings"
-        app:showAsAction="never" />
-    <item
         android:id="@+id/action_manage_assets"
         android:title="@string/route_manage_assets"
         app:showAsAction="never" />

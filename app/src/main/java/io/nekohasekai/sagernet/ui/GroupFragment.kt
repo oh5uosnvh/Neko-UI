@@ -62,8 +62,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     private var groupSearchQuery = ""
     private var groupSearchBar: GroupSearchBar? = null
     private var groupSearchMode = false
-    private var classificationSaving = false
-    private var classificationDialog: androidx.appcompat.app.AlertDialog? = null
     private val searchBackCallback = object : androidx.activity.OnBackPressedCallback(false) {
         override fun handleOnBackPressed() = exitGroupSearchMode()
     }
@@ -71,8 +69,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     private fun updateGroupSearchActions() {
         if (!::groupAdapter.isInitialized) return
         groupSearchBar?.render(groupSearchQuery, groupAdapter.searchMatches().size,
-            groupAdapter.customSelection, selectedForClassification.size, saving = classificationSaving)
-        toolbar.menu.findItem(R.id.action_group_classification_all)?.isEnabled = !classificationSaving
+            groupAdapter.customSelection, selectedForClassification.size)
     }
     private val selectedForClassification = LinkedHashSet<Long>()
 
@@ -163,8 +160,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         if (hidden) {
             cancelGroupJump()
             dismissFilterPicker()
-            classificationDialog?.dismiss()
-            classificationDialog = null
         }
         else if (preparedGroupId > 0L) beginPreparedGroupJump()
     }
@@ -189,9 +184,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         ViewCompat.setOnApplyWindowInsetsListener(view, ListListener)
         toolbar.setTitle(R.string.menu_group)
         toolbar.inflateMenu(R.menu.add_group_menu)
-        // A dedicated labelled overflow item keeps the already busy toolbar/search input clear.
-        toolbar.menu.add(0, R.id.action_group_classification_all, 100, R.string.group_classification_all)
-            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
         toolbar.setOnMenuItemClickListener(this)
         requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, searchBackCallback)
 
@@ -226,7 +218,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder
             ): Int {
                 val proxyGroup = (viewHolder as GroupHolder).proxyGroup
-                if (classificationSaving || groupSearchMode || groupAdapter.customSelection || proxyGroup.ungrouped ||
+                if (groupSearchMode || groupAdapter.customSelection || proxyGroup.ungrouped ||
                     proxyGroup.id in GroupUpdater.updating) {
                     return 0
                 }
@@ -237,7 +229,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder
             ): Int {
                 val proxyGroup = (viewHolder as GroupHolder).proxyGroup
-                if (classificationSaving || groupSearchMode || groupAdapter.customSelection || proxyGroup.ungrouped ||
+                if (groupSearchMode || groupAdapter.customSelection || proxyGroup.ungrouped ||
                     proxyGroup.id in GroupUpdater.updating) {
                     return 0
                 }
@@ -309,15 +301,13 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 groupSearchQuery = query.trim()
                 groupAdapter.applyFilter()
             }, onClassify = ::openClassificationChoice, onClose = ::exitGroupSearchMode,
-                onConfirm = { confirmClassification(selectedForClassification.toList(), custom = true) })
+                onConfirm = { saveClassification(selectedForClassification.toList()) })
         }
         groupAdapter.applyFilter()
     }
 
     private fun exitGroupSearchMode() {
-        if (!groupSearchMode || classificationSaving) return
-        classificationDialog?.dismiss()
-        classificationDialog = null
+        if (!groupSearchMode) return
         groupSearchMode = false
         searchBackCallback.isEnabled = false
         groupSearchBar?.detach()
@@ -329,96 +319,78 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     }
 
     private fun openClassificationChoice() {
+        val matched = groupAdapter.searchMatches()
+        if (matched.isEmpty()) return
         if (groupSearchQuery.isBlank()) {
-            // Selecting every group preserves the entire order and is a no-op.
-            // With no query, let the user choose the groups to bring together.
-            selectedForClassification.clear()
-            groupAdapter.customSelection = true
-            updateGroupSearchActions()
-            groupAdapter.notifyDataSetChanged()
-        } else {
-            confirmClassification(groupAdapter.searchMatches().map { it.id })
-        }
-    }
-
-    private fun confirmClassification(ids: List<Long>, allGroups: Boolean = false, custom: Boolean = false) {
-        if (classificationSaving || classificationDialog?.isShowing == true) return
-        if (ids.isEmpty()) {
-            activity.snackbar(R.string.group_classification_empty).show()
+            val original = groupAdapter.currentOrderIds()
+            val proposed = groupAdapter.classifySimilarOrder()
+            if (proposed.map { it.id } == original) {
+                activity.snackbar(R.string.group_classify_no_matches).show()
+                return
+            }
+            val names = GroupClassification.previewText(proposed) { it.displayName() }
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.group_classify_preview_title)
+                .setMessage(getString(R.string.group_classify_preview_message, names))
+                .setNegativeButton(R.string.group_classify_cancel, null)
+                .setPositiveButton(R.string.group_classify_confirm) { _, _ ->
+                    commitClassification(original, proposed.map { it.id })
+                }.show()
             return
         }
-        val classifyAll = allGroups || (!custom && groupSearchQuery.isBlank())
-        val title = if (classifyAll) R.string.group_classification_all else R.string.group_classify
-        val message = getString(when {
-            custom -> R.string.group_classification_confirm_selected
-            classifyAll -> R.string.group_classification_confirm_all
-            else -> R.string.group_classification_confirm_matches
-        }, ids.size)
-        val builder = MaterialAlertDialogBuilder(requireContext())
-            .setTitle(title)
-            .setMessage(message)
-            .setPositiveButton(R.string.group_classify_confirm) { _, _ -> saveClassification(ids) }
-            .setNegativeButton(R.string.group_classify_cancel, null)
-        if (groupSearchMode && !custom) {
-            builder.setNeutralButton(R.string.group_classify_custom) { _, _ ->
-                selectedForClassification.clear()
-                groupAdapter.customSelection = true
-                updateGroupSearchActions()
-                groupAdapter.notifyDataSetChanged()
-            }
-        }
-        classificationDialog = builder.create().also { dialog ->
-            dialog.setOnDismissListener { if (classificationDialog === dialog) classificationDialog = null }
-            dialog.show()
-        }
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.group_classify)
+            .setItems(arrayOf(
+                getString(R.string.group_classify_confirm),
+                getString(R.string.group_classify_cancel),
+                getString(R.string.group_classify_custom),
+            )) { _, which ->
+                when (which) {
+                    0 -> saveClassification(matched.map { it.id })
+                    1 -> Unit
+                    2 -> {
+                        selectedForClassification.clear()
+                        groupAdapter.customSelection = true
+                        updateGroupSearchActions()
+                        groupAdapter.notifyDataSetChanged()
+                    }
+                }
+            }.show()
     }
 
     private fun saveClassification(ids: List<Long>) {
-        if (classificationSaving || ids.isEmpty()) return
-        // Revalidate IDs: query edits/deletions while a dialog is open cannot classify new matches.
-        val eligible = if (groupSearchMode) groupAdapter.searchMatches().map { it.id }.toSet()
-            else groupAdapter.classificationIds().toSet()
-        val selected = ids.filter { it in eligible }.toSet()
-        if (selected.isEmpty()) {
-            activity.snackbar(R.string.group_classification_empty).show()
-            return
-        }
+        if (ids.isEmpty()) return
+        val selected = ids.toSet()
         val reordered = groupAdapter.classifyOrder(selected)
-        val adapterAtSave = groupAdapter
-        classificationSaving = true
-        updateGroupSearchActions()
-        GroupOrderStore.submit(reordered.map { it.id }) { result ->
-            classificationSaving = false
-            result.error?.let { Logs.w(it) }
-            // The FIFO writer outlives the view. Never refresh a detached or replacement adapter.
-            if (view == null) return@submit
-            if (groupAdapter !== adapterAtSave) {
-                updateGroupSearchActions()
-                return@submit
-            }
-            result.groups?.let { adapterAtSave.reconcileClassification(it) }
-            updateGroupSearchActions()
-            if (result.error != null) {
-                // Keep search/selection for retry; the returned database snapshot is authoritative.
-                activity.snackbar(R.string.group_classification_failed).show()
+        commitClassification(groupAdapter.currentOrderIds(), reordered.map { it.id })
+    }
+
+    private fun commitClassification(original: List<Long>, reordered: List<Long>) {
+        if (original == reordered) return
+        val host = activity as? MainActivity ?: return
+        GroupOrderStore.submit(reordered) { result ->
+            val error = result.error
+            if (error != null) {
+                Logs.w(error)
+                host.snackbar(error.localizedMessage ?: "归类保存失败").show()
             } else {
-                // Show the persisted manual order rather than masking it with expiry sorting.
-                sortMode = SORT_DEFAULT
-                exitGroupSearchMode()
-                adapterAtSave.applyFilter()
-                activity.snackbar(R.string.group_classification_saved).show()
+                host.snackbar(R.string.group_classify_reordered).setAction(R.string.undo) {
+                    GroupOrderStore.submit(original) { restored ->
+                        restored.error?.let {
+                            Logs.w(it)
+                            host.snackbar(it.localizedMessage ?: "还原失败").show()
+                        }
+                    }
+                }.show()
             }
         }
+        exitGroupSearchMode()
+        host.displayFragmentWithId(R.id.nav_group)
     }
 
     override fun onMenuItemClick(item: MenuItem): Boolean {
         when (item.itemId) {
             R.id.action_group_search -> enterGroupSearchMode()
-            R.id.action_group_classification_all -> {
-                enterGroupSearchMode()
-                // Empty query: choose explicitly; search query: classify its matches.
-                // Do not report success for the old all-selected/no-change operation.
-            }
             R.id.action_new_group -> {
                 if (!groupSearchMode) {
                     startActivity(Intent(context, GroupSettingsActivity::class.java).apply {
@@ -606,15 +578,15 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         var customSelection = false
 
         fun searchMatches(): List<ProxyGroup> {
-            val candidates = if (groupSearchQuery.isBlank()) fullList.toList() else fullList.filter {
-                filterSubscription == null || (it.type == GroupType.SUBSCRIPTION) == filterSubscription
-            }
-            return GroupClassification.matches(candidates, groupSearchQuery) { it.displayName() }
+            val q = groupSearchQuery.trim()
+            val candidates = fullList.filter { filterSubscription == null ||
+                (it.type == GroupType.SUBSCRIPTION) == filterSubscription }
+            if (q.isEmpty()) return candidates
+            return candidates.filter { it.displayName().contains(q, ignoreCase = true) }
         }
 
         fun applyCustomSelection(group: ProxyGroup): Boolean {
             if (!customSelection) return false
-            if (classificationSaving) return true
             if (!group.displayName().contains(groupSearchQuery.trim(), ignoreCase = true)) return true
             if (selectedForClassification.contains(group.id)) selectedForClassification.remove(group.id)
             else selectedForClassification.add(group.id)
@@ -623,15 +595,19 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             return true
         }
 
-        fun classificationIds(): List<Long> = fullList.map { it.id }
-
         fun classifyOrder(ids: Set<Long>): List<ProxyGroup> =
             GroupClassification.stackSelected(fullList.toList()) { it.id in ids }
 
-        fun reconcileClassification(groups: List<ProxyGroup>) {
-            // Preserve locally pending swipe deletions and hidden ungrouped rows.
-            val present = fullList.map { it.id }.toSet()
-            submitGroups(groups.filter { it.id in present })
+        fun currentOrderIds(): List<Long> = fullList.map { it.id }
+
+        fun classifySimilarOrder(): List<ProxyGroup> {
+            val root = fullList.toList()
+            val eligible = root.filter { filterSubscription == null ||
+                (it.type == GroupType.SUBSCRIPTION) == filterSubscription }
+            val clustered = GroupClassification.stableClusterOrder(eligible) { it.displayName() }
+            val byId = root.associateBy { it.id }
+            return GroupClassification.mergeSubsetOrder(root.map { it.id }, clustered.map { it.id })
+                .mapNotNull { byId[it] }
         }
 
         fun submitGroups(groups: List<ProxyGroup>) {
@@ -912,8 +888,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     }
 
     override fun onDestroyView() {
-        classificationDialog?.dismiss()
-        classificationDialog = null
         groupSearchBar?.detach()
         groupSearchBar = null
         groupSearchMode = false

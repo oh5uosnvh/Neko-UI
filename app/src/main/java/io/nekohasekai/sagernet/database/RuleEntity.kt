@@ -67,30 +67,17 @@ data class RuleEntity(
         return listOf(this)
     }
 
+    /** pre25 list summary; full criteria stay in the per-rule editor. */
     fun mkSummary(): String {
+        if (packages.isNotEmpty()) return app.getString(R.string.apps_message, packages.size)
         if (builtinKey.startsWith("remote_")) {
             return if (cachedRuleCount > 0) app.getString(R.string.route_configured_rules, cachedRuleCount)
             else app.getString(R.string.route_waiting_update)
         }
-        var summary = ""
-        if (config.isNotBlank()) summary += "[config]\n"
-        if (domains.isNotBlank()) summary += "$domains\n"
-        if (ip.isNotBlank()) summary += "$ip\n"
-        if (source.isNotBlank()) summary += "src ip: $source\n"
-        if (sourcePort.isNotBlank()) summary += "src port: $sourcePort\n"
-        if (port.isNotBlank()) summary += "dst port: $port\n"
-        if (network.isNotBlank()) summary += "network: $network\n"
-        if (protocol.isNotBlank()) summary += "protocol: $protocol\n"
-        if (ruleset.isNotBlank()) summary += "$ruleset\n"
-        if (packages.isNotEmpty()) summary += app.getString(
-            R.string.apps_message, packages.size
-        ) + "\n"
-        val lines = summary.trim().split("\n")
-        return if (lines.size > 3) {
-            lines.subList(0, 3).joinToString("\n", postfix = "\n...")
-        } else {
-            summary.trim()
-        }
+        val count = listOf(config, domains, ip, source, sourcePort, port, network, protocol, ruleset)
+            .sumOf { value -> value.lineSequence().count { it.trim().isNotEmpty() } }
+        return if (count > 0) app.getString(R.string.route_configured_rules, count)
+        else app.getString(R.string.route_configured)
     }
 
     fun displayOutbound(): String {

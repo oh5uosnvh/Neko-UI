@@ -247,9 +247,6 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                     }
                 }
             }
-            R.id.action_route_rule_settings -> {
-                startActivity(Intent(requireContext(), RouteRulesSettingsActivity::class.java))
-            }
             R.id.action_manage_assets -> {
                 startActivity(Intent(requireContext(), AssetsActivity::class.java))
             }

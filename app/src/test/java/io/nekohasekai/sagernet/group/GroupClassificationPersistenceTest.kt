@@ -36,7 +36,7 @@ class GroupClassificationPersistenceTest {
         val db = database()
         try {
             val source = seed(db)
-            val matches = GroupClassification.matches(source, " airport ") { it.displayName() }.map { it.id }.toSet()
+            val matches = source.filter { it.displayName().contains("airport", ignoreCase = true) }.map { it.id }.toSet()
             val reordered = GroupClassification.stackSelected(source) { it.id in matches }
             val saved = GroupOrderStore.save(db, reordered.map { it.id })
             assertEquals(listOf(source[0].id, source[1].id, source[3].id, source[2].id, source[4].id),
@@ -53,15 +53,20 @@ class GroupClassificationPersistenceTest {
         } finally { db.close() }
     }
 
-    @Test fun allGroupsClassificationKeepsExistingOrderAndOnlyUsesOrderWrites() {
+    @Test fun pre25OneClickClustersRelatedNamesPersistsAndCanUndo() {
         val db = database()
         try {
             val source = seed(db)
-            val matches = GroupClassification.matches(source, "") { it.displayName() }.map { it.id }.toSet()
-            val reordered = GroupClassification.stackSelected(source) { it.id in matches }
-            assertEquals(source.map { it.id }, reordered.map { it.id })
-            assertTrue(GroupOrderStore.save(db, reordered.map { it.id }).changed.isEmpty())
-            assertEquals(source.map { it.name }, db.groupDao().allGroups().map { it.name })
+            source[1].name = "Bitz Net"
+            source[3].name = "Bitz Net(2)"
+            source.forEach { db.groupDao().updateGroup(it) }
+            val reordered = GroupClassification.stableClusterOrder(source) { it.displayName() }
+            assertEquals(listOf(source[0].id, source[1].id, source[3].id, source[2].id, source[4].id), reordered.map { it.id })
+            GroupOrderStore.save(db, reordered.map { it.id })
+            assertEquals(reordered.map { it.id }, db.groupDao().allGroups().map { it.id })
+            source.forEach { assertEquals(it.name, db.groupDao().getById(it.id)!!.name) }
+            GroupOrderStore.save(db, source.map { it.id })
+            assertEquals(source.map { it.id }, db.groupDao().allGroups().map { it.id })
         } finally { db.close() }
     }
 
@@ -69,12 +74,12 @@ class GroupClassificationPersistenceTest {
         val db = database()
         try {
             val source = seed(db)
-            val matches = GroupClassification.matches(source, "airport") { it.displayName() }
+            val matches = source.filter { it.displayName().contains("airport", ignoreCase = true) }
             // Dialog preparation is ID-only; cancelling never calls GroupOrderStore.submit/save.
             GroupClassification.stackSelected(source) { row -> matches.any { it.id == row.id } }
             assertEquals(source.map { it.id }, db.groupDao().allGroups().map { it.id })
             assertEquals(source.map { it.userOrder }, db.groupDao().allGroups().map { it.userOrder })
-            assertTrue(GroupClassification.matches(source, "missing") { it.displayName() }.isEmpty())
+            assertTrue(source.none { it.displayName().contains("missing", ignoreCase = true) })
         } finally { db.close() }
     }
 }
