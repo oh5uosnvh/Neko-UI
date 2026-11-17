@@ -485,7 +485,11 @@ fun buildConfig(
                         }
                     }
 
-                    if (needGlobal && DataStore.enableTLSFragment) {
+                    // 026: URLTest 不套 TLS 分片。分片是抗封锁手段，只应作用于
+                    // 实际代理链路；测速探针若走分片 detour，每次冷握手都要为
+                    // 分片间隔付额外开销，还可能顶到 boxapi 的 3 秒阶段超时，
+                    // 把本可达的节点误报成「超时」。
+                    if (needGlobal && !forTest && DataStore.enableTLSFragment) {
                         val outboundMap = currentOutbound.asMap()
                         val tlsOptions = outboundMap["tls"] as? Map<*, *>
                         if (tlsOptions?.get("enabled") == true) {
@@ -571,7 +575,7 @@ fun buildConfig(
 
                             // no chain rule and not outbound, so need to set to direct
                             if (index == profileList.lastIndex) {
-                                if (DataStore.enableTLSFragment) {
+                                if (DataStore.enableTLSFragment && !forTest) {
                                     route.rules.add(Rule_DefaultOptions().apply {
                                         network = listOf("tcp")
                                         inbound = listOf(tag)
@@ -880,7 +884,7 @@ fun buildConfig(
             type = "direct"
         })
 
-        if (DataStore.enableTLSFragment) {
+        if (DataStore.enableTLSFragment && !forTest) {
             val fragmentOutbound = Outbound().apply {
                 tag = TAG_FRAGMENT
                 type = "direct"

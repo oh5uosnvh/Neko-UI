@@ -11,9 +11,10 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/matsuridayo/libneko/protect_server"
+	"github.com/matsuridayo/libneko/speedtest"
+	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/boxapi"
 	"github.com/sagernet/sing-box/experimental/libbox/platform"
 	"github.com/sagernet/sing-box/protocol/group"
@@ -21,7 +22,6 @@ import (
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/common/conntrack"
 	"github.com/sagernet/sing-box/common/dialer"
-	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/service"
@@ -71,7 +71,6 @@ type BoxInstance struct {
 	access sync.Mutex
 
 	*box.Box
-	ctx    context.Context
 	cancel context.CancelFunc
 	state  int
 
@@ -112,7 +111,6 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 
 	b = &BoxInstance{
 		Box:          instance,
-		ctx:          ctx,
 		cancel:       cancel,
 		pauseManager: service.FromContext[pause.Manager](ctx),
 	}
@@ -217,46 +215,23 @@ func (b *BoxInstance) SelectOutbound(tag string) bool {
 
 func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err error) {
 	defer device.DeferPanicToError("box.UrlTest", func(err_ error) { err = err_ })
-	if timeout <= 0 {
-		return 0, errors.New("invalid probe timeout")
-	}
+	var connectionTracker adapter.ConnectionTracker
+	// test i
 	if i != nil {
-		return officialURLTest(i.ctx, i.Box, link, timeout)
+		if i.v2api != nil {
+			connectionTracker = i.v2api.StatsService()
+		}
+		return speedtest.UrlTest(boxapi.CreateProxyHttpClient(i.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
 	}
-	if mainInstance != nil {
-		return officialURLTest(mainInstance.ctx, mainInstance.Box, link, timeout)
+	// test direct
+	if mainInstance == nil {
+		return speedtest.UrlTest(boxapi.CreateProxyHttpClient(nil, nil), link, timeout, speedtest.UrlTestStandard_RTT)
 	}
-	// With no core there is no sing-box outbound. Keep the direct fallback as
-	// one disposable HEAD request, with the user timeout as its only deadline.
-	return probeHTTP(context.Background(), boxapi.CreateProxyHttpClient(nil, nil), link, timeout)
-}
-
-func officialURLTest(parent context.Context, instance *box.Box, link string, timeout int32) (int32, error) {
-	if instance == nil || instance.Outbound() == nil || instance.Outbound().Default() == nil {
-		return 0, errors.New("missing default outbound")
+	// test mainInstance
+	if mainInstance.v2api != nil {
+		connectionTracker = mainInstance.v2api.StatsService()
 	}
-	outbound := instance.Outbound().Default()
-	ctx := context.WithValue(parent, "nb4a_no_concurrent_dial", true)
-	budget := time.Duration(timeout) * time.Millisecond
-	// 026: 两段式测量（Clash unified-delay 语义）。第一段建立出站路径：
-	// 节点域名解析、TCP/TLS、协议会话握手。冷握手时间被整段计费时，
-	// 批量测速恒比已连接节点的控制条手动测试高数百毫秒（手动测试复用
-	// 已建立的会话，不付这笔开销）。预热结果丢弃；节点不可达在预热段
-	// 即失败返回，不额外消耗第二段预算。
-	warmCtx, warmCancel := context.WithTimeout(ctx, budget)
-	_, warmErr := urltest.URLTest(warmCtx, link, outbound)
-	warmCancel()
-	if warmErr != nil {
-		return 0, warmErr
-	}
-	// 第二段测量热路径延迟：与用户在已连接节点上手动测到的数值一致。
-	measureCtx, measureCancel := context.WithTimeout(ctx, budget)
-	defer measureCancel()
-	delay, err := urltest.URLTest(measureCtx, link, outbound)
-	if err != nil {
-		return 0, err
-	}
-	return int32(delay), nil
+	return speedtest.UrlTest(boxapi.CreateProxyHttpClient(mainInstance.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
 }
 
 var protectCloser io.Closer
