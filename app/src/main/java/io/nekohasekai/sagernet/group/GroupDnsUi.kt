@@ -12,13 +12,27 @@ object GroupDnsUi {
     )
 
     /** Only extract supported DNS fields, never the source document or node credentials. */
-    fun automatic(imported: String?): Automatic = try {
-        automatic(SubscriptionDns.fromDocument(SubscriptionDns.loadDocument(imported.orEmpty())))
+    fun automatic(imported: String?): Automatic = automatic(imported, null)
+
+    /**
+     * nodeDomains = null keeps the full imported hosts table (legacy display).
+     * A non-null list — even empty — restricts the domain mapping display to
+     * entries that can actually apply to one of the group's node server
+     * domains. Unrelated provider hosts (Google push, DoH bootstrap) are not
+     * node mappings and must not appear in the mapping editor.
+     */
+    fun automatic(imported: String?, nodeDomains: Collection<String>?): Automatic = try {
+        automatic(
+            SubscriptionDns.fromDocument(SubscriptionDns.loadDocument(imported.orEmpty())),
+            nodeDomains,
+        )
     } catch (_: IllegalArgumentException) {
         Automatic()
     }
 
-    fun automatic(config: SubscriptionDns.Config): Automatic {
+    fun automatic(config: SubscriptionDns.Config): Automatic = automatic(config, null)
+
+    fun automatic(config: SubscriptionDns.Config, nodeDomains: Collection<String>?): Automatic {
         fun compact(values: Map<String, List<String>>): Map<String, Any> =
             values.mapValues { (_, items) -> if (items.size == 1) items.first() else items }
         val privateText = when {
@@ -28,11 +42,15 @@ object GroupDnsUi {
                 if (config.serverPolicy.isNotEmpty()) add("proxy-server-nameserver-policy: " + SubscriptionDns.dumpFlow(compact(config.serverPolicy)))
             }.joinToString("\n")
         }
+        val hosts = when (nodeDomains) {
+            null -> config.hosts
+            else -> SubscriptionDns.nodeRelevantHosts(config.hosts, nodeDomains)
+        }
         return Automatic(
             server = config.serverDns.joinToString("\n"),
             direct = config.directDns.joinToString("\n"),
             privateDns = privateText,
-            hosts = if (config.hosts.isEmpty()) "" else SubscriptionDns.dump(compact(config.hosts)).trimEnd(),
+            hosts = if (hosts.isEmpty()) "" else SubscriptionDns.dump(compact(hosts)).trimEnd(),
         )
     }
 

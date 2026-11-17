@@ -16,6 +16,7 @@ import java.net.InetAddress;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -410,6 +411,19 @@ public final class SubscriptionDns {
             if (matches(key, host) && (best == null || specificity(key) > specificity(best))) best = key;
         }
         return best;
+    }
+    /** Keep only hosts entries that can apply to one of the given node server domains. */
+    public static Map<String, List<String>> nodeRelevantHosts(Map<String, List<String>> hosts, Collection<String> nodeDomains) {
+        Map<String, List<String>> result = new LinkedHashMap<>();
+        if (nodeDomains == null || hosts == null || hosts.isEmpty()) return result;
+        for (String raw : new LinkedHashSet<>(nodeDomains)) {
+            if (raw == null) continue;
+            String node = raw.trim();
+            if (node.isEmpty() || isIp(node)) continue;
+            String key = bestMatch(hosts, node);
+            if (key != null && !result.containsKey(key)) result.put(key, hosts.get(key));
+        }
+        return result;
     }
     private static void validateAliases(Map<String, List<String>> hosts) {
         for (String start : hosts.keySet()) {

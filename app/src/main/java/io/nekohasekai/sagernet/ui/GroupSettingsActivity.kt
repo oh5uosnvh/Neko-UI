@@ -30,6 +30,7 @@ import io.nekohasekai.sagernet.group.GroupDnsUi
 import io.nekohasekai.sagernet.group.GroupUpdater
 import io.nekohasekai.sagernet.group.SubscriptionDns
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.ktx.isIpAddress
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.widget.HostsSwapPreference
@@ -251,7 +252,7 @@ class GroupSettingsActivity(
             true
         }
 
-        automaticDns = GroupDnsUi.automatic(DataStore.subscriptionImportedDns)
+        automaticDns = GroupDnsUi.automatic(DataStore.subscriptionImportedDns, nodeServerDomains())
         dnsPreferences.clear()
         hostsPreference = findPreference<HostsSwapPreference>(Key.SUBSCRIPTION_HOSTS)!!.apply {
             onSwap = { swapHostsMapping() }
@@ -309,6 +310,24 @@ class GroupSettingsActivity(
         configureDnsPreference(Key.SUBSCRIPTION_PRIVATE_DNS)
         configureDnsPreference(Key.SUBSCRIPTION_HOSTS)
         refreshHostsWidget()
+    }
+
+    /**
+     * Server domains of this group's nodes (original dial names, not mapped
+     * IPs). The domain mapping editor only shows hosts entries related to
+     * these; provider junk like Google push or DoH bootstrap never qualifies.
+     */
+    private fun nodeServerDomains(): List<String> {
+        val groupId = DataStore.editingId
+        if (groupId <= 0L) return emptyList()
+        return runCatching {
+            SagerDatabase.proxyDao.getByGroup(groupId).mapNotNull { entity ->
+                val bean = entity.requireBean()
+                val origin = bean.mappedOriginalAddress.takeIf { !it.isNullOrBlank() }
+                    ?: bean.serverAddress
+                origin?.takeIf { it.isNotBlank() && !it.isIpAddress() }
+            }
+        }.getOrDefault(emptyList()).distinct()
     }
 
     private fun dnsState(
@@ -612,7 +631,7 @@ class GroupSettingsActivity(
                 refreshHostsWidget()
             }
             "subscriptionImportedDns" -> runOnUiThread {
-                automaticDns = GroupDnsUi.automatic(DataStore.subscriptionImportedDns)
+                automaticDns = GroupDnsUi.automatic(DataStore.subscriptionImportedDns, nodeServerDomains())
                 refreshDnsSummaries()
                 refreshHostsWidget()
             }
