@@ -51,10 +51,13 @@ class NodeRelevantHostsTest {
     }
 
     @Test fun ipServerAddressesNeverMatchAnything() {
+        // An IP-shaped node address must be skipped entirely, and a node whose
+        // best match is the exact entry must not drag the wider wildcard in.
         val hosts = SubscriptionDns.nodeRelevantHosts(
             importedHosts(), listOf("laura.akibalon.online", "142.250.157.188"),
         )
-        assertEquals(setOf("laura.akibalon.online", "+.akibalon.online"), hosts.keys)
+        assertEquals(setOf("laura.akibalon.online"), hosts.keys)
+        assertFalse(hosts.containsKey("+.akibalon.online"))
     }
 
     @Test fun explicitEmptyNodeListShowsNoMapping() {
