@@ -235,12 +235,24 @@ func officialURLTest(parent context.Context, instance *box.Box, link string, tim
 	if instance == nil || instance.Outbound() == nil || instance.Outbound().Default() == nil {
 		return 0, errors.New("missing default outbound")
 	}
-	ctx, cancel := context.WithTimeout(
-		context.WithValue(parent, "nb4a_no_concurrent_dial", true),
-		time.Duration(timeout)*time.Millisecond,
-	)
-	defer cancel()
-	delay, err := urltest.URLTest(ctx, link, instance.Outbound().Default())
+	outbound := instance.Outbound().Default()
+	ctx := context.WithValue(parent, "nb4a_no_concurrent_dial", true)
+	budget := time.Duration(timeout) * time.Millisecond
+	// 026: 两段式测量（Clash unified-delay 语义）。第一段建立出站路径：
+	// 节点域名解析、TCP/TLS、协议会话握手。冷握手时间被整段计费时，
+	// 批量测速恒比已连接节点的控制条手动测试高数百毫秒（手动测试复用
+	// 已建立的会话，不付这笔开销）。预热结果丢弃；节点不可达在预热段
+	// 即失败返回，不额外消耗第二段预算。
+	warmCtx, warmCancel := context.WithTimeout(ctx, budget)
+	_, warmErr := urltest.URLTest(warmCtx, link, outbound)
+	warmCancel()
+	if warmErr != nil {
+		return 0, warmErr
+	}
+	// 第二段测量热路径延迟：与用户在已连接节点上手动测到的数值一致。
+	measureCtx, measureCancel := context.WithTimeout(ctx, budget)
+	defer measureCancel()
+	delay, err := urltest.URLTest(measureCtx, link, outbound)
 	if err != nil {
 		return 0, err
 	}
