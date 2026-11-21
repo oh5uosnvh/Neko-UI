@@ -24,14 +24,15 @@ android {
     }
     testOptions {
         unitTests.isIncludeAndroidResources = true
-        unitTests.all {
-            // Explicitly forward to the Test worker; Gradle's -D properties are not inherited.
-            systemProperty(
+        unitTests.all { test ->
+            // Explicitly forward to the Test worker; this Android callback takes
+            // an argument, not a Kotlin receiver Test object.
+            test.systemProperty(
                 "neko.config.fixtureDir",
                 System.getProperty("neko.config.fixtureDir")
                     ?: layout.buildDirectory.dir("generated/configbuilder-fixtures").get().asFile.absolutePath,
             )
-            systemProperty("neko.config.repoDir", rootProject.projectDir.absolutePath)
+            test.systemProperty("neko.config.repoDir", rootProject.projectDir.absolutePath)
         }
     }
     buildFeatures {
