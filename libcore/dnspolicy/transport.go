@@ -168,7 +168,7 @@ func New(ctx context.Context, _ log.ContextLogger, tag string, options Options) 
 		preferred: make(map[string]int), slots: make(chan struct{}, 64),
 	}, nil
 }
-func (t *Transport) Start(stage adapter.StartStage) error {
+func (t *Transport) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
@@ -348,4 +348,13 @@ func (t *Transport) Exchange(ctx context.Context, message *dns.Msg) (*dns.Msg, e
 	}
 	response.Id = message.Id
 	return response, nil
+}
+
+func (t *Transport) Reset() {
+	t.choiceMu.Lock()
+	t.preferred = make(map[string]int)
+	t.choiceMu.Unlock()
+}
+func (t *Transport) ExchangeAsync(ctx context.Context, message *dns.Msg, callback func(*dns.Msg, error)) {
+	go func() { response, err := t.Exchange(ctx, message); callback(response, err) }()
 }

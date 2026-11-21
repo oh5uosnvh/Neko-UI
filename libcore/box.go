@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"libcore/device"
+	"libcore/husiurltest"
 	"log"
 	"runtime"
 	"runtime/debug"
@@ -13,24 +14,17 @@ import (
 	"sync"
 
 	"github.com/matsuridayo/libneko/protect_server"
-	"github.com/matsuridayo/libneko/speedtest"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/boxapi"
-	"github.com/sagernet/sing-box/experimental/libbox/platform"
+	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/protocol/group"
 
 	box "github.com/sagernet/sing-box"
-	"github.com/sagernet/sing-box/common/conntrack"
-	"github.com/sagernet/sing-box/common/dialer"
 	"github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/service"
 	"github.com/sagernet/sing/service/pause"
 )
-
-func init() {
-	dialer.DoNotSelectInterface = true
-}
 
 var mainInstance *BoxInstance
 
@@ -59,11 +53,15 @@ func VersionBox() string {
 }
 
 func ResetAllConnections(system bool) {
+	if mainInstance == nil {
+		return
+	}
 	if system {
-		conntrack.Close()
+		mainInstance.Box.Network().ResetNetwork(mainInstance.ctx)
 		log.Println("Reset system connections done")
 	} else {
-		log.Println("TODO: Reset user connections")
+		mainInstance.Box.Router().ResetNetwork()
+		log.Println("Reset user connections done")
 	}
 }
 
@@ -71,6 +69,7 @@ type BoxInstance struct {
 	access sync.Mutex
 
 	*box.Box
+	ctx    context.Context
 	cancel context.CancelFunc
 	state  int
 
@@ -82,20 +81,42 @@ type BoxInstance struct {
 func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *BoxInstance, err error) {
 	defer device.DeferPanicToError("NewSingBoxInstance", func(err_ error) { err = err_ })
 
+	if coreAssetsError != nil {
+		return nil, fmt.Errorf("core assets are not ready: %w", coreAssetsError)
+	}
+
 	// create box context
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = box.Context(ctx,
 		nekoboxAndroidInboundRegistry(), nekoboxAndroidOutboundRegistry(), nekoboxAndroidEndpointRegistry(),
-		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(),
+		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(), nekoboxAndroidCertificateRegistry(),
 	)
 	ctx = service.ContextWithDefaultRegistry(ctx)
-	service.MustRegister[platform.Interface](ctx, boxPlatformInterfaceInstance)
+	ctx = option.ContextWithNekoCompatibility(ctx)
+	ctx = pause.WithDefaultManager(ctx)
+	ctx = service.ContextWithPtr(ctx, urltest.NewHistoryStorage())
+	service.MustRegister[adapter.PlatformInterface](ctx, boxPlatformInterfaceInstance)
+	defer func() {
+		if err != nil {
+			cancel()
+		}
+	}()
 
 	// parse options
 	var options option.Options
 	err = options.UnmarshalJSONContext(ctx, []byte(config))
 	if err != nil {
 		return nil, fmt.Errorf("decode config: %v", err)
+	}
+
+	rootCAMutex.RLock()
+	rootCA := externalRootCA
+	rootCAMutex.RUnlock()
+	if rootCA != "" {
+		if options.Certificate == nil {
+			options.Certificate = &option.CertificateOptions{}
+		}
+		options.Certificate.Certificate = append(options.Certificate.Certificate, rootCA)
 	}
 
 	// create box
@@ -111,6 +132,7 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 
 	b = &BoxInstance{
 		Box:          instance,
+		ctx:          ctx,
 		cancel:       cancel,
 		pauseManager: service.FromContext[pause.Manager](ctx),
 	}
@@ -131,11 +153,15 @@ func (b *BoxInstance) Start() (err error) {
 
 	defer device.DeferPanicToError("box.Start", func(err_ error) { err = err_ })
 
-	if b.state == 0 {
-		b.state = 1
-		return b.Box.Start()
+	if b.state != 0 {
+		return errors.New("already started, failed, or closed")
 	}
-	return errors.New("already started")
+	b.state = 3
+	if err = b.Box.Start(); err != nil {
+		return err
+	}
+	b.state = 1
+	return nil
 }
 
 func (b *BoxInstance) Close() (err error) {
@@ -213,25 +239,25 @@ func (b *BoxInstance) SelectOutbound(tag string) bool {
 	return false
 }
 
-func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err error) {
+func UrlTest(i *BoxInstance, link string, timeout int32) (int32, error) {
+	// Keep the pre26 JNI surface and its RTT intent: husi's unified delay
+	// measures the second HEAD over the established connection.
+	return UrlTestWithFlags(i, link, timeout, int32(husiurltest.UnifiedDelay))
+}
+
+func UrlTestWithFlags(i *BoxInstance, link string, timeout int32, flags int32) (latency int32, err error) {
+	latency = -1
 	defer device.DeferPanicToError("box.UrlTest", func(err_ error) { err = err_ })
-	var connectionTracker adapter.ConnectionTracker
-	// test i
-	if i != nil {
-		if i.v2api != nil {
-			connectionTracker = i.v2api.StatsService()
-		}
-		return speedtest.UrlTest(boxapi.CreateProxyHttpClient(i.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
+	if flags < 0 || flags & ^int32(husiurltest.UnifiedDelay|husiurltest.IgnoreHandshakeTime) != 0 {
+		return -1, errors.New("unsupported URLTest flags")
 	}
-	// test direct
-	if mainInstance == nil {
-		return speedtest.UrlTest(boxapi.CreateProxyHttpClient(nil, nil), link, timeout, speedtest.UrlTestStandard_RTT)
+	if i == nil {
+		i = mainInstance
 	}
-	// test mainInstance
-	if mainInstance.v2api != nil {
-		connectionTracker = mainInstance.v2api.StatsService()
+	if i == nil {
+		return husiurltest.RunDirect(context.Background(), link, timeout, husiurltest.Flags(flags))
 	}
-	return speedtest.UrlTest(boxapi.CreateProxyHttpClient(mainInstance.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
+	return husiurltest.RunTag(i.ctx, i.Outbound(), "", link, timeout, husiurltest.Flags(flags))
 }
 
 var protectCloser io.Closer

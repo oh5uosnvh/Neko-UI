@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -16,7 +17,6 @@ import (
 	"github.com/sagernet/sing-box/dns/transport/quic"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-box/protocol/anytls"
 	"github.com/sagernet/sing-box/protocol/block"
 	"github.com/sagernet/sing-box/protocol/direct"
 	protocolDns "github.com/sagernet/sing-box/protocol/dns"
@@ -26,7 +26,6 @@ import (
 	"github.com/sagernet/sing-box/protocol/hysteria2"
 	"github.com/sagernet/sing-box/protocol/mixed"
 	"github.com/sagernet/sing-box/protocol/redirect"
-	"github.com/sagernet/sing-box/protocol/shadowsocks"
 	"github.com/sagernet/sing-box/protocol/shadowsocksr"
 	"github.com/sagernet/sing-box/protocol/shadowtls"
 	snellprotocol "github.com/sagernet/sing-box/protocol/snell"
@@ -39,6 +38,8 @@ import (
 	"github.com/sagernet/sing-box/protocol/vless"
 	"github.com/sagernet/sing-box/protocol/vmess"
 	"github.com/sagernet/sing-box/protocol/wireguard"
+	"libcore/protocol/shanlian"
+	"libcore/protocol/viewturbo"
 
 	fastupmod "github.com/oh5uosnvh/fastup-mod/fastup"
 	oppamod "github.com/oh5uosnvh/oppa-mod/oppa"
@@ -79,7 +80,7 @@ func nekoboxAndroidOutboundRegistry() *outbound.Registry {
 
 	socks.RegisterOutbound(registry)
 	http.RegisterOutbound(registry)
-	shadowsocks.RegisterOutbound(registry)
+	viewturbo.RegisterOutbound(registry)
 	shadowsocksr.RegisterOutbound(registry)
 	vmess.RegisterOutbound(registry)
 	trojan.RegisterOutbound(registry)
@@ -87,7 +88,7 @@ func nekoboxAndroidOutboundRegistry() *outbound.Registry {
 	ssh.RegisterOutbound(registry)
 	shadowtls.RegisterOutbound(registry)
 	vless.RegisterOutbound(registry)
-	anytls.RegisterOutbound(registry)
+	shanlian.RegisterOutbound(registry)
 	snellprotocol.RegisterOutbound(registry)
 	libcoreX365.RegisterOutbound(registry)
 	libcoreX365.RegisterVLESSOutbound(registry)
@@ -100,7 +101,8 @@ func nekoboxAndroidOutboundRegistry() *outbound.Registry {
 	hysteria2.RegisterOutbound(registry)
 	juicity.RegisterOutbound(registry)
 
-	wireguard.RegisterOutbound(registry)
+	// Legacy WireGuard outbounds are converted to modern endpoints by the
+	// versioned Neko compatibility decoder; tags remain addressable as outbounds.
 
 	return registry
 }
@@ -140,7 +142,9 @@ func nekoboxAndroidDNSTransportRegistry(localTransport LocalDNSTransport) *dns.T
 }
 
 func nekoboxAndroidServiceRegistry() *service.Registry {
-	registry := service.NewRegistry()
+	return service.NewRegistry()
+}
 
-	return registry
+func nekoboxAndroidCertificateRegistry() *certificate.Registry {
+	return certificate.NewRegistry()
 }

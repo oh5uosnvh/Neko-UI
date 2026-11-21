@@ -1,5 +1,42 @@
 # NekoBox UI source
 
+## pre26 → husi core upgrade candidate
+
+This branch starts from **1.4.2-mg-pre26**, commit
+`49054c5845a93fb5ab23402d75788d4327c4c85d`, successful run `44174626202`.
+It does NOT start from NekoBoxForAndroid or the default Neko-UI branch. Existing
+UI/layout resources, package `com.nb4a.qiyiguo112`, and the legacy signing key are
+preserved. Android backend changes only connect the new platform network getters
+and propagate socket protection failures.
+
+The real core is `v1.15.0-alpha.13` (`824dbcfb4dd0a95921840b1737b950cde590241e`)
+plus an immutable-pinned private compatibility commit. `get_source.sh` verifies
+that ancestry. Private MG modules remain private and are staged at their original
+pin, with API-only namespace adaptations; upstream AnyTLS/Snell/SS remain current.
+
+`Libcore.urlTest` retains its JNI signature and uses husi's UnifiedDelay second
+HEAD measurement, multiplex session warmup, HTTP3/QUIC, shared history, and instance
+cancellation. `urlTestWithFlags` exposes the optional early-handshake timing flag
+without changing the existing UI. Server `Connection: close` is handled safely.
+
+GitHub Actions is the only build execution used for this migration. The workflow
+`Build pre26 husi core upgrade` uses Go 1.27.4 and signed debug-named candidates,
+base version code >=2066 (Android >=10330, above pre26's 10325). It runs tagged Go
+regressions, original JNI/AAR checks, all PreviewDebug JVM tests, 24 real FINAL
+ConfigBuilder exports, full-config decode and host New/Start/Close gates before
+assemble. Missing fixtures and zero-matched tests fail the build. APK checks read
+its manifest, native module dependencies, exact source revision and provenance;
+the original APK/native SHA256 is not accepted as an upgrade.
+
+These CI gates are NOT Android VPN/TUN, network-switch, or live-node protocol
+acceptance. Native-TUN Start, APK databases and private live-server handshakes
+still require separate device/runtime evidence. An artifact is a candidate until
+those gates pass; a green compilation is not a claim that migration is complete.
+
+The sections below are the inherited historical pre26 documentation, not this
+branch's baseline, version code or Go toolchain specification.
+
+
 This repository contains the Android application source tree and its integrated
 UI, profile-management, selection, undo, and protocol wiring changes.
 

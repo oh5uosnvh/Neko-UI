@@ -1,4 +1,4 @@
-name: Build debug candidate
+name: Build pre26 husi core upgrade
 
 on:
   workflow_dispatch:
@@ -6,11 +6,11 @@ on:
       release_tag:
         description: 'Debug candidate name only; does not create a release or tag'
         required: true
-        default: '1.4.2-mg-pre1-debug-dns09'
+        default: '1.4.2-mg-debug-husi15-upgrade'
       version_code:
         description: 'Base version code (>=49; Android code is base x 5)'
         required: true
-        default: '58'
+        default: '2066'
       signed:
         description: 'Sign with the verified legacy key (requires secrets)'
         type: boolean
@@ -18,6 +18,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: pre26-husi-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   libcore:
@@ -41,7 +45,7 @@ jobs:
             Neko-oppa
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24.9'
+          go-version: '1.27.4'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -58,15 +62,45 @@ jobs:
           cp -a mg/Neko-oppa ../oppa-mod
       - name: Validate subscription DNS parser before building
         run: python3 buildScript/test-subscription-dns.py
-      - name: Verify pinned DNS runtime and TLS identity
+      - name: Resolve migrated module checksums on GitHub Actions
+        env:
+          SING_BOX_CLONE_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           bash buildScript/lib/core/get_source.sh
           cd libcore
-          # TestRealTCPCancellationClosesBlockedConnection 依赖真实 DNS TCP 出网，
-          # 在 CI runner 上偶发超时导致假失败，与代码无关，跳过。
+          go mod tidy
+          go list -m github.com/sagernet/sing-box github.com/sagernet/quic-go
+          mkdir -p ../core-audit
+          cp go.mod go.sum ../core-audit/
+      - name: Verify pinned DNS runtime and TLS identity
+        run: |
+          cd libcore
           go test -race -count=1 -skip 'TestRealTCPCancellationClosesBlockedConnection' ./dnspolicy
+      - name: Verify husi URLTest, protocol and platform regression tests
+        run: |
+          cd libcore
+          go test -p 2 -race -count=1 -skip 'TestRealTCPCancellationClosesBlockedConnection|TestPre26AppConfigFixtures' -tags 'with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' ./...
+      - name: Verify upgraded core compatibility and actual fragment behavior
+        run: |
+          cd libcore
+          go test -p 2 -race -count=1 -tags 'with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' \
+            -run 'TestNeko' github.com/sagernet/sing-box/option github.com/sagernet/sing-box/dns \
+            github.com/sagernet/sing-box/protocol/direct github.com/sagernet/sing-box/route/rule github.com/sagernet/sing-box/common/dialer
       - name: Build libcore
-        run: ./run lib core
+        env:
+          SING_BOX_CLONE_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          ./run lib core
+          python3 buildScript/core-provenance.py
+          mkdir -p core-audit
+          cp app/src/main/assets/core-provenance.json core-audit/
+          python3 buildScript/verify-aar-api.py app/libs/libcore.aar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-audit
+          path: core-audit/
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: libcore
@@ -85,6 +119,15 @@ jobs:
         with:
           name: libcore
           path: app/libs
+      - uses: actions/download-artifact@v4
+        with:
+          name: core-audit
+          path: core-audit
+      - name: Restore verified core provenance for the APK
+        run: cp core-audit/core-provenance.json app/src/main/assets/core-provenance.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.4'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -92,6 +135,28 @@ jobs:
       - uses: nttld/setup-ndk@v1
         with:
           ndk-version: r25c
+      - uses: actions/checkout@v4
+        with:
+          repository: oh5uosnvh/Nekobox-MG
+          ref: c91b33856ce5827a9a39e8d5d83188c505a15f32
+          path: mg
+          token: ${{ secrets.GH_PAT }}
+          persist-credentials: false
+          sparse-checkout: |
+            Neko-shanlian
+            Neko-viewTurbo
+            Neko-fastup
+            Neko-oppa
+      - name: Stage the same pinned modules for App config validation
+        env:
+          SING_BOX_CLONE_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          cp -a mg/Neko-shanlian ../sing-anytls-shanlian
+          cp -a mg/Neko-viewTurbo ../sing-shadowsocks2-vt
+          cp -a mg/Neko-fastup ../fastup-mod
+          cp -a mg/Neko-oppa ../oppa-mod
+          bash buildScript/lib/core/get_source.sh
+          cp core-audit/go.mod core-audit/go.sum libcore/
       - name: Retrieve legacy signing key only for an explicitly signed build
         if: ${{ inputs.signed }}
         uses: actions/checkout@v4
@@ -117,9 +182,9 @@ jobs:
         run: |
           set -euo pipefail
           trap 'rm -f release.keystore; rm -rf mg-sign' EXIT
-          [[ "$APP_VERSION_NAME" == *-debug-* || "$APP_VERSION_NAME" == *-pre[0-9]* ]] || { echo 'This branch only builds debug-named or pre-numbered candidates' >&2; exit 1; }
+          [[ "$APP_VERSION_NAME" == *-debug-* ]] || { echo 'This migration branch builds debug-named candidates only' >&2; exit 1; }
           [[ "$APP_VERSION_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$ ]] || { echo 'Invalid candidate version' >&2; exit 1; }
-          [[ "$APP_VERSION_CODE" =~ ^[1-9][0-9]{0,8}$ ]] && (( 10#$APP_VERSION_CODE >= 49 && 10#$APP_VERSION_CODE <= 420000000 )) || { echo 'Base version code must be 49..420000000' >&2; exit 1; }
+          [[ "$APP_VERSION_CODE" =~ ^[1-9][0-9]{0,8}$ ]] && (( 10#$APP_VERSION_CODE >= 2066 && 10#$APP_VERSION_CODE <= 420000000 )) || { echo 'Base version code must be 2066..420000000 to upgrade pre26' >&2; exit 1; }
           if [[ "$SIGNED" == true ]]; then
             [[ -n "$KEYSTORE_PASS" && -n "$ALIAS_NAME" && -n "$ALIAS_PASS" && -f mg-sign/keystore/release.keystore ]] || { echo 'Signing credentials or keystore missing' >&2; exit 1; }
             cp mg-sign/keystore/release.keystore release.keystore
@@ -157,9 +222,11 @@ jobs:
             https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/2.0.21/kotlin-compiler-embeddable-2.0.21.pom \
             -o "$compiler_cache/kotlin-compiler-embeddable-2.0.21.pom"
           echo "bd4656a46ec418252e5bc5e1c20eb2029fb2a8e0e3cc94eeddfac7e87c8cd5b6  $compiler_cache/kotlin-compiler-embeddable-2.0.21.pom" | sha256sum -c -
-          ./gradlew --no-daemon app:testPreviewDebugUnitTest --tests 'io.nekohasekai.sagernet.group.*' --tests 'io.nekohasekai.sagernet.ui.GroupDatabaseMigrationTest'
+          export NEKO_CONFIG_FIXTURE_DIR="$RUNNER_TEMP/pre26-config-fixtures"
+          ./gradlew --no-daemon -Dneko.config.fixtureDir="$NEKO_CONFIG_FIXTURE_DIR" app:testPreviewDebugUnitTest
+          python3 buildScript/verify-configbuilder-fixtures.py --fixture-dir "$NEKO_CONFIG_FIXTURE_DIR" --run-go
           ./gradlew --no-daemon app:assemblePreviewRelease
-          mkdir -p release
+          mkdir -p release/apk-audit
           shopt -s nullglob
           apks=(app/build/outputs/apk/preview/release/*.apk)
           (( ${#apks[@]} > 0 )) || { echo 'No APKs found' >&2; exit 1; }
@@ -169,8 +236,20 @@ jobs:
               python3 buildScript/verify-apk-cert.py "$RUNNER_TEMP/apk-certs.txt"
             done
           fi
+          for apk in "${apks[@]}"; do
+            python3 buildScript/verify-upgrade-apk.py "$apk" \
+              --version "$APP_VERSION_NAME" --code "$((10#$APP_VERSION_CODE * 5))" \
+              --revision "$GITHUB_SHA" --report "release/apk-audit/$(basename "$apk").json"
+          done
+          cp core-audit/core-provenance.json release/apk-audit/
           cp "${apks[@]}" release/
           (cd release && sha256sum ./*.apk > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app-config-fixtures
+          path: ${{ runner.temp }}/pre26-config-fixtures/
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: always()
         with:

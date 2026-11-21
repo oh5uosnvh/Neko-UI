@@ -2,6 +2,9 @@ package moe.matsuri.nb4a
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Build.VERSION_CODES
@@ -24,7 +27,9 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
     //  libbox interface
 
     override fun autoDetectInterfaceControl(fd: Int) {
-        DataStore.vpnService?.protect(fd)
+        val service = DataStore.vpnService
+            ?: throw IllegalStateException("socket protect: VPN service unavailable")
+        requireSocketProtection(fd, service::protect)
     }
 
     override fun openTun(singTunOptionsJson: String, tunPlatformOptionsJson: String): Long {
@@ -74,6 +79,33 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
         val connectionInfo = wifiManager.connectionInfo
         return "${connectionInfo.ssid},${connectionInfo.bssid}"
     }
+
+    // Prefer the listener's underlying network. Never use a VPN network as
+    // bootstrap/default output: activeNetwork can point to our own tunnel.
+    private fun defaultPhysicalLink(): LinkProperties? {
+        val connectivity = SagerNet.connectivity
+        fun physicalLink(network: Network?): LinkProperties? {
+            network ?: return null
+            val capabilities = connectivity.getNetworkCapabilities(network) ?: return null
+            if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) return null
+            return connectivity.getLinkProperties(network)
+        }
+        physicalLink(SagerNet.underlyingNetwork)?.let { return it }
+        if (Build.VERSION.SDK_INT >= VERSION_CODES.M) {
+            return physicalLink(connectivity.activeNetwork)
+        }
+        // API 21-22 has no activeNetwork. The existing listener is authoritative;
+        // do not guess an arbitrary up interface when its state is unavailable.
+        return null
+    }
+
+    override fun defaultNetworkInterface(): String = defaultPhysicalLink()?.interfaceName.orEmpty()
+
+    override fun defaultNetworkDNSServers(): String = defaultPhysicalLink()?.dnsServers
+        ?.mapNotNull { it.hostAddress }?.joinToString("\n").orEmpty()
+
+    override fun defaultNetworkGateways(): String = defaultPhysicalLink()?.routes
+        ?.mapNotNull { it.gateway?.hostAddress }?.distinct()?.joinToString("\n").orEmpty()
 
     // nb4a interface
 

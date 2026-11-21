@@ -3,22 +3,21 @@ package libcore
 import (
 	"crypto/x509"
 	"log"
-	_ "unsafe" // for go:linkname
+	"sync"
 )
 
-//go:linkname systemRoots crypto/x509.systemRoots
-var systemRoots *x509.CertPool
+var rootCAMutex sync.RWMutex
+var externalRootCA string
 
 func updateRootCACerts(pem []byte) {
-	x509.SystemCertPool()
-	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM(pem) {
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
 		log.Println("failed to append certificates from pem")
 		return
 	}
-	systemRoots = roots
+	rootCAMutex.Lock()
+	externalRootCA = string(pem)
+	rootCAMutex.Unlock()
 	log.Println("external ca.pem was loaded")
 }
-
-//go:linkname initSystemRoots crypto/x509.initSystemRoots
-func initSystemRoots()
+func initSystemRoots() { _, _ = x509.SystemCertPool() }

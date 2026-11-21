@@ -24,6 +24,15 @@ android {
     }
     testOptions {
         unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            // Explicitly forward to the Test worker; Gradle's -D properties are not inherited.
+            systemProperty(
+                "neko.config.fixtureDir",
+                System.getProperty("neko.config.fixtureDir")
+                    ?: layout.buildDirectory.dir("generated/configbuilder-fixtures").get().asFile.absolutePath,
+            )
+            systemProperty("neko.config.repoDir", rootProject.projectDir.absolutePath)
+        }
     }
     buildFeatures {
         buildConfig = true

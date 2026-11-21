@@ -13,3 +13,5 @@ const (
 var apkAssetPrefixSingBox = "sing-box/"
 var internalAssetsPath string
 var externalAssetsPath string
+
+var coreAssetsError error

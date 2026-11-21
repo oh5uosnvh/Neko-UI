@@ -1,4 +1,7 @@
 *.iml
+__pycache__/
+*.pyc
+/core-audit/
 .gradle
 .idea
 .vscode
@@ -14,6 +17,7 @@ local.properties
 /release/
 /app/libs/
 /app/src/main/assets/sing-box
+/app/src/main/assets/core-provenance.json
 /service_account_credentials.json
 jniLibs/
 /library/libcore_build/

@@ -26,8 +26,8 @@ type stubDNSTransport struct {
 
 var _ adapter.DNSTransport = (*stubDNSTransport)(nil)
 
-func (*stubDNSTransport) Start(adapter.StartStage) error { return nil }
-func (*stubDNSTransport) Close() error                   { return nil }
+func (*stubDNSTransport) Start(adapter.StartStage, *adapter.Scope) error { return nil }
+func (*stubDNSTransport) Close() error                                   { return nil }
 func (s *stubDNSTransport) Exchange(ctx context.Context, q *dns.Msg) (*dns.Msg, error) {
 	return s.exchange(ctx, q)
 }
@@ -368,4 +368,10 @@ func TestMostSpecificPatternWins(t *testing.T) {
 	}}, map[string]testExchangeFunc{"default": nil, "broad": nil, "narrow": nil, "exact": nil})
 	exchangeForTest(t, f, testQuery("db.private.test", dns.TypeA))
 	assertCalls(t, f, "exact")
+}
+
+func (t *stubDNSTransport) Reset() {}
+func (t *stubDNSTransport) ExchangeAsync(ctx context.Context, message *dns.Msg, callback func(*dns.Msg, error)) {
+	response, err := t.Exchange(ctx, message)
+	callback(response, err)
 }

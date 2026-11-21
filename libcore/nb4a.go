@@ -67,22 +67,22 @@ func InitCore(process, cachePath, internalAssets, externalAssets string,
 	// nekoutils
 	nekoutils.Selector_OnProxySelected = intfNB4A.Selector_OnProxySelected
 
-	// Set up some component
+	// CA and geo assets are part of the initialization contract, not background
+	// best-effort work that races the first default route/URLTest.
+	if pem, err := os.ReadFile(filepath.Join(externalAssetsPath, "ca.pem")); err == nil {
+		updateRootCACerts(pem)
+	}
+	if isBgProcess {
+		coreAssetsError = extractAssets()
+		if coreAssetsError != nil {
+			log.Println("Core assets failed:", coreAssetsError)
+		}
+	}
 	go func() {
-		defer device.DeferPanicToError("InitCore-go", func(err error) { log.Println(err) })
+		defer device.DeferPanicToError("InitCore-debug", func(err error) { log.Println(err) })
 		device.GoDebug(process)
-
-		// certs
-		pem, err := os.ReadFile(externalAssetsPath + "ca.pem")
-		if err == nil {
-			updateRootCACerts(pem)
-		}
-
-		// bg
-		if isBgProcess {
-			extractAssets()
-		}
 	}()
+
 }
 
 func sendFdToProtect(fd int, path string) error {

@@ -54,14 +54,14 @@ func newTCP(ctx context.Context, _ log.ContextLogger, tag string, options option
 		dialer:           d, address: address,
 	}, nil
 }
-func newTLS(ctx context.Context, _ log.ContextLogger, tag string, options option.RemoteTLSDNSServerOptions) (adapter.DNSTransport, error) {
+func newTLS(ctx context.Context, logger log.ContextLogger, tag string, options option.RemoteTLSDNSServerOptions) (adapter.DNSTransport, error) {
 	d, err := boxdns.NewRemoteDialer(ctx, options.RemoteDNSServerOptions)
 	if err != nil {
 		return nil, err
 	}
 	tlsOptions := common.PtrValueOrDefault(options.TLS)
 	tlsOptions.Enabled = true
-	config, err := tls.NewClient(ctx, options.Server, tlsOptions)
+	config, err := tls.NewClient(ctx, logger, options.Server, tlsOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,10 @@ func newTLS(ctx context.Context, _ log.ContextLogger, tag string, options option
 		dialer:           d, address: address, tlsConfig: config,
 	}, nil
 }
-func (s *streamTransport) Start(stage adapter.StartStage) error {
+func (s *streamTransport) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage == adapter.StartStateInitialize {
+		scope.Add(s.Close)
+	}
 	if stage == adapter.StartStateStart {
 		return dialer.InitializeDetour(s.dialer)
 	}
@@ -184,4 +187,17 @@ func (s *streamTransport) exchangeStream(ctx context.Context, conn net.Conn, mes
 	}
 	s.keepIdle(conn)
 	return response, nil
+}
+
+func (s *streamTransport) Reset() {
+	s.poolMu.Lock()
+	idle := s.idle
+	s.idle = nil
+	s.poolMu.Unlock()
+	for _, item := range idle {
+		_ = item.conn.Close()
+	}
+}
+func (s *streamTransport) ExchangeAsync(ctx context.Context, message *dns.Msg, callback func(*dns.Msg, error)) {
+	go func() { response, err := s.Exchange(ctx, message); callback(response, err) }()
 }

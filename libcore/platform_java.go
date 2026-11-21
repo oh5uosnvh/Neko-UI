@@ -19,4 +19,9 @@ type BoxPlatformInterface interface {
 	PackageNameByUid(uid int32) (string, error)
 	UIDByPackageName(packageName string) (int32, error)
 	WIFIState() string
+	// Existing JNI methods remain; these getters identify Android's actual
+	// underlying LinkProperties rather than guessing from up interfaces.
+	DefaultNetworkInterface() string
+	DefaultNetworkDNSServers() string
+	DefaultNetworkGateways() string
 }

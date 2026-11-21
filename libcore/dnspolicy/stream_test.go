@@ -10,6 +10,7 @@ import (
 
 	"github.com/miekg/dns"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/json/badoption"
 )
@@ -35,7 +36,7 @@ func tcpUpstream(t *testing.T, tag string, port uint16) adapter.DNSTransport {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := upstream.Start(adapter.StartStateStart); err != nil {
+	if err := upstream.Start(adapter.StartStateStart, adapter.NewScope(context.Background(), log.NewNOPFactory().Logger())); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = upstream.Close() })

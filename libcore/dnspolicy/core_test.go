@@ -12,6 +12,7 @@ import (
 	"github.com/miekg/dns"
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -38,7 +39,8 @@ func TestPinnedCoreConfigResolverAndIndependentCache(t *testing.T) {
 	direct.RegisterOutbound(outRegistry)
 	inRegistry := inbound.NewRegistry()
 	direct.RegisterInbound(inRegistry)
-	ctx := box.Context(context.Background(), inRegistry, outRegistry, endpoint.NewRegistry(), dnsRegistry, boxservice.NewRegistry())
+	ctx := box.Context(context.Background(), inRegistry, outRegistry, endpoint.NewRegistry(), dnsRegistry, boxservice.NewRegistry(), certificate.NewRegistry())
+	ctx = option.ContextWithNekoCompatibility(ctx)
 	ctx = service.ContextWithDefaultRegistry(ctx)
 	config := fmt.Sprintf(`{
       "log":{"disabled":true},
@@ -123,7 +125,7 @@ func TestCustomDirectDNSCanBootstrapLegacyRemoteDNS(t *testing.T) {
 	transport.RegisterHTTPS(dr)
 	or := outbound.NewRegistry()
 	direct.RegisterOutbound(or)
-	ctx := box.Context(context.Background(), inbound.NewRegistry(), or, endpoint.NewRegistry(), dr, boxservice.NewRegistry())
+	ctx := box.Context(context.Background(), inbound.NewRegistry(), or, endpoint.NewRegistry(), dr, boxservice.NewRegistry(), certificate.NewRegistry())
 	ctx = service.ContextWithDefaultRegistry(ctx)
 	config := fmt.Sprintf(`{
       "log":{"disabled":true},

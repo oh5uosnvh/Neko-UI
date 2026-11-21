@@ -13,19 +13,17 @@ import (
 	"golang.org/x/mobile/asset"
 )
 
-func extractAssets() {
+func extractAssets() error {
+	if intfNB4A == nil {
+		return fmt.Errorf("asset provider is not initialized")
+	}
 	useOfficialAssets := intfNB4A.UseOfficialAssets()
-
-	extract := func(name string) {
-		err := extractAssetName(name, useOfficialAssets)
-		if err != nil {
-			log.Println("Extract", geoipDat, "failed:", err)
+	for _, name := range []string{geoipDat, geositeDat, yacdDstFolder} {
+		if err := extractAssetName(name, useOfficialAssets); err != nil {
+			return fmt.Errorf("extract %s: %w", name, err)
 		}
 	}
-
-	extract(geoipDat)
-	extract(geositeDat)
-	extract(yacdDstFolder)
+	return nil
 }
 
 // 这里解压的是 apk 里面的
@@ -54,7 +52,7 @@ func extractAssetName(name string, useOfficialAssets bool) error {
 	} else {
 		dir = externalAssetsPath
 	}
-	dstName := dir + name
+	dstName := filepath.Join(dir, name)
 
 	var localVersion string
 	var assetVersion string
@@ -84,11 +82,11 @@ func extractAssetName(name string, useOfficialAssets bool) error {
 		doExtract = true
 	} else if useOfficialAssets || !replaceable {
 		// 官方源升级
-		b, err := os.ReadFile(dir + version)
+		b, err := os.ReadFile(filepath.Join(dir, version))
 		if err != nil {
 			// versionFileMissing
 			doExtract = true
-			_ = os.RemoveAll(version)
+			_ = os.Remove(filepath.Join(dir, version))
 		} else {
 			localVersion = string(b)
 			if localVersion == "Custom" {
@@ -115,7 +113,13 @@ func extractAssetName(name string, useOfficialAssets bool) error {
 		tmpXzName := dstName + ".xz"
 		err := extractAsset(f, tmpXzName)
 		if err == nil {
-			err = Unxz(tmpXzName, dstName)
+			temporary := dstName + ".tmp"
+			err = Unxz(tmpXzName, temporary)
+			if err == nil {
+				err = os.Rename(temporary, dstName)
+			} else {
+				_ = os.Remove(temporary)
+			}
 			os.Remove(tmpXzName)
 		}
 		if err != nil {
@@ -138,10 +142,18 @@ func extractAssetName(name string, useOfficialAssets bool) error {
 	}
 
 	if f, err := asset.Open(apkPrefix + name + ".xz"); err == nil {
-		extractXz(f)
-	} else if f, err := asset.Open("yacd.zip"); err == nil {
+		if err := extractXz(f); err != nil {
+			return err
+		}
+	} else if name == yacdDstFolder {
+		f, err := asset.Open("yacd.zip")
+		if err != nil {
+			return err
+		}
 		os.RemoveAll(dstName)
-		extracZip(f, internalAssetsPath)
+		if err := extracZip(f, internalAssetsPath); err != nil {
+			return err
+		}
 		m, err := filepath.Glob(internalAssetsPath + "/Yacd-*")
 		if err != nil {
 			return fmt.Errorf("glob Yacd: %v", err)
@@ -154,9 +166,11 @@ func extractAssetName(name string, useOfficialAssets bool) error {
 			return fmt.Errorf("rename Yacd: %v", err)
 		}
 
-	} // TODO normal file
+	} else {
+		return fmt.Errorf("asset %s.xz unavailable", name)
+	}
 
-	o, err := os.Create(dir + version)
+	o, err := os.Create(filepath.Join(dir, version))
 	if err != nil {
 		return fmt.Errorf("create version: %v", err)
 	}

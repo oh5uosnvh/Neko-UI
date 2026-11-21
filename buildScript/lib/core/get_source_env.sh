@@ -1,4 +1,9 @@
-export COMMIT_SING_BOX="0b7a2fc2f2c33f754e5fe5a1bb3e0a4f610b6aa9"
+# Real v1.15.0-alpha.13 ancestry plus pre26 configuration/protocol compatibility.
+# Private fork is immutable-pinned; CI verifies this exact source before bind.
+export SING_BOX_REPO_URL="https://github.com/oh5uosnvh/sing-box.git"
+export SING_BOX_UPSTREAM_COMMIT="824dbcfb4dd0a95921840b1737b950cde590241e"
+export COMMIT_SING_BOX="39be1e9d0c130f42bd112fec49207adcca410f54"
+export COMMIT_SNELL_PRE26="c120d40d0d5b64b6552624bf18d3794f1c044870"
 export COMMIT_LIBNEKO="6a85c185d62435a5293ef70ac3b638ae3ee1efa7"
 
 export COMMIT_ANYTLS_SHANLIAN="35fe946085e3cd5782fd095dd5878c7388519895"

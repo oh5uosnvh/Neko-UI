@@ -2,6 +2,7 @@ package libcore
 
 import (
 	"fmt"
+	"io"
 	"path/filepath"
 
 	geosites "github.com/sagernet/sing-box/common/geosite"
@@ -48,6 +49,9 @@ func init() {
 		g := new(geosite)
 		if err := g.Open(filepath.Join(externalAssetsPath, "geosite.db")); err != nil {
 			return nil, err
+		}
+		if closer, ok := g.geositeReader.Upstream().(io.Closer); ok {
+			defer closer.Close()
 		}
 		return g.Rules(name)
 	}

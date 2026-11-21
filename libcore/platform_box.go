@@ -7,14 +7,13 @@ import (
 	"fmt"
 	"libcore/procfs"
 	"log"
+	"net"
 	"net/netip"
 	"strings"
 	"syscall"
 
 	"github.com/matsuridayo/libneko/neko_log"
 	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/common/process"
-	"github.com/sagernet/sing-box/experimental/libbox/platform"
 	sblog "github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	tun "github.com/sagernet/sing-tun"
@@ -23,12 +22,18 @@ import (
 	N "github.com/sagernet/sing/common/network"
 )
 
-var boxPlatformInterfaceInstance platform.Interface = &boxPlatformInterfaceWrapper{}
+var boxPlatformInterfaceInstance adapter.PlatformInterface = &boxPlatformInterfaceWrapper{}
 
 type boxPlatformInterfaceWrapper struct{}
 
-func (w *boxPlatformInterfaceWrapper) ReadWIFIState() adapter.WIFIState {
-	state := strings.Split(intfBox.WIFIState(), ",")
+func (w *boxPlatformInterfaceWrapper) ReadWIFIState(ctx context.Context) adapter.WIFIState {
+	if intfBox == nil {
+		return adapter.WIFIState{}
+	}
+	state := strings.SplitN(intfBox.WIFIState(), ",", 2)
+	if len(state) < 2 {
+		state = append(state, "")
+	}
 	return adapter.WIFIState{
 		SSID:  state[0],
 		BSSID: state[1],
@@ -46,34 +51,50 @@ func (w *boxPlatformInterfaceWrapper) UsePlatformAutoDetectInterfaceControl() bo
 func (w *boxPlatformInterfaceWrapper) AutoDetectInterfaceControl(fd int) error {
 	// call protect_path
 	if !isBgProcess {
-		_ = sendFdToProtect(fd, "protect_path")
-		return nil
+		return sendFdToProtect(fd, "protect_path")
 	}
 	// bg process call VPNService
+	if intfBox == nil {
+		return errors.New("Android VPN service is not initialized")
+	}
 	return intfBox.AutoDetectInterfaceControl(int32(fd))
 }
 
-func (w *boxPlatformInterfaceWrapper) OpenTun(options *tun.Options, platformOptions option.TunPlatformOptions) (tun.Tun, error) {
+func (w *boxPlatformInterfaceWrapper) OpenInterface(options *tun.Options, platformOptions option.TunPlatformOptions) (tun.Tun, error) {
 	if len(options.IncludeUID) > 0 || len(options.ExcludeUID) > 0 {
 		return nil, E.New("android: unsupported uid options")
 	}
 	if len(options.IncludeAndroidUser) > 0 {
 		return nil, E.New("android: unsupported android_user option")
 	}
-	a, _ := json.Marshal(options)
-	b, _ := json.Marshal(platformOptions)
+	if intfBox == nil {
+		return nil, errors.New("Android VPN service is not initialized")
+	}
+	a, err := json.Marshal(options)
+	if err != nil {
+		return nil, err
+	}
+	b, err := json.Marshal(platformOptions)
+	if err != nil {
+		return nil, err
+	}
 	tunFd, err := intfBox.OpenTun(string(a), string(b))
 	if err != nil {
 		return nil, fmt.Errorf("intfBox.OpenTun: %v", err)
 	}
-	// Do you want to close it?
+	// JNI returns a borrowed ParcelFileDescriptor owned by VpnService.
+	// Exactly one dup is owned by sing-tun and released at scope Close.
 	tunFd, err = syscall.Dup(tunFd)
 	if err != nil {
 		return nil, fmt.Errorf("syscall.Dup: %v", err)
 	}
 	//
 	options.FileDescriptor = int(tunFd)
-	return tun.New(*options)
+	device, err := tun.New(*options)
+	if err != nil {
+		_ = syscall.Close(tunFd)
+	}
+	return device, err
 }
 
 func (w *boxPlatformInterfaceWrapper) CloseTun() error {
@@ -85,7 +106,7 @@ func (w *boxPlatformInterfaceWrapper) UsePlatformDefaultInterfaceMonitor() bool 
 }
 
 func (w *boxPlatformInterfaceWrapper) CreateDefaultInterfaceMonitor(l logger.Logger) tun.DefaultInterfaceMonitor {
-	return &interfaceMonitorStub{}
+	return newInterfaceMonitor()
 }
 
 func (w *boxPlatformInterfaceWrapper) UsePlatformInterfaceGetter() bool {
@@ -100,7 +121,7 @@ func (w *boxPlatformInterfaceWrapper) IncludeAllNetworks() bool {
 	return false
 }
 
-func (w *boxPlatformInterfaceWrapper) SendNotification(notification *platform.Notification) error {
+func (w *boxPlatformInterfaceWrapper) SendNotification(notification *adapter.Notification) error {
 	return nil
 }
 
@@ -119,7 +140,7 @@ func (w *boxPlatformInterfaceWrapper) ClearDNSCache() {
 
 // process.Searcher
 
-func (w *boxPlatformInterfaceWrapper) FindProcessInfo(ctx context.Context, network string, source netip.AddrPort, destination netip.AddrPort) (*process.Info, error) {
+func (w *boxPlatformInterfaceWrapper) FindProcessInfo(ctx context.Context, network string, source netip.AddrPort, destination netip.AddrPort) (*adapter.ConnectionOwner, error) {
 	var uid int32
 	if useProcfs {
 		uid = procfs.ResolveSocketByProcSearch(network, source, destination)
@@ -143,7 +164,7 @@ func (w *boxPlatformInterfaceWrapper) FindProcessInfo(ctx context.Context, netwo
 		}
 	}
 	packageName, _ := intfBox.PackageNameByUid(uid)
-	return &process.Info{UserId: uid, PackageName: packageName}, nil
+	return &adapter.ConnectionOwner{UserId: uid, PackageNames: []string{packageName}}, nil
 }
 
 // io.Writer
@@ -172,4 +193,90 @@ func (w *boxPlatformLogWriterWrapper) WriteMessage(level uint8, message string) 
 		message += "\n"
 	}
 	neko_log.LogWriter.Write([]byte(message))
+}
+
+func (w *boxPlatformInterfaceWrapper) UsePlatformInterface() bool { return true }
+func (w *boxPlatformInterfaceWrapper) ProcessPlatformOptions(options option.TunPlatformOptions) error {
+	return nil
+}                                                                         // forwarded in full by OpenInterface
+func (w *boxPlatformInterfaceWrapper) UsePlatformNetworkInterfaces() bool { return false }
+func (w *boxPlatformInterfaceWrapper) NetworkInterfaces() ([]adapter.NetworkInterface, error) {
+	return nil, errors.New("platform network interface getter is unavailable; use native monitor")
+}
+func (w *boxPlatformInterfaceWrapper) NetworkExtensionIncludeAllNetworks() bool { return false }
+func (w *boxPlatformInterfaceWrapper) RequestPermissionForWIFIState() error     { return nil } // existing JNI WIFIState owns Android permission handling
+func (w *boxPlatformInterfaceWrapper) UsePlatformConnectionOwnerFinder() bool   { return true }
+func (w *boxPlatformInterfaceWrapper) FindConnectionOwner(request *adapter.FindConnectionOwnerRequest) (*adapter.ConnectionOwner, error) {
+	source, err := netip.ParseAddr(request.SourceAddress)
+	if err != nil {
+		return nil, err
+	}
+	destination, err := netip.ParseAddr(request.DestinationAddress)
+	if err != nil {
+		return nil, err
+	}
+	network := "tcp"
+	if request.IpProtocol == syscall.IPPROTO_UDP {
+		network = "udp"
+	} else if request.IpProtocol != syscall.IPPROTO_TCP {
+		return nil, errors.New("unsupported ownership protocol")
+	}
+	return w.FindProcessInfo(context.Background(), network, netip.AddrPortFrom(source, uint16(request.SourcePort)), netip.AddrPortFrom(destination, uint16(request.DestinationPort)))
+}
+func (w *boxPlatformInterfaceWrapper) UsePlatformWIFIMonitor() bool  { return false }
+func (w *boxPlatformInterfaceWrapper) UsePlatformNotification() bool { return false }
+func (w *boxPlatformInterfaceWrapper) CancelNotification(identifier string, typeID int32) error {
+	return errors.New("platform notification API unavailable")
+}
+func (w *boxPlatformInterfaceWrapper) MyInterfaceAddress() []netip.Addr {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var result []netip.Addr
+	for _, iif := range interfaces {
+		if iif.Flags&net.FlagLoopback != 0 || iif.Flags&net.FlagUp == 0 {
+			continue
+		}
+		addrs, _ := iif.Addrs()
+		for _, a := range addrs {
+			p, err := netip.ParsePrefix(a.String())
+			if err == nil {
+				result = append(result, p.Addr())
+			}
+		}
+	}
+	return result
+}
+func (w *boxPlatformInterfaceWrapper) UsePlatformNeighborResolver() bool { return false }
+func (w *boxPlatformInterfaceWrapper) StartNeighborMonitor(listener adapter.NeighborUpdateListener) error {
+	return errors.New("platform neighbor monitor unavailable")
+}
+func (w *boxPlatformInterfaceWrapper) CloseNeighborMonitor(listener adapter.NeighborUpdateListener) error {
+	return nil
+}
+func (w *boxPlatformInterfaceWrapper) UsePlatformShell() bool { return false }
+func (w *boxPlatformInterfaceWrapper) CheckPlatformShell() error {
+	return errors.New("platform shell unavailable")
+}
+func (w *boxPlatformInterfaceWrapper) OpenShellSession(user *adapter.PlatformUser, command string, env []string, term string, rows, cols int32) (adapter.ShellSession, error) {
+	return nil, errors.New("platform shell unavailable")
+}
+func (w *boxPlatformInterfaceWrapper) LookupUser(username string) (*adapter.PlatformUser, error) {
+	return nil, errors.New("platform users unavailable")
+}
+func (w *boxPlatformInterfaceWrapper) LookupSFTPServer() (string, error) {
+	return "", errors.New("platform SFTP unavailable")
+}
+func (w *boxPlatformInterfaceWrapper) ReadSystemSSHHostKey() ([]byte, error) {
+	return nil, errors.New("platform SSH host keys unavailable")
+}
+func (w *boxPlatformInterfaceWrapper) TailscaleHostname() string { return "" }
+func (w *boxPlatformInterfaceWrapper) UsePlatformBridge() bool   { return false }
+func (w *boxPlatformInterfaceWrapper) CreateBridge(options adapter.BridgeOptions) (adapter.BridgeSession, error) {
+	return nil, errors.New("platform bridge unavailable")
+}
+func (w *boxPlatformInterfaceWrapper) UsePlatformAutoRedirect() bool { return false }
+func (w *boxPlatformInterfaceWrapper) CreateAutoRedirect(options adapter.AutoRedirectOptions) (adapter.AutoRedirectSession, error) {
+	return nil, errors.New("platform auto redirect unavailable")
 }
