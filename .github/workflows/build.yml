@@ -66,6 +66,14 @@ jobs:
         run: python3 buildScript/test-subscription-dns.py
       - name: Guard Android production network bridge against forbidden Go netlink enumeration
         run: python3 buildScript/verify-android-network-bridge.py
+      - name: Ensure libcore working tree is clean before gomobile bind
+        run: |
+          cd libcore
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "libcore working tree has uncommitted changes:"
+            git status --porcelain
+            exit 1
+          fi
       - name: Resolve migrated module checksums on GitHub Actions
         env:
           SING_BOX_CLONE_TOKEN: ${{ secrets.GH_PAT }}

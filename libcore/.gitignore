@@ -1,4 +1,7 @@
 binary*.go
+*.go.generated
+gen*.go
+bind*.go
 *.[a|j]ar
 .idea
 .vscode
