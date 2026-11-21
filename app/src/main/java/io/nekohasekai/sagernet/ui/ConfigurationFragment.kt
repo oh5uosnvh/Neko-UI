@@ -1731,10 +1731,12 @@ class ConfigurationFragment @JvmOverloads constructor(
         val generation = latencyGeneration.incrementAndGet()
         activeLatencyGeneration = generation
         val testJobs = mutableListOf<Job>()
-        val effectiveConcurrency = DataStore.connectionTestConcurrent.coerceIn(1, 64)
+        val effectiveConcurrency = DataStore.connectionTestConcurrent.coerceIn(1, 16) // Safe default; Box lifecycle is heavy
         var testPool: kotlinx.coroutines.ExecutorCoroutineDispatcher? = null
         val groupId = request.groupId
         val test = TestDialog(request, 0, generation)
+        // Semaphore limits concurrent Box lifecycles to avoid FD/port/memory exhaustion.
+        val boxSemaphore = kotlinx.coroutines.sync.Semaphore(effectiveConcurrency.coerceAtMost(8))
         // Lazy start guarantees the UI cancel/minimize hooks exist before even
         // an empty/fast target set can finish. Unexpected worker/DB failures are
         // logged and still run the completion cleanup; no uncaught main crash.
@@ -1761,17 +1763,19 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
             }
             repeat(effectiveConcurrency) {
-                testJobs.add(launch(Dispatchers.IO) {
+                testJobs.add(launch(testPool!!) { // Workers run on the bounded pool, not unbounded Dispatchers.IO
                     val urlTest = UrlTest(testPool!!)
                     while (isActive) {
                         val profile = profiles.poll() ?: break
                         if (!isActive) break
-                        try { profile.status = 1; profile.ping = urlTest.doTest(profile) }
-                        catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                        catch (e: PluginManager.PluginNotFoundException) { profile.status = 2; profile.error = e.readableMessage }
-                        catch (e: Exception) { profile.status = 3; profile.error = e.readableMessage }
-                        ensureActive()
-                        test.update(profile)
+                        boxSemaphore.withPermit { // Serialize Box create/start/close to avoid resource exhaustion
+                            try { profile.status = 1; profile.ping = urlTest.doTest(profile) }
+                            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                            catch (e: PluginManager.PluginNotFoundException) { profile.status = 2; profile.error = e.readableMessage }
+                            catch (e: Exception) { profile.status = 3; profile.error = e.readableMessage }
+                            ensureActive()
+                            test.update(profile)
+                        }
                     }
                 })
             }
