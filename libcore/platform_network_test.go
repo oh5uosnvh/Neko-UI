@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/matsuridayo/libneko/neko_log"
 	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing/common/control"
@@ -259,6 +260,9 @@ func runProductionNetworkLifecycle(t *testing.T, callback *liveNetworkCallback, 
 	defer func() { intfBox, networkInterfaceProvider, isBgProcess = oldIntf, oldProvider, oldBG }()
 	intfBox, isBgProcess = callback, bgProcess
 	SetNetworkInterfaceProvider(callback)
+	// Initialize neko_log so that panic handler and platform log writer work.
+	neko_log.SetupLog(50*1024, filepath.Join(t.TempDir(), "test.log"))
+	defer neko_log.LogWriter.Truncate()
 	wrapper := boxPlatformInterfaceInstance.(*boxPlatformInterfaceWrapper)
 	if !wrapper.UsePlatformNetworkInterfaces() || !wrapper.UsePlatformInterfaceGetter() {
 		t.Fatal("production platform getter disabled")
