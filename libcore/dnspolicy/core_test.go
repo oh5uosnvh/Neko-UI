@@ -126,6 +126,7 @@ func TestCustomDirectDNSCanBootstrapLegacyRemoteDNS(t *testing.T) {
 	or := outbound.NewRegistry()
 	direct.RegisterOutbound(or)
 	ctx := box.Context(context.Background(), inbound.NewRegistry(), or, endpoint.NewRegistry(), dr, boxservice.NewRegistry(), certificate.NewRegistry())
+	ctx = option.ContextWithNekoCompatibility(ctx)
 	ctx = service.ContextWithDefaultRegistry(ctx)
 	config := fmt.Sprintf(`{
       "log":{"disabled":true},
