@@ -85,7 +85,7 @@ jobs:
           cd libcore
           go test -p 2 -race -count=1 -tags 'with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' \
             -run 'TestNeko' github.com/sagernet/sing-box/option github.com/sagernet/sing-box/dns \
-            github.com/sagernet/sing-box/protocol/direct github.com/sagernet/sing-box/route/rule github.com/sagernet/sing-box/common/dialer
+            github.com/sagernet/sing-box/protocol/direct github.com/sagernet/sing-box/route/rule github.com/sagernet/sing-box/common/dialer github.com/sagernet/sing-box/transport/v2rayxhttp
       - name: Build libcore
         env:
           SING_BOX_CLONE_TOKEN: ${{ secrets.GH_PAT }}
