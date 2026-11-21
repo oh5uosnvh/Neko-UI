@@ -60,6 +60,8 @@ class SagerNet : Application(),
         if (isMainProcess || isBgProcess) {
             externalAssets.mkdirs()
             Seq.setContext(this)
+            // Required in both UI URLTest and :bg VPN, before any Box is built.
+            Libcore.setNetworkInterfaceProvider(nativeInterface)
             Libcore.initCore(
                 process,
                 cacheDir.absolutePath + "/",

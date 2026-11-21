@@ -10,7 +10,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
-	"net"
 	"strings"
 	"syscall"
 	"testing"
@@ -19,6 +18,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common/control"
 	"github.com/sagernet/sing/service"
 	"github.com/sagernet/sing/service/pause"
 )
@@ -63,7 +63,7 @@ func TestNekoPlatformProtectErrorAndOwner(t *testing.T) {
 func TestNekoMonitorRejectsMissingAndVPNDoesNotGuess(t *testing.T) {
 	monitor := newInterfaceMonitor()
 	monitor.getter = func() string { return "" }
-	monitor.lookup = func(string) (*net.Interface, error) {
+	monitor.lookup = func(string) (*control.Interface, error) {
 		t.Fatal("no-network getter must not enumerate/fallback")
 		return nil, nil
 	}

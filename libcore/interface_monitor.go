@@ -2,8 +2,8 @@ package libcore
 
 import (
 	"fmt"
-	"net"
 	"net/netip"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -24,55 +24,65 @@ type interfaceMonitor struct {
 	myInterfaces []string
 	done         chan struct{}
 	wait         sync.WaitGroup
-	getter       func() string
-	lookup       func(string) (*net.Interface, error)
-	lastData     string
+	readSnapshot func() (*androidNetworkSnapshot, error)
+	// Explicit host-test hooks only; production reads the complete JNI snapshot.
+	getter   func() string
+	lookup   func(string) (*control.Interface, error)
+	refresh  func() error
+	validate func(*control.Interface, string) error
+	lastData string
 }
 
 var _ tun.DefaultInterfaceMonitor = (*interfaceMonitor)(nil)
 
 func newInterfaceMonitor() *interfaceMonitor {
-	return &interfaceMonitor{getter: func() string {
-		if intfBox == nil {
-			return ""
-		}
-		return intfBox.DefaultNetworkInterface()
-	}, lookup: net.InterfaceByName}
+	return &interfaceMonitor{readSnapshot: readAndroidNetworkSnapshot}
 }
-func (s *interfaceMonitor) readInterface() (*control.Interface, error) {
-	name := strings.TrimSpace(s.getter())
-	if name == "" {
-		return nil, nil
+func (s *interfaceMonitor) readInterfaceData() (*control.Interface, string, error) {
+	var iif *control.Interface
+	var data string
+	if s.getter != nil {
+		name := strings.TrimSpace(s.getter())
+		if name == "" {
+			return nil, "", nil
+		}
+		if strings.HasPrefix(name, "tun") || strings.HasPrefix(name, "utun") {
+			return nil, "", fmt.Errorf("VPN cannot be the underlying interface: %q", name)
+		}
+		if s.lookup == nil {
+			return nil, "", fmt.Errorf("host interface lookup was not explicitly injected")
+		}
+		var err error
+		iif, err = s.lookup(name)
+		if err != nil {
+			return nil, "", err
+		}
+	} else {
+		snapshot, err := s.readSnapshot()
+		if err != nil {
+			return nil, "", err
+		}
+		iif, data = snapshot.defaultInterface, snapshot.fingerprint
+	}
+	if iif == nil {
+		return nil, data, nil
 	}
 	s.access.Lock()
 	isMine := false
-	for _, it := range s.myInterfaces {
-		if it == name {
+	for _, name := range s.myInterfaces {
+		if name == iif.Name {
 			isMine = true
 		}
 	}
 	s.access.Unlock()
-	if isMine || strings.HasPrefix(name, "tun") || strings.HasPrefix(name, "utun") {
-		return nil, fmt.Errorf("Android underlying network getter returned VPN interface %q", name)
+	if isMine || strings.HasPrefix(iif.Name, "tun") || strings.HasPrefix(iif.Name, "utun") {
+		return nil, "", fmt.Errorf("Android underlying network getter returned VPN interface %q", iif.Name)
 	}
-	iif, err := s.lookup(name)
-	if err != nil {
-		return nil, err
-	}
-	if iif.Flags&net.FlagUp == 0 || iif.Flags&net.FlagLoopback != 0 {
-		return nil, fmt.Errorf("Android underlying interface %q is not usable", name)
-	}
-	prefixes := []netip.Prefix{}
-	addresses, err := iif.Addrs()
-	if err != nil {
-		return nil, err
-	}
-	for _, address := range addresses {
-		if prefix, ok := parseInterfacePrefix(address.String()); ok {
-			prefixes = append(prefixes, prefix)
-		}
-	}
-	return &control.Interface{Index: iif.Index, MTU: iif.MTU, Name: iif.Name, Flags: iif.Flags, Addresses: prefixes}, nil
+	return iif, data, nil
+}
+func (s *interfaceMonitor) readInterface() (*control.Interface, error) {
+	iif, _, err := s.readInterfaceData()
+	return iif, err
 }
 func parseInterfacePrefix(value string) (netip.Prefix, bool) {
 	if slash := strings.LastIndexByte(value, '/'); slash >= 0 {
@@ -99,15 +109,28 @@ func (s *interfaceMonitor) Start() error {
 		return fmt.Errorf("interface monitor already started")
 	}
 	s.access.Unlock()
-	iif, err := s.readInterface()
+	iif, data, err := s.readInterfaceData()
 	if err != nil {
 		return err
+	}
+	// Publish only metadata that is present in this instance's refreshed finder.
+	// A network can switch between the monitor read and UpdateInterfaces callback.
+	if s.refresh != nil {
+		if err := s.refresh(); err != nil {
+			return err
+		}
+		if s.validate != nil {
+			if err := s.validate(iif, data); err != nil {
+				return err
+			}
+		}
 	}
 	if iif == nil {
 		return fmt.Errorf("Android underlying network is unavailable")
 	}
 	s.access.Lock()
 	s.current = iif
+	s.lastData = data
 	s.done = make(chan struct{})
 	done := s.done
 	s.wait.Add(1)
@@ -128,17 +151,26 @@ func (s *interfaceMonitor) Start() error {
 	return nil
 }
 func (s *interfaceMonitor) update() {
-	next, err := s.readInterface()
+	next, data, err := s.readInterfaceData()
 	if err != nil {
 		next = nil
 	}
-	data := ""
-	if intfBox != nil {
-		data = intfBox.DefaultNetworkDNSServers() + "\n" + intfBox.DefaultNetworkGateways()
-	}
 	s.access.Lock()
 	previous := s.current
-	changed := previous == nil && next != nil || previous != nil && next == nil || previous != nil && next != nil && (previous.Index != next.Index || previous.Name != next.Name) || data != s.lastData
+	changed := !reflect.DeepEqual(previous, next) || data != s.lastData
+	s.access.Unlock()
+	// Replace, never append/cache by name. DNS/address/MTU changes and a reused
+	// name with a new index must reach the core finder before callbacks wake it.
+	if changed && s.refresh != nil {
+		if err := s.refresh(); err != nil {
+			next, data = nil, ""
+		} else if s.validate != nil {
+			if err := s.validate(next, data); err != nil {
+				next, data = nil, ""
+			}
+		}
+	}
+	s.access.Lock()
 	s.lastData = data
 	s.current = next
 	callbacks := []tun.DefaultInterfaceUpdateCallback{}
@@ -180,11 +212,9 @@ func (s *interfaceMonitor) AndroidVPNEnabled() bool  { return false }
 func (s *interfaceMonitor) RegisterCallback(callback tun.DefaultInterfaceUpdateCallback) *list.Element[tun.DefaultInterfaceUpdateCallback] {
 	s.access.Lock()
 	element := s.callbacks.PushBack(callback)
-	current := s.current
 	s.access.Unlock()
-	if current != nil {
-		callback(current, 0)
-	}
+	// Initial state is consumed by core PostStart. Registration must not queue
+	// ResetNetwork: it races and can close the very first URLTest HEAD socket.
 	return element
 }
 func (s *interfaceMonitor) UnregisterCallback(element *list.Element[tun.DefaultInterfaceUpdateCallback]) {

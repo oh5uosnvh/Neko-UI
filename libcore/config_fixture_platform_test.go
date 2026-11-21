@@ -73,6 +73,14 @@ func newConfigFixturePlatform(t *testing.T) *configFixturePlatform {
 func (p *configFixturePlatform) CreateDefaultInterfaceMonitor(logger.Logger) tun.DefaultInterfaceMonitor {
 	monitor := newInterfaceMonitor()
 	monitor.getter = func() string { return p.defaultInterface.Name }
+	monitor.lookup = func(name string) (*control.Interface, error) {
+		if name != p.defaultInterface.Name {
+			return nil, fmt.Errorf("unexpected host interface %q", name)
+		}
+		clone := p.defaultInterface
+		clone.Addresses = append([]netip.Prefix(nil), clone.Addresses...)
+		return &clone, nil
+	}
 	return monitor
 }
 func (*configFixturePlatform) UsePlatformDefaultInterfaceMonitor() bool { return true }

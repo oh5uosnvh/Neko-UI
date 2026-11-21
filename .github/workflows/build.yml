@@ -64,6 +64,8 @@ jobs:
           cp -a mg/Neko-oppa ../oppa-mod
       - name: Validate subscription DNS parser before building
         run: python3 buildScript/test-subscription-dns.py
+      - name: Guard Android production network bridge against forbidden Go netlink enumeration
+        run: python3 buildScript/verify-android-network-bridge.py
       - name: Resolve migrated module checksums on GitHub Actions
         env:
           SING_BOX_CLONE_TOKEN: ${{ secrets.GH_PAT }}
@@ -79,6 +81,11 @@ jobs:
         run: |
           cd libcore
           go test -race -count=1 -skip 'TestRealTCPCancellationClosesBlockedConnection' ./dnspolicy
+      - name: Verify Android production networking with denied netlink and protect IPC
+        run: |
+          cd libcore
+          go test -p 2 -race -v -timeout=4m -count=1 -tags 'with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' \
+            -run '^(TestAndroidNetwork|TestAndroidSocketProtection|TestAndroidProtectIPC)' .
       - name: Verify husi URLTest, protocol and platform regression tests
         run: |
           cd libcore

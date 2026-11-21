@@ -17,6 +17,7 @@ import (
 	sblog "github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	tun "github.com/sagernet/sing-tun"
+	"github.com/sagernet/sing/common/control"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
 	N "github.com/sagernet/sing/common/network"
@@ -41,6 +42,18 @@ func (w *boxPlatformInterfaceWrapper) ReadWIFIState(ctx context.Context) adapter
 }
 
 func (w *boxPlatformInterfaceWrapper) Initialize(n adapter.NetworkManager) error {
+	// Populate the core finder before it can fall back to Go's Android netlink.
+	if err := n.UpdateInterfaces(); err != nil {
+		return err
+	}
+	if monitor, ok := n.InterfaceMonitor().(*interfaceMonitor); ok {
+		monitor.refresh = n.UpdateInterfaces
+		if monitor.getter == nil {
+			monitor.validate = func(iif *control.Interface, data string) error {
+				return validateAndroidNetworkRefresh(n.NetworkInterfaces(), iif, data)
+			}
+		} // explicit host getter/lookup fixtures have no Android JSON fingerprint
+	}
 	return nil
 }
 
@@ -49,6 +62,17 @@ func (w *boxPlatformInterfaceWrapper) UsePlatformAutoDetectInterfaceControl() bo
 }
 
 func (w *boxPlatformInterfaceWrapper) AutoDetectInterfaceControl(fd int) error {
+	provider := androidNetworkProvider()
+	if provider == nil {
+		return errors.New("Android socket protection state provider is not initialized")
+	}
+	required, err := provider.SocketProtectionRequired()
+	if err != nil {
+		return fmt.Errorf("Android socket protection state: %w", err)
+	}
+	if !required {
+		return nil
+	} // confirmed no VPN: UI and proxy mode can dial directly
 	// call protect_path
 	if !isBgProcess {
 		return sendFdToProtect(fd, "protect_path")
@@ -110,11 +134,11 @@ func (w *boxPlatformInterfaceWrapper) CreateDefaultInterfaceMonitor(l logger.Log
 }
 
 func (w *boxPlatformInterfaceWrapper) UsePlatformInterfaceGetter() bool {
-	return false
+	return true
 }
 
 func (w *boxPlatformInterfaceWrapper) Interfaces() ([]adapter.NetworkInterface, error) {
-	return nil, errors.New("wtf")
+	return w.NetworkInterfaces()
 }
 
 func (w *boxPlatformInterfaceWrapper) IncludeAllNetworks() bool {
@@ -199,9 +223,13 @@ func (w *boxPlatformInterfaceWrapper) UsePlatformInterface() bool { return true 
 func (w *boxPlatformInterfaceWrapper) ProcessPlatformOptions(options option.TunPlatformOptions) error {
 	return nil
 }                                                                         // forwarded in full by OpenInterface
-func (w *boxPlatformInterfaceWrapper) UsePlatformNetworkInterfaces() bool { return false }
+func (w *boxPlatformInterfaceWrapper) UsePlatformNetworkInterfaces() bool { return true }
 func (w *boxPlatformInterfaceWrapper) NetworkInterfaces() ([]adapter.NetworkInterface, error) {
-	return nil, errors.New("platform network interface getter is unavailable; use native monitor")
+	snapshot, err := readAndroidNetworkSnapshot()
+	if err != nil {
+		return nil, err
+	}
+	return snapshot.interfaces, nil
 }
 func (w *boxPlatformInterfaceWrapper) NetworkExtensionIncludeAllNetworks() bool { return false }
 func (w *boxPlatformInterfaceWrapper) RequestPermissionForWIFIState() error     { return nil } // existing JNI WIFIState owns Android permission handling
@@ -229,20 +257,23 @@ func (w *boxPlatformInterfaceWrapper) CancelNotification(identifier string, type
 	return errors.New("platform notification API unavailable")
 }
 func (w *boxPlatformInterfaceWrapper) MyInterfaceAddress() []netip.Addr {
-	interfaces, err := net.Interfaces()
+	interfaces, err := w.NetworkInterfaces()
 	if err != nil {
+		// The legacy API cannot return an error. Startup/getter/monitor do.
+		log.Printf("Android interface addresses: %v", err)
 		return nil
 	}
 	var result []netip.Addr
+	seen := make(map[netip.Addr]bool)
 	for _, iif := range interfaces {
 		if iif.Flags&net.FlagLoopback != 0 || iif.Flags&net.FlagUp == 0 {
 			continue
 		}
-		addrs, _ := iif.Addrs()
-		for _, a := range addrs {
-			p, err := netip.ParsePrefix(a.String())
-			if err == nil {
-				result = append(result, p.Addr())
+		for _, prefix := range iif.Addresses {
+			address := prefix.Addr()
+			if !seen[address] {
+				seen[address] = true
+				result = append(result, address)
 			}
 		}
 	}

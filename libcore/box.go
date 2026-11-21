@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/matsuridayo/libneko/protect_server"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/boxapi"
 	"github.com/sagernet/sing-box/common/urltest"
@@ -268,8 +267,17 @@ func goServeProtect(start bool) {
 		protectCloser = nil
 	}
 	if start {
-		protectCloser = protect_server.ServeProtect("protect_path", false, 0, func(fd int) {
-			intfBox.AutoDetectInterfaceControl(int32(fd))
+		server, err := serveAndroidProtect("protect_path", func(fd int) error {
+			if intfBox == nil {
+				return errors.New("Android VPN service is not initialized")
+			}
+			return intfBox.AutoDetectInterfaceControl(int32(fd))
 		})
+		if err != nil {
+			// No success reply/service is preferable to silently unprotected sockets.
+			log.Printf("start socket protection service: %v", err)
+			return
+		}
+		protectCloser = server
 	}
 }

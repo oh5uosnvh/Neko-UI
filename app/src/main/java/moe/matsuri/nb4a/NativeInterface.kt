@@ -3,7 +3,6 @@ package moe.matsuri.nb4a
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.LinkProperties
-import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -19,10 +18,12 @@ import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.utils.PackageCache
 import libcore.BoxPlatformInterface
 import libcore.Libcore
+import libcore.NetworkInterfaceProvider
 import libcore.NB4AInterface
 import java.net.InetSocketAddress
+import java.net.NetworkInterface
 
-class NativeInterface : BoxPlatformInterface, NB4AInterface {
+class NativeInterface : BoxPlatformInterface, NB4AInterface, NetworkInterfaceProvider {
 
     //  libbox interface
 
@@ -80,23 +81,85 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
         return "${connectionInfo.ssid},${connectionInfo.bssid}"
     }
 
-    // Prefer the listener's underlying network. Never use a VPN network as
-    // bootstrap/default output: activeNetwork can point to our own tunnel.
-    private fun defaultPhysicalLink(): LinkProperties? {
+    // One fresh framework snapshot per call. Never cache Java interfaces by name:
+    // Android can recreate wlan0/rmnet with a different index after a reconnect.
+    private fun networkRecords(): List<PlatformNetworkRecord> {
         val connectivity = SagerNet.connectivity
-        fun physicalLink(network: Network?): LinkProperties? {
-            network ?: return null
-            val capabilities = connectivity.getNetworkCapabilities(network) ?: return null
-            if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) return null
-            return connectivity.getLinkProperties(network)
+        @Suppress("DEPRECATION") val networks = connectivity.allNetworks
+        return networks.mapNotNull { network ->
+            val link = connectivity.getLinkProperties(network) ?: return@mapNotNull null
+            val caps = connectivity.getNetworkCapabilities(network) ?: return@mapNotNull null
+            val name = link.interfaceName ?: return@mapNotNull null
+            // Java's Android implementation is supported; Go net.Interfaces is not.
+            // Lookup only framework-reported names, not a full Java enumeration.
+            val javaInterface = NetworkInterface.getByName(name) ?: return@mapNotNull null
+            val addresses = link.linkAddresses.mapNotNull { address ->
+                address.address.hostAddress?.let { "${it.substringBefore('%')}/${address.prefixLength}" }
+            }
+            if (addresses.isEmpty()) return@mapNotNull null // network disappeared during snapshot
+            var flags = 0
+            if (javaInterface.isUp) flags = flags or AndroidNetworkSnapshot.UP or AndroidNetworkSnapshot.RUNNING
+            if (javaInterface.isLoopback) flags = flags or AndroidNetworkSnapshot.LOOPBACK
+            if (javaInterface.isPointToPoint) flags = flags or AndroidNetworkSnapshot.POINT_TO_POINT
+            if (javaInterface.supportsMulticast()) flags = flags or AndroidNetworkSnapshot.MULTICAST
+            val mtu = link.mtu.takeIf { it > 0 } ?: javaInterface.mtu
+            PlatformNetworkRecord(
+                id = network.toString(), name = name, index = javaInterface.index, mtu = mtu, flags = flags,
+                addresses = addresses,
+                type = when {
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+                    else -> "other"
+                },
+                dnsServers = link.dnsServers.mapNotNull { it.hostAddress },
+                dnsSearchDomains = link.domains.orEmpty().split(Regex("\\s+")).filter { it.isNotEmpty() },
+                gateways = link.routes.filter { it.gateway?.isAnyLocalAddress == false }
+                    .mapNotNull { it.gateway?.hostAddress },
+                metered = !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED),
+                vpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) ||
+                    !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN),
+                internet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
+                // API 21/22 does not expose VALIDATED. INTERNET is its only
+                // framework bootstrap signal; newer devices must be validated.
+                validated = Build.VERSION.SDK_INT < VERSION_CODES.M ||
+                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+            )
         }
-        physicalLink(SagerNet.underlyingNetwork)?.let { return it }
-        if (Build.VERSION.SDK_INT >= VERSION_CODES.M) {
-            return physicalLink(connectivity.activeNetwork)
+    }
+
+    private fun activeNetworkId(): String? = if (Build.VERSION.SDK_INT >= VERSION_CODES.M) {
+        SagerNet.connectivity.activeNetwork?.toString()
+    } else null
+
+    override fun socketProtectionRequired(): Boolean {
+        // Service exists before establish(): protect must already be mandatory.
+        return AndroidNetworkSnapshot.protectionRequired(DataStore.vpnService != null) {
+            val connectivity = SagerNet.connectivity
+            @Suppress("DEPRECATION") val networks = connectivity.allNetworks
+            networks.map { network ->
+                // A racing/failed state read is NOT evidence that VPN is disabled.
+                val caps = connectivity.getNetworkCapabilities(network)
+                    ?: throw IllegalStateException("VPN protection state unavailable for $network")
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) ||
+                    !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            }
         }
-        // API 21-22 has no activeNetwork. The existing listener is authoritative;
-        // do not guess an arbitrary up interface when its state is unavailable.
-        return null
+    }
+
+    override fun networkInterfacesJSON(): String = AndroidNetworkSnapshot.encode(
+        networkRecords(), SagerNet.underlyingNetwork?.toString(), activeNetworkId(),
+    )
+
+    // Legacy getters remain ABI compatible, but use the same selection policy.
+    private fun defaultPhysicalLink(): LinkProperties? {
+        val records = networkRecords()
+        val selected = AndroidNetworkSnapshot.selectDefault(
+            records, SagerNet.underlyingNetwork?.toString(), activeNetworkId(),
+        ) ?: return null
+        @Suppress("DEPRECATION") val network = SagerNet.connectivity.allNetworks
+            .firstOrNull { it.toString() == selected.id } ?: return null
+        return SagerNet.connectivity.getLinkProperties(network)
     }
 
     override fun defaultNetworkInterface(): String = defaultPhysicalLink()?.interfaceName.orEmpty()
