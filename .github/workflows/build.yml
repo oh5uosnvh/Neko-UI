@@ -84,7 +84,7 @@ jobs:
       - name: Verify Android production networking with denied netlink and protect IPC
         run: |
           cd libcore
-          go test -p 2 -race -v -timeout=4m -count=1 -tags 'with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' \
+          go test -p 1 -race -v -timeout=4m -count=1 -tags 'with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' \
             -run '^(TestAndroidNetwork|TestAndroidSocketProtection|TestAndroidProtectIPC)' .
       - name: Verify husi URLTest, protocol and platform regression tests
         run: |
