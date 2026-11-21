@@ -149,7 +149,7 @@ def main():
     if args.run_go:
         kernel_source(repo)
         go_gate(repo, directory, ["TestPre26AppConfigFixtures"], args.tags)
-        print("HOST GATES passed: 24 full decodes; 21 unmodified full-config lifecycles; 3 native TUN device gates remain UNTESTED")
+        print("HOST GATES passed with explicit simulated platform: 24 full decodes; 21 unmodified full-config lifecycles; Android VPN/protect/network switch, real APK databases, live protocol handshakes and 3 native TUN Start gates remain UNTESTED")
 
 
 if __name__ == "__main__":

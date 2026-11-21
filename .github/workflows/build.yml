@@ -46,10 +46,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.11'
+          cache-dependency-path: libcore/go.sum
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
+          cache: gradle
       - uses: nttld/setup-ndk@v1
         with:
           ndk-version: r25c
@@ -86,7 +88,7 @@ jobs:
           cd libcore
           go test -p 2 -race -timeout=4m -count=1 -tags 'with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' \
             -run 'TestNeko' github.com/sagernet/sing-box/option github.com/sagernet/sing-box/dns \
-            github.com/sagernet/sing-box/protocol/direct github.com/sagernet/sing-box/route/rule github.com/sagernet/sing-box/common/dialer github.com/sagernet/sing-box/transport/v2rayxhttp
+            github.com/sagernet/sing-box/protocol/direct github.com/sagernet/sing-box/route github.com/sagernet/sing-box/route/rule github.com/sagernet/sing-box/common/dialer github.com/sagernet/sing-box/transport/v2rayxhttp
       - name: Build libcore
         env:
           SING_BOX_CLONE_TOKEN: ${{ secrets.GH_PAT }}
@@ -129,10 +131,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.11'
+          cache-dependency-path: libcore/go.sum
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
+          cache: gradle
       - uses: nttld/setup-ndk@v1
         with:
           ndk-version: r25c

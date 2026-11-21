@@ -209,7 +209,10 @@ func configFixtureHostContext(t *testing.T) context.Context {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	ctx = configFixtureContext(ctx, nil) // Production host local transport; NOT an Android platform mock.
+	ctx = configFixtureContext(ctx, nil)
+	// Full original Android config uses an explicit host platform provider.
+	// This validates construction/resources/listeners, NOT Android VPN protect/TUN.
+	service.MustRegister[adapter.PlatformInterface](ctx, newConfigFixturePlatform(t))
 	return filemanager.WithDefault(ctx, base, filepath.Join(root, "tmp"), os.Getuid(), os.Getgid())
 }
 

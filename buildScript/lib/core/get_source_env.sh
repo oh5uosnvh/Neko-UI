@@ -2,7 +2,7 @@
 # Private fork is immutable-pinned; CI verifies this exact source before bind.
 export SING_BOX_REPO_URL="https://github.com/oh5uosnvh/sing-box.git"
 export SING_BOX_UPSTREAM_COMMIT="824dbcfb4dd0a95921840b1737b950cde590241e"
-export COMMIT_SING_BOX="720b1a521c3ce662dabe56c160e1ea51904b83f8"
+export COMMIT_SING_BOX="eb00ef349f0978a4a0ab16afb22b902bd087e426"
 export COMMIT_SNELL_PRE26="c120d40d0d5b64b6552624bf18d3794f1c044870"
 export COMMIT_LIBNEKO="6a85c185d62435a5293ef70ac3b638ae3ee1efa7"
 
