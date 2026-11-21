@@ -1731,7 +1731,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         val generation = latencyGeneration.incrementAndGet()
         activeLatencyGeneration = generation
         val testJobs = mutableListOf<Job>()
-        val effectiveConcurrency = DataStore.connectionTestConcurrent.coerceIn(1, 16)
+        val effectiveConcurrency = DataStore.connectionTestConcurrent.coerceIn(1, 64)
         var testPool: kotlinx.coroutines.ExecutorCoroutineDispatcher? = null
         val groupId = request.groupId
         val test = TestDialog(request, 0, generation)
