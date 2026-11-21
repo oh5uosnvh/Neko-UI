@@ -221,11 +221,11 @@ func hostNetworkCallback(t *testing.T) *liveNetworkCallback {
 	return &liveNetworkCallback{value: string(value)}
 }
 func TestAndroidNetworkProductionNewStartURLTestClose(t *testing.T) {
-	callback := hostNetworkCallback(t)
+	callback := &liveNetworkCallback{value: networkTestJSON("wlan0", 77, "192.0.2.2/24")}
 	runProductionNetworkLifecycle(t, callback, true)
 }
 func TestAndroidNetworkProductionVPNMainIPC(t *testing.T) {
-	callback := hostNetworkCallback(t)
+	callback := &liveNetworkCallback{value: networkTestJSON("wlan0", 77, "192.0.2.2/24")}
 	oldDirectory, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)

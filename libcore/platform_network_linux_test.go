@@ -21,7 +21,7 @@ func TestAndroidNetworkProductionDeniedNetlink(t *testing.T) {
 	const child = "NEKO_TEST_DENY_NETLINK"
 	const snapshot = "NEKO_TEST_NETWORK_SNAPSHOT"
 	if os.Getenv(child) != "1" {
-		callback := hostNetworkCallback(t)
+		callback := &liveNetworkCallback{value: networkTestJSON("wlan0", 77, "192.0.2.2/24")}
 		command := exec.Command(os.Args[0], "-test.run=^TestAndroidNetworkProductionDeniedNetlink$", "-test.v")
 		command.Env = append(os.Environ(), child+"=1", snapshot+"="+callback.value)
 		output, err := command.CombinedOutput()
