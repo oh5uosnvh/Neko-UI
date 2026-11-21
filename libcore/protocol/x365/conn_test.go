@@ -3,8 +3,10 @@ package x365
 import (
 	"bytes"
 	"encoding/hex"
+	"io"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
 	M "github.com/sagernet/sing/common/metadata"
@@ -115,20 +117,27 @@ func TestConnRoundTrip(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
+	_ = server.SetDeadline(time.Now().Add(2 * time.Second))
+	_ = client.SetDeadline(time.Now().Add(2 * time.Second))
 
 	c := NewConn(client, key, CommandTCP, dest)
 	go func() {
-		// read the request the client sends
-		head := make([]byte, 26+11+1) // magic..domain(len 11)+padding
-		if _, err := server.Read(head); err != nil {
+		// Read exactly the encoded domain request, then consume the client's
+		// separate payload write before sending the response. net.Pipe is
+		// synchronous: both peers writing at once is a fixture deadlock.
+		head := make([]byte, requestLen(dest))
+		if _, err := io.ReadFull(server, head); err != nil {
 			return
 		}
 		if !bytes.Equal(head[0:4], []byte("X365")) {
-			server.Write([]byte{'B', 'A', 'D', '9', 0x00})
+			return
+		}
+		payload := make([]byte, len("payload"))
+		if _, err := io.ReadFull(server, payload); err != nil || string(payload) != "payload" {
 			return
 		}
 		// reply: X365 + 1 consumed byte + payload
-		server.Write([]byte{'X', '3', '6', '5', 0x01, 'H', 'I'})
+		_, _ = server.Write([]byte{'X', '3', '6', '5', 0x01, 'H', 'I'})
 	}()
 
 	if _, err := c.Write([]byte{}); err != nil {
@@ -154,29 +163,26 @@ func TestPacketConnFrame(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
+	_ = server.SetDeadline(time.Now().Add(2 * time.Second))
+	_ = client.SetDeadline(time.Now().Add(2 * time.Second))
 
 	pc := &PacketConn{Conn: client, key: key, destination: dest}
 	go func() {
-		buf := make([]byte, 1024)
-		n, readErr := server.Read(buf)
-		if readErr != nil || n < 34 {
+		// IPv4 request is 29 bytes; the following UDP frame has 2 length
+		// bytes and 3 payload bytes. Read the complete frame, not one Read.
+		buf := make([]byte, requestLen(dest)+2+3)
+		if _, err := io.ReadFull(server, buf); err != nil {
 			return
 		}
-		// first write = header + 2-byte length prefix + payload
-		if !bytes.Equal(buf[0:4], []byte("X365")) {
+		if !bytes.Equal(buf[0:4], []byte("X365")) || buf[5] != CommandUDP {
 			return
 		}
-		if buf[5] != CommandUDP {
-			return
-		}
-		// find length prefix right after address: port(2)+atyp(1)+ipv4(4)
 		trailerStart := 22
 		length := int(buf[trailerStart+7])<<8 | int(buf[trailerStart+8])
-		if length != 3 || string(buf[trailerStart+9:trailerStart+9+length]) != "abc" {
-			server.Write([]byte("XX"))
+		if length != 3 || string(buf[trailerStart+9:]) != "abc" {
 			return
 		}
-		server.Write([]byte{'X', '3', '6', '5', 0x00, 0x00, 0x02, 'o', 'k'})
+		_, _ = server.Write([]byte{'X', '3', '6', '5', 0x00, 0x00, 0x02, 'o', 'k'})
 	}()
 
 	if _, err := pc.Write([]byte("abc")); err != nil {
