@@ -6,8 +6,8 @@ import (
 	"net"
 	"testing"
 
-	M "github.com/sagernet/sing/common/metadata"
 	"github.com/gofrs/uuid/v5"
+	M "github.com/sagernet/sing/common/metadata"
 )
 
 // Wire format (from 365VPN libgojni.so reverse engineering):
@@ -158,7 +158,10 @@ func TestPacketConnFrame(t *testing.T) {
 	pc := &PacketConn{Conn: client, key: key, destination: dest}
 	go func() {
 		buf := make([]byte, 1024)
-		n, _ := server.Read(buf)
+		n, readErr := server.Read(buf)
+		if readErr != nil || n < 34 {
+			return
+		}
 		// first write = header + 2-byte length prefix + payload
 		if !bytes.Equal(buf[0:4], []byte("X365")) {
 			return

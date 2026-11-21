@@ -10,6 +10,9 @@ import (
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/nekoutils"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common"
+	"github.com/sagernet/sing/common/json/badoption"
+	"go4.org/netipx"
 )
 
 type geoip struct {
@@ -45,9 +48,13 @@ func (g *geoip) Rules(countryCode string) ([]option.HeadlessRule, error) {
 	}
 
 	var headlessRule option.DefaultHeadlessRule
-	headlessRule.IPCIDR = make([]string, 0, len(ipNets))
+	headlessRule.IPCIDR = make([]*badoption.Prefixable, 0, len(ipNets))
 	for _, cidr := range ipNets {
-		headlessRule.IPCIDR = append(headlessRule.IPCIDR, cidr.String())
+		prefix, valid := netipx.FromStdIPNet(cidr)
+		if !valid {
+			return nil, fmt.Errorf("invalid GeoIP network: %v", cidr)
+		}
+		headlessRule.IPCIDR = append(headlessRule.IPCIDR, common.Ptr(badoption.Prefixable(prefix)))
 	}
 
 	return []option.HeadlessRule{
