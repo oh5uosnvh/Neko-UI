@@ -28,7 +28,7 @@ func localTCPDNS(t *testing.T, handler dns.HandlerFunc) uint16 {
 	t.Cleanup(func() { _ = server.Shutdown() })
 	return uint16(listener.Addr().(*net.TCPAddr).Port)
 }
-func tcpUpstream(t *testing.T, tag string, port uint16) adapter.DNSTransport {
+func tcpUpstreamWithScope(t *testing.T, tag string, port uint16) (*streamTransport, *adapter.Scope) {
 	t.Helper()
 	upstream, err := newTCP(context.Background(), nil, tag, option.RemoteDNSServerOptions{
 		DNSServerAddressOptions: option.DNSServerAddressOptions{Server: "127.0.0.1", ServerPort: port},
@@ -36,10 +36,18 @@ func tcpUpstream(t *testing.T, tag string, port uint16) adapter.DNSTransport {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := upstream.Start(adapter.StartStateStart, adapter.NewScope(context.Background(), log.NewNOPFactory().Logger())); err != nil {
-		t.Fatal(err)
+	scope := adapter.NewScope(context.Background(), log.NewNOPFactory().Logger())
+	t.Cleanup(func() { _ = scope.Close() })
+	for _, stage := range []adapter.StartStage{adapter.StartStateInitialize, adapter.StartStateStart} {
+		if err := upstream.Start(stage, scope); err != nil {
+			t.Fatal(err)
+		}
 	}
-	t.Cleanup(func() { _ = upstream.Close() })
+	return upstream.(*streamTransport), scope
+}
+
+func tcpUpstream(t *testing.T, tag string, port uint16) adapter.DNSTransport {
+	upstream, _ := tcpUpstreamWithScope(t, tag, port)
 	return upstream
 }
 func TestRealTCPPolicyFallbackAndAlias(t *testing.T) {
@@ -137,7 +145,7 @@ func TestTCPReusesConnectionWithoutKeepingCancelledSocket(t *testing.T) {
 		addresses <- w.RemoteAddr().String()
 		_ = w.WriteMsg(addressReply(q, "192.0.2.18"))
 	})
-	transport := tcpUpstream(t, "reuse", port)
+	transport, scope := tcpUpstreamWithScope(t, "reuse", port)
 	for _, name := range []string{"first.test", "second.test"} {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		_, err := transport.Exchange(ctx, testQuery(name, dns.TypeA))
@@ -150,11 +158,13 @@ func TestTCPReusesConnectionWithoutKeepingCancelledSocket(t *testing.T) {
 	if first != second {
 		t.Fatalf("TCP DNS was not reused: %s != %s", first, second)
 	}
-	if got := len(transport.(*streamTransport).idle); got != 1 {
+	if got := len(transport.idle); got != 1 {
 		t.Fatalf("idle connections %d", got)
 	}
-	_ = transport.Close()
-	if len(transport.(*streamTransport).idle) != 0 {
+	if err := scope.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(transport.idle) != 0 {
 		t.Fatal("Close leaked pooled connections")
 	}
 }

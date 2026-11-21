@@ -41,10 +41,13 @@ func TestDoTAndDoHPreserveTLSNameAndCustomPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = dot.Start(adapter.StartStateStart, adapter.NewScope(context.Background(), log.NewNOPFactory().Logger())); err != nil {
-		t.Fatal(err)
+	dotScope := adapter.NewScope(context.Background(), log.NewNOPFactory().Logger())
+	defer dotScope.Close()
+	for _, stage := range []adapter.StartStage{adapter.StartStateInitialize, adapter.StartStateStart} {
+		if err = dot.Start(stage, dotScope); err != nil {
+			t.Fatal(err)
+		}
 	}
-	defer dot.(interface{ Close() error }).Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	response, err := dot.Exchange(ctx, testQuery("node.private.test", dns.TypeA))
@@ -101,9 +104,12 @@ func TestDoTAndDoHPreserveTLSNameAndCustomPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer doh.Close()
-	if err = doh.Start(adapter.StartStateStart, adapter.NewScope(context.Background(), log.NewNOPFactory().Logger())); err != nil {
-		t.Fatal(err)
+	dohScope := adapter.NewScope(context.Background(), log.NewNOPFactory().Logger())
+	defer dohScope.Close()
+	for _, stage := range []adapter.StartStage{adapter.StartStateInitialize, adapter.StartStateStart} {
+		if err = doh.Start(stage, dohScope); err != nil {
+			t.Fatal(err)
+		}
 	}
 	failed := &stubDNSTransport{TransportAdapter: boxdns.NewTransportAdapter("mock", "failed", nil), exchange: func(context.Context, *dns.Msg) (*dns.Msg, error) { return nil, fmt.Errorf("offline") }}
 	rawResolver, err := New(context.Background(), nil, "private", Options{Fallback: []string{"unused-public"}, Rules: []Rule{{"+.private.test", []string{"failed", "doh"}}}, Timeout: badoption.Duration(time.Second)})
