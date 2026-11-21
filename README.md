@@ -20,7 +20,10 @@ cancellation. `urlTestWithFlags` exposes the optional early-handshake timing fla
 without changing the existing UI. Server `Connection: close` is handled safely.
 
 GitHub Actions is the only build execution used for this migration. The workflow
-`Build pre26 husi core upgrade` uses Go 1.27.4 and signed debug-named candidates,
+`Build pre26 husi core upgrade` uses Go 1.26.11 and signed debug-named candidates.
+This satisfies the core's Go 1.25.5 minimum and retains the original verified
+Matsuri gomobile JNI generator: Go 1.27 removed its `gotypesalias=0` setting.
+Changing the compiler is not a core version rollback. Candidates use
 base version code >=2066 (Android >=10330, above pre26's 10325). It runs tagged Go
 regressions, original JNI/AAR checks, all PreviewDebug JVM tests, 24 real FINAL
 ConfigBuilder exports, full-config decode and host New/Start/Close gates before
