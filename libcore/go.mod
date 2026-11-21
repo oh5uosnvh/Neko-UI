@@ -226,3 +226,8 @@ replace github.com/oh5uosnvh/oppa-mod => ../../oppa-mod
 // authentication/QUIC proxy library has a separate identity.
 replace github.com/oh5uosnvh/snell-compat => ../../sing-snell-pre26
 replace github.com/sagernet/sing-vmess => github.com/xchacha20-poly1305/sing-vmess v0.2.9-0.20261120142420-bb1b0c7028c2
+
+// MVS sorts the legacy dated pseudo-version above the modern custom tag.
+// Force the sing-tun-compatible fork in the main module; dependency replaces
+// are not inherited and otherwise WritePacketDirect is missing under with_gvisor.
+replace github.com/sagernet/gvisor => github.com/sagernet/gvisor v0.0.0-20260727.0-sing-box-mod.1
