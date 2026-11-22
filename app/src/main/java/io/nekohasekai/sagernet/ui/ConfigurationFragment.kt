@@ -1733,12 +1733,12 @@ class ConfigurationFragment @JvmOverloads constructor(
         val generation = latencyGeneration.incrementAndGet()
         activeLatencyGeneration = generation
         val testJobs = mutableListOf<Job>()
-        val effectiveConcurrency = DataStore.connectionTestConcurrent.coerceIn(1, 16) // Safe default; Box lifecycle is heavy
+        val effectiveConcurrency = DataStore.connectionTestConcurrent.coerceIn(1, 64) // User-configurable; Box lifecycle is heavy
         var testPool: kotlinx.coroutines.ExecutorCoroutineDispatcher? = null
         val groupId = request.groupId
         val test = TestDialog(request, 0, generation)
         // Semaphore limits concurrent Box lifecycles to avoid FD/port/memory exhaustion.
-        val boxSemaphore = kotlinx.coroutines.sync.Semaphore(effectiveConcurrency.coerceAtMost(8))
+        val boxSemaphore = kotlinx.coroutines.sync.Semaphore(effectiveConcurrency.coerceAtMost(16))
         // Lazy start guarantees the UI cancel/minimize hooks exist before even
         // an empty/fast target set can finish. Unexpected worker/DB failures are
         // logged and still run the completion cleanup; no uncaught main crash.
